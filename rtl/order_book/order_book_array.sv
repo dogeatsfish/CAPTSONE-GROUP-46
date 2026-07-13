@@ -236,26 +236,35 @@ module order_book_array
         // A modify at an existing price skips this entirely.
         //--------------------------------------------------------------------
         SHIFT: begin
+          automatic logic [LEVEL_IDX_W:0] src_i;
+          automatic logic [LEVEL_IDX_W:0] dst_i;
+
           if (!needs_shift) begin
             state <= WRITE_COMMIT;
           end else if (is_removal) begin
-            // Shift up, one level per cycle, from hit_idx toward the tail.
-            if (shift_idx + hit_idx + 1 < NUM_LEVELS) begin
-              book[tgt_asset][tgt_side][hit_idx + shift_idx] <=
-                book[tgt_asset][tgt_side][hit_idx + shift_idx + 1];
-              shift_idx <= shift_idx + 1;
+            // Shift up: dst = hit_idx + shift_idx, src = dst + 1
+            dst_i = {1'b0, hit_idx} + shift_idx;
+            src_i = dst_i + 1'b1;
+
+            if (src_i < LEVEL_IDX_W'(NUM_LEVELS)) begin
+              book[tgt_asset][tgt_side][dst_i[LEVEL_IDX_W-1:0]] <=
+                book[tgt_asset][tgt_side][src_i[LEVEL_IDX_W-1:0]];
+              shift_idx <= shift_idx + 1'b1;
             end else begin
               // Tail slot is now vacant.
               book[tgt_asset][tgt_side][NUM_LEVELS-1] <= '0;
               state <= WRITE_COMMIT;
             end
           end else begin
-            // Insertion: shift down from the tail back toward hit_idx, so we
-            // never overwrite a level we still need.
-            if (shift_idx < (NUM_LEVELS-1) - hit_idx) begin
-              book[tgt_asset][tgt_side][(NUM_LEVELS-1) - shift_idx] <=
-                book[tgt_asset][tgt_side][(NUM_LEVELS-2) - shift_idx];
-              shift_idx <= shift_idx + 1;
+            // Insertion: shift down from the tail toward hit_idx, so we never
+            // overwrite a level we still need.
+            dst_i = (LEVEL_IDX_W+1)'(NUM_LEVELS-1) - shift_idx;
+            src_i = dst_i - 1'b1;
+
+            if (dst_i > {1'b0, hit_idx}) begin
+              book[tgt_asset][tgt_side][dst_i[LEVEL_IDX_W-1:0]] <=
+                book[tgt_asset][tgt_side][src_i[LEVEL_IDX_W-1:0]];
+              shift_idx <= shift_idx + 1'b1;
             end else begin
               state <= WRITE_COMMIT;
             end
