@@ -20,14 +20,15 @@ jobs:
       - name: Verilator lint
         run: |
           shopt -s globstar nullglob
-          files=(rtl/**/*.sv)
-          if [ ${#files[@]} -eq 0 ]; then
+          pkg=(rtl/common/*.sv)
+          mods=(rtl/alpha_engine/*.sv rtl/order_book/*.sv rtl/parser/*.sv \
+                rtl/risk_gateway/*.sv rtl/rx_mac/*.sv rtl/top/*.sv rtl/tx_gen/*.sv)
+          if [ ${#mods[@]} -eq 0 ]; then
             echo "No RTL sources yet, skipping."
             exit 0
           fi
           verilator --lint-only -Wall \
-            -Wno-UNUSEDSIGNAL \           # TODO: remove these Wno-* once actual verilog code has been written
-            -Wno-UNUSEDPARAM \
-            -Wno-UNDRIVEN \
-            -Irtl/common "${files[@]}"
+            -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-UNDRIVEN \
+            --top-module commontrader_top \
+            "${pkg[@]}" "${mods[@]}"
         shell: bash
