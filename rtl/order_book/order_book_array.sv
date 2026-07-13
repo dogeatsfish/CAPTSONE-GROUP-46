@@ -246,7 +246,7 @@ module order_book_array
             dst_i = {1'b0, hit_idx} + shift_idx;
             src_i = dst_i + 1'b1;
 
-            if (src_i < LEVEL_IDX_W'(NUM_LEVELS)) begin
+            if (src_i < (LEVEL_IDX_W+1)'(NUM_LEVELS)) begin
               book[tgt_asset][tgt_side][dst_i[LEVEL_IDX_W-1:0]] <=
                 book[tgt_asset][tgt_side][src_i[LEVEL_IDX_W-1:0]];
               shift_idx <= shift_idx + 1'b1;
