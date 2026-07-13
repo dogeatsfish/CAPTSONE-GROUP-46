@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint RTL
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Verilator
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y verilator
+
+      - name: Verilator lint
+        run: |
+          shopt -s globstar nullglob
+          files=(rtl/**/*.sv)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No RTL sources yet, skipping."
+            exit 0
+          fi
+          verilator --lint-only -Wall -Irtl/common "${files[@]}"
+        shell: bash

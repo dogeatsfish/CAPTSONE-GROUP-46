@@ -1,0 +1,14 @@
+# Assign reviewers automatically by path.
+# Replace the placeholders with GitHub usernames.
+
+/rtl/common/            @owner-all
+/rtl/rx_mac/            @owner-rxmac
+/rtl/parser/            @owner-parser
+/rtl/order_book/        @owner-orderbook
+/rtl/alpha_engine/      @owner-alpha
+/rtl/risk_gateway/      @owner-risk
+/rtl/tx_gen/            @owner-txgen
+/sw/market_sim/         @owner-sim
+/sw/matching_engine/    @owner-matching
+/sw/api/                @owner-api
+/sw/ui/                 @owner-ui
