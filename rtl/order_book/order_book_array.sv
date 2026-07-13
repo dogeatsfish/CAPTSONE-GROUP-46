@@ -15,7 +15,6 @@
 //
 // FS-6 (real-time database, zero-wait), FS-7 (feeds Alpha Engine)
 //==============================================================================
-`include "interfaces.svh"
 
 module order_book_array
   import ct_pkg::*;

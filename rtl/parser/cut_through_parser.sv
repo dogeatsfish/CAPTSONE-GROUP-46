@@ -14,7 +14,6 @@
 //
 // FS-1 (cut-through), FS-2 (field tracking), FS-4 (integrity), FS-5 (timing)
 //==============================================================================
-`include "interfaces.svh"
 
 module cut_through_parser
   import ct_pkg::*;

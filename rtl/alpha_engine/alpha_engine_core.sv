@@ -16,7 +16,6 @@
 //
 // FS-7 (alpha engine), FS-8 (sandbox interface)
 //==============================================================================
-`include "interfaces.svh"
 
 module alpha_engine_core
   import ct_pkg::*;

@@ -11,7 +11,6 @@
 //
 // FS-3 (line rate), FS-4 (integrity monitoring)
 //==============================================================================
-`include "interfaces.svh"
 
 module rx_mac_core
   import ct_pkg::*;

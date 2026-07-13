@@ -13,7 +13,6 @@
 //
 // FS-11 (risk gateway), FS-4 (integrity endpoint), FS-10 (kill switch)
 //==============================================================================
-`include "interfaces.svh"
 
 module pre_trade_risk_gateway
   import ct_pkg::*;

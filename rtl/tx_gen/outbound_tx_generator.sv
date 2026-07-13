@@ -12,7 +12,6 @@
 //
 // FS-5 (timing), FS-12 (telemetry), FS-13 (protocol encapsulation)
 //==============================================================================
-`include "interfaces.svh"
 
 module outbound_tx_generator
   import ct_pkg::*;

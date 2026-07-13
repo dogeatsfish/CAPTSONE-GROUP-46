@@ -13,7 +13,6 @@
 // parser and the TX Generator. Both must sample the SAME counter, or the
 // latency subtraction has no common time origin and FS-12 is meaningless.
 //==============================================================================
-`include "interfaces.svh"
 
 module commontrader_top
   import ct_pkg::*;
