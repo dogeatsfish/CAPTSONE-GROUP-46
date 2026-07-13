@@ -25,5 +25,9 @@ jobs:
             echo "No RTL sources yet, skipping."
             exit 0
           fi
-          verilator --lint-only -Wall -Irtl/common "${files[@]}"
+          verilator --lint-only -Wall \
+            -Wno-UNUSEDSIGNAL \           # TODO: remove these Wno-* once actual verilog code has been written
+            -Wno-UNUSEDPARAM \
+            -Wno-UNDRIVEN \
+            -Irtl/common "${files[@]}"
         shell: bash
