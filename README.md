@@ -55,3 +55,42 @@ verilator --lint-only -Wall -Irtl/common rtl/**/*.sv
 - Branch off `main`: `name/short-description`
 - Open a PR, get one approval, merge, delete the branch.
 - Keep branches short-lived.
+
+## Branching and Pull Requests
+
+`main` is protected — you can't push to it directly. All work goes through a branch and a pull request.
+
+**1. Start from the latest `main`:**
+```bash
+git checkout main
+git pull
+```
+
+**2. Make your branch:**
+```bash
+git checkout -b yourname/what-youre-doing
+```
+
+**3. Work, and commit as you go:**
+```bash
+git add .
+git commit -m "What you did"
+```
+
+**4. Push:**
+```bash
+git push -u origin yourname/what-youre-doing
+```
+
+**5. Open the PR** — click the link the push prints, or use the banner on GitHub. Wait for the green CI check and one approval, then **Merge** and **Delete branch**.
+
+**6. Clean up:**
+```bash
+git checkout main
+git pull
+```
+
+### Notes
+- Keep branches and PRs small and short-lived.
+- `rtl/common/ct_pkg.sv` and `rtl/top/commontrader_top.sv` are shared by everyone — flag any changes to them in your PR description.
+- Stuck? Ask in the group chat before running anything with `--force` in it.
