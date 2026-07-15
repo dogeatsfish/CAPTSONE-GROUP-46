@@ -6,10 +6,8 @@
 // in cut-through mode. CRC-32 is computed in parallel; rx_error is asserted on
 // the final cycle of the packet and routed directly to the Risk Gateway.
 //
-// Runs in the 125 MHz PHY clock domain. Downstream crossing to 250 MHz is
-// handled by the RX CDC FIFO (vendor IP, not designed here).
+// Runs in the 125 MHz PHY clock domain.
 //
-// FS-3 (line rate), FS-4 (integrity monitoring)
 //==============================================================================
 
 module rx_mac_core
@@ -175,16 +173,25 @@ module rx_mac_core
   //--------------------------------------------------------------------------
   // Stage 3: Parallel CRC-32 (IEEE 802.3 polynomial)
   //--------------------------------------------------------------------------
-  logic [31:0] crc_reg;
+  logic [31:0] crc_reg, crc_next;
 
-  // TODO: unrolled 8-bit XOR tree (one byte per cycle), GF(2) arithmetic.
-  //       Equations generated with crcgen. Residual for a valid frame is
-  //       0xC704DD7B. Assert rx_error on the cycle sdr_data_valid de-asserts
-  //       if the residual does not match.
-  //
-  // NOTE: This runs in parallel with the FSM and is NOT on the critical path.
-  //       Do not gate m_axis_tvalid on the CRC result.
+  crc crc_inst (
+    .crcIn (crc_reg),
+    .data  (sdr_data),
+    .crcOut(crc_next)
+  );
 
+  always_ff @(posedge clk or negedge rgmii_rst_n) begin
+    if (~rgmii_rst_n) begin
+      crc_reg <= 32'hFFFFFFFF;
+    end else if (state == IDLE || state == PREAMBLE_SYNC) begin
+      crc_reg <= 32'hFFFFFFFF;
+    end else if (sdr_data_valid) begin
+      crc_reg <= crc_next; 
+    end
+  end
   
+  // Differs from design doc since using LSB-first CRC-32 (doc "used" MSB-first which is standard)
+  assign rx_error = (!sdr_data_valid && (state == STREAM_PAYLOAD) && (crc_reg != 32'h2144DF1C)); 
 
 endmodule
