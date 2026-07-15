@@ -36,6 +36,7 @@ module rx_mac_core
   logic [7:0] sdr_data;
   logic       sdr_data_valid;
   logic       sdr_error;
+  logic       phy_error;
 
   genvar i; 
   generate
@@ -72,6 +73,8 @@ module rx_mac_core
       .S(0)
     );
   endgenerate 
+
+  assign phy_error = sdr_data_valid ^ sdr_error; 
 
   //--------------------------------------------------------------------------
   // Stage 2: Cut-through FSM
@@ -192,6 +195,6 @@ module rx_mac_core
   end
   
   // Differs from design doc since using LSB-first CRC-32 (doc "used" MSB-first which is standard)
-  assign rx_error = (!sdr_data_valid && (state == STREAM_PAYLOAD) && (crc_reg != 32'h2144DF1C)); 
+  assign rx_error = (!sdr_data_valid && (state == STREAM_PAYLOAD) && (crc_reg != 32'h2144DF1C)) || phy_error; 
 
 endmodule
