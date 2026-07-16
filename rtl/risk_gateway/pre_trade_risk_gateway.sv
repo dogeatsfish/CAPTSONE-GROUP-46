@@ -5,13 +5,10 @@
 // Evaluates six risk conditions IN PARALLEL and suppresses any trade that fails
 // one. Protects the system from flawed user logic.
 //
-// Fixed 2-cycle latency: fast combinational checks are pipelined one stage to
+// 2-cycle latency: fast combinational checks are pipelined one stage to
 // align with the DSP/BRAM checks, then all six flags are OR-reduced.
 //
-// Also forwards the 16-bit timestamp UNCHANGED toward the TX Generator; without
-// it, FS-12 cannot be computed.
-//
-// FS-11 (risk gateway), FS-4 (integrity endpoint), FS-10 (kill switch)
+// Future Optimizations will have streamed, serial data from Alpha Engine
 //==============================================================================
 
 module pre_trade_risk_gateway
@@ -19,7 +16,7 @@ module pre_trade_risk_gateway
 #(
   parameter int MAX_QTY        = 32'd10_000,      // max shares per order
   parameter int MAX_ORDER_VAL  = 32'd1_000_000,   // max price*qty
-  parameter int RATE_TOKENS    = 8,               // token bucket depth
+  parameter int RATE_TOKENS    = 16,               // token bucket depth
   parameter int RATE_PERIOD    = 250_000          // 1 ms @ 250 MHz
 )
 (
@@ -52,12 +49,12 @@ module pre_trade_risk_gateway
   // Six parallel risk checks.
   // Convention: each flag is asserted HIGH ON VIOLATION.
   //--------------------------------------------------------------------------
-  logic viol_max_qty;      // combinational: quantity > MAX_QTY
-  logic viol_max_value;    // 1 cycle (DSP):  price * quantity > MAX_ORDER_VAL
-  logic viol_blacklist;    // 1 cycle (BRAM): ticker is restricted
-  logic viol_rate_limit;   // combinational: token bucket empty
-  logic viol_kill_switch;  // combinational: hw_kill_switch asserted
-  logic viol_crc;          // combinational: rx_error asserted
+  logic viol_max_qty[0:1];      // combinational: quantity > MAX_QTY
+  logic viol_max_value[0:1];    // 1 cycle (DSP):  price * quantity > MAX_ORDER_VAL
+  logic viol_blacklist[0:1];    // 1 cycle (BRAM): ticker is restricted
+  logic viol_rate_limit;        // combinational: token bucket empty
+  logic viol_kill_switch;       // combinational: hw_kill_switch asserted
+  logic viol_crc[0:1];          // combinational: rx_error asserted
 
   // TODO: Max Quantity   -- comparator on trade_in.quantity.
   // TODO: Max Order Val  -- route price and quantity into a DSP48 multiplier,
@@ -70,6 +67,74 @@ module pre_trade_risk_gateway
   // TODO: CRC drop       -- direct read of rx_error. This is what makes the
   //                         parser's optimistic cut-through forwarding SAFE:
   //                         a trade derived from a corrupt packet dies here.
+
+  // Max Quantity Check
+
+  always_ff @(posedge clk_250mhz or negedge rst_n) begin: Max_Quantity
+    if (~rst_n) begin
+      viol_max_qty <= '0; 
+    end else if (s_axis_order_tvalid) begin
+      // Cycle 0 
+      viol_max_qty[0] <= trade_in.quantity > MAX_QTY;
+      // Cycle 1
+      viol_max_qty[1] <= viol_max_qty[0];
+    end
+  end
+
+  // Rate Limiter Check
+  // No pipeline since it is not related to any one packet
+  logic [$clog2(RATE_PERIOD)-1:0] cycle_cnt; 
+  logic refill_pulse; 
+  logic [$clog2(RATE_TOKENS)-1:0] token_bucket; 
+
+  always_ff @(posedge clk_250mhz or negedge rst_n) begin: Rate_Limiter_Counter
+    if (~rst_n) begin
+      refill_pulse <= 0; 
+      cycle_cnt <= '0; 
+    end else begin
+      if (cycle_cnt < RATE_PERIOD - 1) begin
+        cycle_cnt <= cycle_cnt + 1; 
+        refill_pulse <= 0; 
+      end else begin
+        cycle_cnt <= 0;
+        refill_pulse <= 1;  
+      end
+    end
+  end
+
+  always_ff @(posedge clk_250mhz or negedge rst_n) begin: Token_Bucket
+    if (~rst_n) begin
+      token_bucket <= '0; 
+    end else if (m_axis_tx_tvalid) begin
+      // Token Bucket Stays at 0 
+      token_bucket <= (token_bucket > 0) ? token_bucket - 1 : token_bucket; 
+    end else if (refill_pulse) begin
+      // Token Bucket stays at RATE_TOKENS
+      token_bucket <= (token_bucket < RATE_TOKENS) ? token_bucket + 1 : token_bucket; 
+    end
+  end
+
+  always_ff @(posedge clk_250mhz or negedge rst_n) begin: Rate_Limiter
+    if (~rst_n) begin
+      viol_rate_limit <= 0; 
+    end else if (token_bucket == 0) begin
+      viol_rate_limit <= 1; 
+    end else begin
+      viol_rate_limit <= 0; 
+    end 
+  end
+
+  // Hardware Kill Switch check
+  // No pipeline since it is not related to any one packet
+  // Stop entire pipeline if asserted
+  always_ff @(posedge clk_250mhz or negedge rst_n) begin: HW_Kill_Switch
+    if (~rst_n) begin
+      viol_kill_switch <= 0; 
+    end else begin
+      // Stays asserted until reset
+      viol_kill_swith <= hw_kill_switch || viol_kill_switch; 
+    end
+  end
 
   //--------------------------------------------------------------------------
   // Pipeline synchronisation (2 cycles, latency-insensitive)
