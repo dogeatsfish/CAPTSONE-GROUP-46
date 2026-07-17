@@ -49,12 +49,12 @@ module pre_trade_risk_gateway
   // Six parallel risk checks.
   // Convention: each flag is asserted HIGH ON VIOLATION.
   //--------------------------------------------------------------------------
-  logic viol_max_qty[0:1];      // combinational: quantity > MAX_QTY
+  logic viol_max_qty[0:2];      // combinational: quantity > MAX_QTY -- 
   logic viol_max_value[0:1];    // 1 cycle (DSP):  price * quantity > MAX_ORDER_VAL
   logic viol_blacklist[0:1];    // 1 cycle (BRAM): ticker is restricted
-  logic viol_rate_limit;        // combinational: token bucket empty
-  logic viol_kill_switch;       // combinational: hw_kill_switch asserted
-  logic viol_crc[0:1];          // combinational: rx_error asserted
+  logic viol_rate_limit;        // combinational: token bucket empty --
+  logic viol_kill_switch;       // combinational: hw_kill_switch asserted --
+  logic viol_crc[0:1];          // combinational: rx_error asserted 
 
   // TODO: Max Quantity   -- comparator on trade_in.quantity.
   // TODO: Max Order Val  -- route price and quantity into a DSP48 multiplier,
@@ -73,11 +73,13 @@ module pre_trade_risk_gateway
   always_ff @(posedge clk_250mhz or negedge rst_n) begin: Max_Quantity
     if (~rst_n) begin
       viol_max_qty <= '0; 
-    end else if (s_axis_order_tvalid) begin
+    end else begin
       // Cycle 0 
-      viol_max_qty[0] <= trade_in.quantity > MAX_QTY;
+      viol_max_qty[0] <= (s_axis_order_tvalid) ? trade_in.quantity > MAX_QTY : 0;
       // Cycle 1
       viol_max_qty[1] <= viol_max_qty[0];
+      // Cycle 2
+      viol_max_qty[2] <= viol_max_qty[1]; 
     end
   end
 
@@ -124,6 +126,31 @@ module pre_trade_risk_gateway
     end 
   end
 
+  // Max Value Check 
+
+  (* use_dsp = "yes" *) logic [31:0] price_s1; 
+  (* use_dsp = "yes" *) logic [31:0] quantity_s1; 
+  (* use_dsp = "yes" *) logic [63:0] product_s2; 
+  (* use_dsp = "yes" *) logic [63:0] product_s3; 
+
+  always_ff @(posedge clk_250mhz or negedge rst_n) begin: Max_Value
+    if (~rst_n) begin
+      price_s1    <= '0; 
+      quantity_s1 <= '0;
+      product_s2  <= '0;
+      product_s3  <= '0;
+    end else begin
+      if (s_axis_order_tvalid) begin
+        price_s1    <= trade_in.price; 
+        quantity_s1 <= trade_in.quantity; 
+      end
+      product_s2 <= price_s1 * quantity_s1;
+      product_s3 <= product_s2; 
+    end
+  end
+
+  assign viol_max_value = (product_s3 > MAX_ORDER_VAL);
+
   // Hardware Kill Switch check
   // No pipeline since it is not related to any one packet
   // Stop entire pipeline if asserted
@@ -146,9 +173,9 @@ module pre_trade_risk_gateway
   //   cycle 2: OR-reduce the six flags. If any is set, m_axis_tx_tvalid is
   //            suppressed and the trade never leaves the chip.
   //--------------------------------------------------------------------------
-  trade_t trade_p1, trade_p2;
-  logic   tuser_p1, tuser_p2;
-  logic   tvalid_p1, tvalid_p2;
+  trade_t trade  [0:2];
+  logic   tuser  [0:2];
+  logic   tvalid [0:2];
 
   // TODO: implement the 2-stage shift-register pipeline.
   // TODO: m_axis_tx_tvalid = tvalid_p2 & ~(|{six violation flags});
