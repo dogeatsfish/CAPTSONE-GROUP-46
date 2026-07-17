@@ -109,14 +109,14 @@ module pre_trade_risk_gateway
       token_bucket <= RATE_TOKENS; 
     end else if (m_axis_tx_tvalid && refill_pulse) begin
       token_bucket <= token_bucket; 
-    end else if (m_axis_tx_valid) begin
+    end else if (m_axis_tx_tvalid) begin
       token_bucket <= (token_bucket > 0) ? token_bucket - 1 : token_bucket; 
     end else if (refill_pulse) begin
       token_bucket <= (token_bucket < RATE_TOKENS) ? token_bucket + 1 : token_bucket; 
     end
   end
 
-  assign viol_rate_limit = (tocken_bucket == 0);
+  assign viol_rate_limit = (token_bucket == 0);
 
   // Max Value Check 
 
@@ -183,5 +183,40 @@ module pre_trade_risk_gateway
       end
     end
   end
+
+// -------------------------------------------------------------------------------------
+// Egress Generation 
+// -------------------------------------------------------------------------------------
+
+logic [5:0] violations;
+logic violation;
+
+assign violations = {viol_max_qty[2], viol_max_value, viol_rate_limit, viol_kill_switch, 0, 0/*, viol_crc[2], viol_blacklist[1]*/};
+assign violation = |violations; 
+
+always_ff @(posedge clk_250mhz or negedge rst_n) begin
+  if (~rst_n) begin
+    m_axis_tx_tvalid <= 0;
+    m_axis_tx_tdata  <= '0; 
+    m_axis_tx_tuser  <= 0; 
+  end else begin
+    if (tvalid[2]) begin
+      if (violation) begin
+        m_axis_tx_tvalid <= 0;
+        m_axis_tx_tdata  <= '0;
+        m_axis_tx_tuser  <= 0; 
+      end else begin
+        // Approved Trade
+        m_axis_tx_tvalid <= 1;
+        m_axis_tx_tdata  <= trade[2];
+        m_axis_tx_tuser  <= tuser[2];
+      end
+    end else begin
+      m_axis_tx_tvalid <= 0;
+      m_axis_tx_tdata  <= '0;
+      m_axis_tx_tuser  <= 0; 
+    end
+  end
+end
 
 endmodule
