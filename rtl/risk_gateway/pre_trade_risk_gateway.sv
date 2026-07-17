@@ -50,7 +50,7 @@ module pre_trade_risk_gateway
   // Convention: each flag is asserted HIGH ON VIOLATION.
   //--------------------------------------------------------------------------
   logic viol_max_qty[0:2];      // combinational: quantity > MAX_QTY -- 
-  logic viol_max_value[0:1];    // 1 cycle (DSP):  price * quantity > MAX_ORDER_VAL
+  logic viol_max_value;         // 2 cycle (DSP):  price * quantity > MAX_ORDER_VAL -- 
   logic viol_blacklist[0:1];    // 1 cycle (BRAM): ticker is restricted
   logic viol_rate_limit;        // combinational: token bucket empty --
   logic viol_kill_switch;       // combinational: hw_kill_switch asserted --
@@ -106,25 +106,17 @@ module pre_trade_risk_gateway
 
   always_ff @(posedge clk_250mhz or negedge rst_n) begin: Token_Bucket
     if (~rst_n) begin
-      token_bucket <= '0; 
-    end else if (m_axis_tx_tvalid) begin
-      // Token Bucket Stays at 0 
+      token_bucket <= RATE_TOKENS; 
+    end else if (m_axis_tx_tvalid && refill_pulse) begin
+      token_bucket <= token_bucket; 
+    end else if (m_axis_tx_valid) begin
       token_bucket <= (token_bucket > 0) ? token_bucket - 1 : token_bucket; 
     end else if (refill_pulse) begin
-      // Token Bucket stays at RATE_TOKENS
       token_bucket <= (token_bucket < RATE_TOKENS) ? token_bucket + 1 : token_bucket; 
     end
   end
 
-  always_ff @(posedge clk_250mhz or negedge rst_n) begin: Rate_Limiter
-    if (~rst_n) begin
-      viol_rate_limit <= 0; 
-    end else if (token_bucket == 0) begin
-      viol_rate_limit <= 1; 
-    end else begin
-      viol_rate_limit <= 0; 
-    end 
-  end
+  assign viol_rate_limit = (tocken_bucket == 0);
 
   // Max Value Check 
 
@@ -148,7 +140,6 @@ module pre_trade_risk_gateway
       product_s3 <= product_s2; 
     end
   end
-
   assign viol_max_value = (product_s3 > MAX_ORDER_VAL);
 
   // Hardware Kill Switch check
@@ -159,7 +150,7 @@ module pre_trade_risk_gateway
       viol_kill_switch <= 0; 
     end else begin
       // Stays asserted until reset
-      viol_kill_swith <= hw_kill_switch || viol_kill_switch; 
+      viol_kill_switch <= hw_kill_switch || viol_kill_switch; 
     end
   end
 
@@ -173,15 +164,24 @@ module pre_trade_risk_gateway
   //   cycle 2: OR-reduce the six flags. If any is set, m_axis_tx_tvalid is
   //            suppressed and the trade never leaves the chip.
   //--------------------------------------------------------------------------
-  trade_t trade  [0:2];
-  logic   tuser  [0:2];
-  logic   tvalid [0:2];
+  trade_t trade [0:2];
+  logic   [2:0] tuser;
+  logic   [2:0] tvalid;
 
-  // TODO: implement the 2-stage shift-register pipeline.
-  // TODO: m_axis_tx_tvalid = tvalid_p2 & ~(|{six violation flags});
-  //
-  // IMPORTANT: the timestamp in trade_t must be forwarded BIT-FOR-BIT. The TX
-  //            Generator subtracts it from timestamp_now to produce the FS-12
-  //            telemetry; corrupting it here silently breaks the latency metric.
+  always_ff @(posedge clk_250mhz or negedge rst_n) begin: Data_Pipeline
+    if (~rst_n) begin
+      trade  <= '0;
+      tuser  <= '0;
+      tvalid <= '0;
+    end else begin
+      tuser   <= {tuser[1:0], s_axis_order_tuser};
+      tvalid  <= {tvalid[1:0], s_axis_order_tvalid};  
+      if (s_axis_order_tvalid) begin
+        trade[0] <= trade_in;
+        trade[1] <= trade[0];
+        trade[2] <= trade[1]; 
+      end
+    end
+  end
 
 endmodule
