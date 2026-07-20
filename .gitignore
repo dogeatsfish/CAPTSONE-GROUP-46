@@ -15,8 +15,7 @@ vivado/*.ip_user_files/
 vivado/*.sim/
 
 # Simulation
-sim/obj_dir/
-sim/obj_order_book_tb
+sim/obj*
 sim/*.vcd
 sim/*.fst
 sim/*.wdb
