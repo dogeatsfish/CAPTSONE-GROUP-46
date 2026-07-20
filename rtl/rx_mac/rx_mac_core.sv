@@ -195,6 +195,6 @@ module rx_mac_core
   end
   
   // Differs from design doc since using LSB-first CRC-32 (doc "used" MSB-first which is standard)
-  assign rx_error = (!sdr_data_valid && (state == STREAM_PAYLOAD) && (crc_reg != 32'h2144DF1C)) || phy_error; 
+  assign rx_error = (!sdr_data_valid && (state == STREAM_PAYLOAD) && (crc_reg != 32'hDEBB20E3)) || phy_error; 
 
 endmodule

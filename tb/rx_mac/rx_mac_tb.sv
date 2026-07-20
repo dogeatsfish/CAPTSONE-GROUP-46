@@ -132,16 +132,18 @@ module tb_rx_mac_core();
         rgmii_rx_ctl <= 0;
         rgmii_rxd    <= 0;
         
-        // Check CRC Result exactly 1 cycle after valid drops
+        // Wait for the IDDR SAME_EDGE_PIPELINED delay to flush
         @(posedge rgmii_rx_clk); 
-        #1; // Delta delay to let combinational rx_error flag resolve
+        @(posedge rgmii_rx_clk); // sdr_data_valid drops on this edge
+        #1; // Delta delay for combinational rx_error to resolve
         
         if (rx_error === corrupt_crc) begin
             $display("[%0t ns] [PASS] CRC Evaluation Successful. Expected rx_error: %b, Got: %b", 
                      $time, corrupt_crc, rx_error);
         end else begin
-            $error("[%0t ns] [FAIL] CRC Evaluation Mismatch! Expected rx_error: %b, Got: %b", 
-                   $time, corrupt_crc, rx_error);
+            // We use hierarchical referencing (dut.crc_reg) to peek inside the module!
+            $error("[%0t ns] [FAIL] CRC Evaluation Mismatch! Expected rx_error: %b, Got: %b. RAW CRC REG: 0x%h", 
+                   $time, corrupt_crc, rx_error, dut.crc_reg);
         end
         
         // Pad with Inter-Frame Gap (IFG) idle cycles
