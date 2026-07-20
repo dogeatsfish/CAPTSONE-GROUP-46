@@ -84,7 +84,7 @@ module rx_mac_core
   logic [4:0][7:0] shift_reg; // Sliding Window Shift reg to drop last 4 bytes
   logic [4:0] hdr_cnt;   // counts the 14 header bytes + 5 cycle shift register
 
-  always_ff @ (posedge clk or negedge rgmii_rst_n) begin : State_Transitions
+  always_ff @ (posedge rgmii_rx_clk or negedge rgmii_rst_n) begin : State_Transitions
     if (rgmii_rst_n == 0) begin
       state <= IDLE; 
       hdr_cnt <= 0; 
@@ -165,7 +165,7 @@ module rx_mac_core
 
   end
 
-  always_ff @ (posedge clk or negedge rgmii_rst_n) begin: Shift_Register
+  always_ff @ (posedge rgmii_rx_clk or negedge rgmii_rst_n) begin: Shift_Register
     if (~rgmii_rst_n) begin
       shift_reg <= '0; 
     end else if (sdr_data_valid) begin
@@ -184,7 +184,7 @@ module rx_mac_core
     .crcOut(crc_next)
   );
 
-  always_ff @(posedge clk or negedge rgmii_rst_n) begin
+  always_ff @(posedge rgmii_rx_clk or negedge rgmii_rst_n) begin
     if (~rgmii_rst_n) begin
       crc_reg <= 32'hFFFFFFFF;
     end else if (state == IDLE || state == PREAMBLE_SYNC) begin
