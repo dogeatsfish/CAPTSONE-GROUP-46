@@ -1,13 +1,14 @@
 name: CI
 
+# Verilator lint is retired -- elaboration and lint are covered by Vivado now.
+# Kept as a manual-only job: run it from the Actions tab if you ever want a
+# quick vendor-independent syntax check without opening Vivado.
 on:
-  push:
-    branches: [ main ]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   lint:
-    name: Lint RTL
+    name: Lint RTL (manual)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
