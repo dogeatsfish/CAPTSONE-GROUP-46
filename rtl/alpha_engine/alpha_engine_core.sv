@@ -184,13 +184,17 @@ module alpha_engine_core
       s1_valid <= 1'b0;
 
       if (sel_valid) begin
-        automatic logic [PRICE_W:0]   px_sum;
+        // px_sum is carried at the full working width so every operand of the
+        // add and the shift already matches. Sizing it to PRICE_W+1 instead
+        // would make MW'(px_sum >> 1) widen the shift's operand implicitly,
+        // which older Verilator flags as WIDTHEXPAND.
+        automatic logic [MW-1:0]        px_sum;
         automatic logic signed [MW-1:0] mid_c;
         automatic logic signed [MW-1:0] ema_delta_c;
         automatic logic signed [MW-1:0] mid_a, mid_b, spread_c, spread_delta_c;
 
-        px_sum = {1'b0, tob_bid_price[sel_idx]} + {1'b0, tob_ask_price[sel_idx]};
-        mid_c  = signed'(MW'(px_sum >> 1));
+        px_sum = MW'(tob_bid_price[sel_idx]) + MW'(tob_ask_price[sel_idx]);
+        mid_c  = signed'(px_sum >> 1);
 
         mid_reg[sel_idx] <= mid_c;
 
