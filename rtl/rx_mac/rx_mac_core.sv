@@ -38,7 +38,7 @@ module rx_mac_core
   logic       sdr_error;
   logic       phy_error;
 
-  /* verilator lint_off */
+  /* verilator lint_off MODMISSING */
   genvar i; 
   generate
     // Input Data IDDR
@@ -75,7 +75,7 @@ module rx_mac_core
     );
   endgenerate 
 
-  /* verilator lint_on */
+  /* verilator lint_on MODMISSING */
   assign phy_error = sdr_data_valid ^ sdr_error; 
 
   //--------------------------------------------------------------------------
