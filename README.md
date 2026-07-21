@@ -11,7 +11,7 @@ Target: AMD Artix-7 XC7A200T (Alinx AX7A200B)
 | `rtl/` | SystemVerilog sources, one directory per subsystem |
 | `rtl/common/` | Shared interface definitions and parameters |
 | `tb/` | Testbenches (mirrors `rtl/`) |
-| `sim/` | Verilator scripts and simulation harness |
+| `sim/` | Simulation harness — see [`sim/README.md`](sim/README.md) for the verification flow |
 | `vivado/` | Tcl build scripts and XDC constraints |
 | `sw/` | Market simulation, matching engine, FastAPI backend, React UI |
 | `docs/` | Design documents and reference material |
