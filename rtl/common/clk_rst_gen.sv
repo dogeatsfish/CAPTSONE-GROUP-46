@@ -42,6 +42,13 @@ module clk_rst_gen #(
   output logic phy_rst_n        // synchronous to rgmii_rx_clk
 );
 
+  // Module-scoped, so it cannot leak into other files the way a `timescale
+  // directive does. This is the only RTL module that contains a delay (the
+  // behavioural clock source below) and xsim will not elaborate a delay in a
+  // module with no time unit.
+  timeunit      1ns;
+  timeprecision 1ps;
+
   logic mmcm_locked;
 
   //--------------------------------------------------------------------------
