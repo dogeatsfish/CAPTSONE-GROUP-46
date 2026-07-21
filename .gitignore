@@ -16,6 +16,7 @@ vivado/*.sim/
 
 # Simulation
 sim/obj*
+sim/logs/
 sim/*.vcd
 sim/*.fst
 sim/*.wdb

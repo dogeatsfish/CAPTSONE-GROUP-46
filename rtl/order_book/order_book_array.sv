@@ -190,8 +190,14 @@ module order_book_array
       unique case (state)
 
         //--------------------------------------------------------------------
+        // symbol_id is 8 bits wide but only NUM_ASSETS books exist, and
+        // ASSET_IDX_W rounds UP to 3 bits. Truncating to symbol_id[2:0] would
+        // let locates 5..7 index past the end of the book array. The parser
+        // takes symbol_id straight from the ITCH Stock Locate field, so a feed
+        // carrying an unexpected locate must be discarded HERE, in the block
+        // that owns the array -- not silently aliased onto a real asset.
         IDLE: begin
-          if (s_axis_tvalid) begin
+          if (s_axis_tvalid && upd.symbol_id < SYMBOL_W'(NUM_ASSETS)) begin
             tgt_asset <= upd.symbol_id[ASSET_IDX_W-1:0];
             tgt_side  <= upd.side;
             tgt_price <= upd.price;
