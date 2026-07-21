@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 #==============================================================================
-# Build and run the TX MAC Core unit testbench under Verilator.
+# Convenience wrapper: run the 'tx_mac' bench.
+#
+#   ./sim/run_tx_mac_tb.sh [+PLUSARG=value ...]
+#
+# Sources live in sim/filelists/tx_mac.f and the top module in sim/benches.sh,
+# both shared with the xsim flow. To run the same bench under Vivado:
+#
+#   ./sim/run_xsim.sh tx_mac
 #==============================================================================
 set -euo pipefail
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$REPO_ROOT"
-OBJ_DIR="sim/obj_tx_mac_tb"
-verilator --binary --timing --trace \
-  --top-module tx_mac_core_tb --Mdir "$OBJ_DIR" \
-  -Wno-fatal -Wno-TIMESCALEMOD -Wno-EOFNEWLINE \
-  rtl/rx_mac/crc.sv \
-  rtl/ip/tx_mac/tx_mac_core.sv \
-  tb/ip/tx_mac/tx_mac_core_tb.sv
-"./$OBJ_DIR/Vtx_mac_core_tb"
+exec "$(dirname "${BASH_SOURCE[0]}")/run_verilator.sh" tx_mac "$@"

@@ -1,31 +1,13 @@
 #!/usr/bin/env bash
 #==============================================================================
-# Build and run the RX MAC Core unit testbench under Verilator.
+# Convenience wrapper: run the 'rx_mac' bench.
 #
-#   ./sim/run_rx_mac_tb.sh
+#   ./sim/run_rx_mac_tb.sh [+PLUSARG=value ...]
 #
-# SYNTHESIS is deliberately NOT defined, so rx_mac_core's IDDR stage falls back
-# to its behavioural equivalent. Vendor primitives are only elaborated by Vivado.
+# Sources live in sim/filelists/rx_mac.f and the top module in sim/benches.sh,
+# both shared with the xsim flow. To run the same bench under Vivado:
+#
+#   ./sim/run_xsim.sh rx_mac
 #==============================================================================
 set -euo pipefail
-
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$REPO_ROOT"
-
-OBJ_DIR="sim/obj_rx_mac_tb"
-
-verilator \
-  --binary \
-  --timing \
-  --trace \
-  -Irtl/common \
-  --top-module tb_rx_mac_core \
-  --Mdir "$OBJ_DIR" \
-  -Wno-fatal \
-  -Wno-TIMESCALEMOD \
-  rtl/common/ct_pkg.sv \
-  rtl/rx_mac/crc.sv \
-  rtl/rx_mac/rx_mac_core.sv \
-  tb/rx_mac/rx_mac_tb.sv
-
-"./$OBJ_DIR/Vtb_rx_mac_core"
+exec "$(dirname "${BASH_SOURCE[0]}")/run_verilator.sh" rx_mac "$@"

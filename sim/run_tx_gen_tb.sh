@@ -1,29 +1,13 @@
 #!/usr/bin/env bash
 #==============================================================================
-# Build and run the Outbound TX Generator unit testbench under Verilator.
+# Convenience wrapper: run the 'tx_gen' bench.
 #
-#   ./sim/run_tx_gen_tb.sh
+#   ./sim/run_tx_gen_tb.sh [+PLUSARG=value ...]
 #
-# Requires Verilator 5.x (uses --binary --timing).
+# Sources live in sim/filelists/tx_gen.f and the top module in sim/benches.sh,
+# both shared with the xsim flow. To run the same bench under Vivado:
+#
+#   ./sim/run_xsim.sh tx_gen
 #==============================================================================
 set -euo pipefail
-
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$REPO_ROOT"
-
-OBJ_DIR="sim/obj_tx_gen_tb"
-
-verilator \
-  --binary \
-  --timing \
-  --trace \
-  -Irtl/common \
-  --top-module outbound_tx_generator_tb \
-  --Mdir "$OBJ_DIR" \
-  -Wno-fatal \
-  -Wno-TIMESCALEMOD \
-  rtl/common/ct_pkg.sv \
-  rtl/tx_gen/outbound_tx_generator.sv \
-  tb/tx_gen/outbound_tx_generator_tb.sv
-
-"./$OBJ_DIR/Voutbound_tx_generator_tb"
+exec "$(dirname "${BASH_SOURCE[0]}")/run_verilator.sh" tx_gen "$@"
