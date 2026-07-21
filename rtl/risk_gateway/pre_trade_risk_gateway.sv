@@ -49,21 +49,17 @@ module pre_trade_risk_gateway
   // Six parallel risk checks.
   // Convention: each flag is asserted HIGH ON VIOLATION.
   //--------------------------------------------------------------------------
-  logic viol_max_qty[0:2];      // combinational: quantity > MAX_QTY -- 
-  logic viol_max_value;         // 2 cycle (DSP):  price * quantity > MAX_ORDER_VAL -- 
+  logic [2:0] viol_max_qty;      // combinational: quantity > MAX_QTY 
+  logic viol_max_value;         // 2 cycle (DSP):  price * quantity > MAX_ORDER_VAL 
   logic viol_blacklist[0:1];    // 1 cycle (BRAM): ticker is restricted
-  logic viol_rate_limit;        // combinational: token bucket empty --
-  logic viol_kill_switch;       // combinational: hw_kill_switch asserted --
+  logic viol_rate_limit;        // combinational: token bucket empty
+  logic viol_kill_switch;       // combinational: hw_kill_switch asserted 
   logic viol_crc[0:1];          // combinational: rx_error asserted 
 
-  // TODO: Max Quantity   -- comparator on trade_in.quantity.
-  // TODO: Max Order Val  -- route price and quantity into a DSP48 multiplier,
-  //                         compare the product against MAX_ORDER_VAL.
+
+
   // TODO: Blacklist      -- hash trade_in.ticker into a BRAM address; the BRAM
   //                         is preloaded at bitstream generation from a .coe.
-  // TODO: Rate limiter   -- token bucket: increments every RATE_PERIOD cycles,
-  //                         decrements on each accepted order.
-  // TODO: Kill switch    -- direct read of hw_kill_switch.
   // TODO: CRC drop       -- direct read of rx_error. This is what makes the
   //                         parser's optimistic cut-through forwarding SAFE:
   //                         a trade derived from a corrupt packet dies here.
@@ -154,23 +150,15 @@ module pre_trade_risk_gateway
     end
   end
 
-  //--------------------------------------------------------------------------
-  // Pipeline synchronisation (2 cycles, latency-insensitive)
-  //
-  //   cycle 0: data enters, all checks begin. Fast (combinational) checks are
-  //            registered once so they arrive with the slow ones.
-  //   cycle 1: DSP and BRAM results land; all six flags now aligned. Trade data
-  //            and tvalid are pipelined alongside.
-  //   cycle 2: OR-reduce the six flags. If any is set, m_axis_tx_tvalid is
-  //            suppressed and the trade never leaves the chip.
-  //--------------------------------------------------------------------------
   trade_t trade [0:2];
   logic   [2:0] tuser;
   logic   [2:0] tvalid;
 
   always_ff @(posedge clk_250mhz or negedge rst_n) begin: Data_Pipeline
     if (~rst_n) begin
-      trade  <= '0;
+      trade[0]  <= '0;
+      trade[1]  <= '0;
+      trade[2]  <= '0;
       tuser  <= '0;
       tvalid <= '0;
     end else begin
