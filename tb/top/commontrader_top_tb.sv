@@ -344,29 +344,31 @@ module commontrader_top_tb
   // Continuous flow-control monitors. These paths physically cannot absorb
   // back-pressure, so a single violation anywhere in the run is a failure.
   //--------------------------------------------------------------------------
-  logic rx_fifo_stalled;   // RX CDC FIFO refused a byte the RX MAC had to write
-  logic book_stalled;      // Order Book de-asserted tready on the parser
+  // Counters rather than sticky single-bit flags. A `logic` flag written by a
+  // monitor process and read by the test process does not reliably propagate
+  // under every simulator's optimiser, and the failure mode is silent: the
+  // check reads the reset value and passes vacuously. An int counter both
+  // propagates and tells you HOW MANY times the condition fired.
+  int rx_fifo_stall_n;   // RX CDC FIFO refused a byte the RX MAC had to write
+  int book_stall_n;      // Order Book de-asserted tready on the parser
+  int rx_error_n;        // rx_error observed in the core domain (T9)
 
   initial begin
-    rx_fifo_stalled = 1'b0;
-    book_stalled    = 1'b0;
+    rx_fifo_stall_n = 0;
+    book_stall_n    = 0;
+    rx_error_n      = 0;
   end
 
-  always @(posedge rgmii_rx_clk) begin
+  always @(negedge rgmii_rx_clk) begin
     if (sys_rst_n && dut.mac_tvalid && !dut.rx_fifo_wr_ready)
-      rx_fifo_stalled <= 1'b1;
+      rx_fifo_stall_n++;
   end
 
-  always @(posedge dut.core_clk) begin
+  always @(negedge dut.core_clk) begin
     if (dut.core_rst_n && dut.upd_tvalid && !dut.upd_tready)
-      book_stalled <= 1'b1;
-  end
-
-  // rx_error crossing into the core domain (T9).
-  logic rx_error_seen;
-  always @(posedge dut.core_clk) begin
-    if (!dut.core_rst_n)       rx_error_seen <= 1'b0;
-    else if (dut.rx_error_sync) rx_error_seen <= 1'b1;
+      book_stall_n++;
+    if (dut.core_rst_n && dut.rx_error_sync)
+      rx_error_n++;
   end
 
   //--------------------------------------------------------------------------
@@ -496,8 +498,8 @@ module commontrader_top_tb
     //------------------------------------------------------------------------
     $display("\n[T6] Flow control");
     //------------------------------------------------------------------------
-    check_int("T6 RX CDC FIFO never back-pressured", int'(rx_fifo_stalled),   0);
-    check_int("T6 Order Book never stalled parser",  int'(book_stalled),      0);
+    check_int("T6 RX CDC FIFO never back-pressured", rx_fifo_stall_n,        0);
+    check_int("T6 Order Book never stalled parser",  book_stall_n,           0);
     check_int("T6 TX CDC FIFO never overflowed",     int'(tx_fifo_overflow),  0);
     check_int("T6 no orders dropped",                int'(order_drop_count),  0);
 
@@ -553,7 +555,7 @@ module commontrader_top_tb
     send_frame(1'b1);                       // corrupt FCS
     wait_tx_frame(2000, got);
 
-    check_int("T9 rx_error reached the core domain", int'(rx_error_seen), 1);
+    check_int("T9 rx_error reached the core domain", (rx_error_n > 0) ? 1 : 0, 1);
     check_int("T9 order still emitted (viol_crc stubbed -- KNOWN GAP)",
               int'(got), 1);
 
