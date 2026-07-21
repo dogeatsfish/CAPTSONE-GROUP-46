@@ -17,6 +17,11 @@ vivado/*.sim/
 # Simulation
 sim/obj*
 sim/logs/
+sim/xsim_*
+sim/replay_*.hex
+sim/replay_*.txt
+*.jou
+xsim.dir/
 sim/*.vcd
 sim/*.fst
 sim/*.wdb
