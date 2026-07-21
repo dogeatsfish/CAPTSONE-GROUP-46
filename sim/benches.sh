@@ -24,6 +24,7 @@ declare -A BENCH_TOP=(
   [tx_gen]="outbound_tx_generator_tb"
   [integration]="commontrader_top_tb"
   [replay]="commontrader_replay_tb"
+  [integration_crv]="commontrader_crv_tb"
 )
 
 # Unit benches first, integration last: if a block is broken, its own bench
@@ -40,4 +41,5 @@ BENCH_ORDER=(
   tx_gen
   integration
   replay
+  integration_crv
 )

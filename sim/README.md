@@ -3,11 +3,14 @@
 Everything needed to run and extend the CommonTrader testbenches.
 
 ```
-./sim/run_all_tb.sh          # everything (~0.7 s warm, ~78 s cold)
-./sim/run_parser_tb.sh       # one bench
-./sim/run_xsim.sh parser     # the same bench under Vivado
-./sim/clean.sh               # reclaim build artifacts
+./sim/run_all_tb.sh                        # everything (~0.7 s warm, ~78 s cold)
+./sim/run_all_tb.sh order_book_crv         # just one bench
+./sim/run_all_tb.sh +SEED=42               # every bench, specific seed
+./sim/run_all_tb.sh --sim xsim             # everything under Vivado
+./sim/clean.sh                             # reclaim build artifacts
 ```
+
+Full plusarg reference and multi-seed soak recipes: **[section 2](#2-running-tests-and-soaking-seeds)**.
 
 ---
 
@@ -76,9 +79,11 @@ the DDR stages before board bring-up.
 > **Untested.** This flow was written but never executed; there is no Vivado on
 > the machine it was developed on. Expect to shake out a wrinkle on first run.
 
-### `sim/run_all_tb.sh [--sim verilator|xsim] [-q]`
+### `sim/run_all_tb.sh`
 
 Runs every bench in `BENCH_ORDER`, writing per-bench logs to `sim/logs/<sim>/`.
+It also accepts plusargs and a bench subset — see
+[section 2](#2-running-tests-and-soaking-seeds).
 
 It keys off a single line every bench prints:
 
@@ -99,7 +104,88 @@ or before archiving, not out of habit.
 
 ---
 
-## 2. The benches
+## 2. Running tests and soaking seeds
+
+### `run_all_tb.sh` arguments
+
+```
+./sim/run_all_tb.sh [--sim verilator|xsim] [-q] [+PLUSARG=value ...] [bench ...]
+```
+
+| Argument | Effect |
+|---|---|
+| *(none)* | every bench, Verilator |
+| `--sim xsim` | every bench, Vivado xsim |
+| `-q` | summary table only, no failure excerpts |
+| `+NAME=value` | forwarded **verbatim to every bench that runs** |
+| `<bench>` | run only the named bench(es); a typo fails immediately with the valid list |
+
+Plusargs a bench does not read are simply ignored, so a global `+SEED=42` is safe
+even though only the two constrained-random benches act on it.
+
+### Plusargs by bench
+
+| Bench | Plusarg | Default | Meaning |
+|---|---|---|---|
+| `order_book_crv` | `+SEED` | `0xC0FFEE01` | RNG seed |
+| | `+NTXN` | `2000` | book transactions to generate |
+| `integration_crv` | `+SEED` | `0xBEEF0001` | RNG seed |
+| | `+NPKT_A` | `60` | phase A packets (mixed random traffic) |
+| | `+NPKT_B` | `20` | phase B packets (minimum inter-frame gap) |
+| | `+NPKT_C` | `30` | phase C packets (order-rate burst) |
+| `replay` | `+FRAMES` | `sim/replay_frames.hex` | frame byte stream |
+| | `+LENS` | `sim/replay_lens.hex` | per-frame lengths |
+| | `+TOB` | `sim/replay_tob.hex` | expected top of book |
+
+Every randomised bench **prints its seed on the first line of output and again in
+the failure summary**, so a failing log always tells you how to reproduce it.
+
+### Soak recipes
+
+Both runners exit non-zero on failure, so `|| break` stops at the first bad seed
+and leaves its log in place.
+
+```bash
+# One bench across several seeds -- the usual quick soak
+for s in 1 42 777 31337; do
+  ./sim/run_all_tb.sh -q order_book_crv +SEED=$s || break
+done
+
+# Whole regression across 20 seeds, stopping at the first failure
+for s in $(seq 1 20); do
+  echo "=== seed $s ==="
+  ./sim/run_all_tb.sh -q +SEED=$s || { echo "FAILED at seed $s"; break; }
+done
+
+# Deep soak of one bench (minutes, not seconds)
+./sim/run_order_book_crv_tb.sh +SEED=7 +NTXN=200000
+
+# Both constrained-random benches, one seed
+./sim/run_all_tb.sh order_book_crv integration_crv +SEED=777
+
+# Reproduce a specific reported failure
+./sim/run_order_book_crv_tb.sh +SEED=3237998081
+```
+
+### Reading the result
+
+```
+BENCH                            CHECKS    FAILS   STATUS
+order_book_crv                   177988        0   PASS
+```
+
+Per-bench logs land in `sim/logs/<simulator>/<bench>.log`. A bench that builds
+and runs but prints **no summary line** is reported as a failure, not a pass --
+otherwise a bench that silently stopped checking anything would look green.
+
+Some checks are labelled `KNOWN GAP` — a defect that is understood, documented in
+`docs/known_limitations.md`, and deliberately not fixed. Those report loudly but
+do not fail the regression, and they invert into real failures once the
+underlying defect is fixed.
+
+---
+
+## 3. The benches
 
 | Bench | Testbench | What it proves |
 |---|---|---|
@@ -114,6 +200,7 @@ or before archiving, not out of habit.
 | `tx_gen` | `tb/tx_gen/outbound_tx_generator_tb.sv` | OUCH Enter Order encoding, IP/UDP wrapping |
 | `integration` | `tb/top/commontrader_top_tb.sv` | **Full chip**, RGMII in → RGMII out, hand-built packets |
 | `replay` | `tb/top/commontrader_replay_tb.sv` | **Full chip** with real recorded market data |
+| `integration_crv` | `tb/top/commontrader_crv_tb.sv` | **Full chip, constrained random** — randomised traffic shape and timing, invariant checks |
 
 The three that matter most, and why they are not redundant:
 
@@ -125,10 +212,17 @@ The three that matter most, and why they are not redundant:
 - **`replay`** streams an actual recorded feed and cross-checks the book against
   an independent software model. Real data, real price distribution, real
   erroneous ticks.
+- **`integration_crv`** randomises traffic shape and timing and checks invariants
+  that need no golden model. This is what found the TX CDC FIFO overflow
+  recorded as L1 in `docs/known_limitations.md`.
+
+Benches pin known defects rather than hiding them: a check labelled `KNOWN GAP`
+reports loudly, does not fail the regression, and inverts into a real failure the
+moment the underlying defect is fixed. See `docs/known_limitations.md`.
 
 ---
 
-## 3. The replay stimulus: `csv_to_itch.py` and the `.hex` files
+## 4. The replay stimulus: `csv_to_itch.py` and the `.hex` files
 
 The `.hex` files in `sim/` are **generated stimulus, not source.** They are
 gitignored and rebuilt on demand.
@@ -199,7 +293,7 @@ Two flags exist because the corresponding decisions are **not settled** — see
 
 ---
 
-## 4. Writing a new bench
+## 5. Writing a new bench
 
 1. Write `tb/<block>/<name>_tb.sv`. It **must** print, once, at the end:
 
@@ -215,7 +309,7 @@ Both simulators pick it up. Nothing else to touch.
 
 ---
 
-## 5. Portability rules — learned the hard way
+## 6. Portability rules — learned the hard way
 
 Every one of these came from a bug that made a bench pass in one configuration
 and fail in another. Follow them or the xsim migration will hurt.
@@ -260,7 +354,7 @@ lint directive and fails the build.
 
 ---
 
-## 6. Constrained random
+## 7. Constrained random
 
 `order_book_crv` uses `$urandom_range` with explicit constraint logic rather than
 SystemVerilog `rand` / `constraint` classes. Verilator implements class
@@ -268,10 +362,9 @@ randomisation by shelling out to the **z3** SAT solver, which is not installed
 and would become a hard dependency for everyone cloning this repo. `$urandom_range`
 needs nothing, behaves identically under xsim, and is reproducible from a seed.
 
-```bash
-./sim/run_order_book_crv_tb.sh                        # default seed, 2000 txns
-./sim/run_order_book_crv_tb.sh +SEED=1337 +NTXN=20000 # soak
-```
+Seeds and transaction counts are plusargs; see
+[section 2](#2-running-tests-and-soaking-seeds) for the full table and soak
+recipes.
 
 The bench prints what the stimulus actually **reached** (new-level inserts,
 aggregations, tail evictions, full-book drops) as well as pass/fail, so a green
