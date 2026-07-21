@@ -1,31 +1,13 @@
 #!/usr/bin/env bash
 #==============================================================================
-# Build and run the Pre-Trade Risk Gateway unit testbench under Verilator.
+# Convenience wrapper: run the 'risk_gateway' bench.
 #
-#   ./sim/run_risk_gateway_tb.sh
+#   ./sim/run_risk_gateway_tb.sh [+PLUSARG=value ...]
 #
-# Requires Verilator 5.x (uses --binary --timing).
+# Sources live in sim/filelists/risk_gateway.f and the top module in sim/benches.sh,
+# both shared with the xsim flow. To run the same bench under Vivado:
+#
+#   ./sim/run_xsim.sh risk_gateway
 #==============================================================================
 set -euo pipefail
-
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$REPO_ROOT"
-
-OBJ_DIR="sim/obj_risk_gateway_tb"
-
-verilator \
-  --binary \
-  --timing \
-  --trace \
-  -Irtl/common \
-  --top-module tb_pre_trade_risk_gateway \
-  --Mdir "$OBJ_DIR" \
-  -Wno-fatal \
-  -Wno-TIMESCALEMOD \
-  -Wno-WIDTHEXPAND \
-  -Wno-WIDTHTRUNC \
-  rtl/common/ct_pkg.sv \
-  rtl/risk_gateway/pre_trade_risk_gateway.sv \
-  tb/risk_gateway/risk_gateway_tb.sv
-
-"./$OBJ_DIR/Vtb_pre_trade_risk_gateway"
+exec "$(dirname "${BASH_SOURCE[0]}")/run_verilator.sh" risk_gateway "$@"

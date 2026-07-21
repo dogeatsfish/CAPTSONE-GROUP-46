@@ -1,29 +1,13 @@
 #!/usr/bin/env bash
 #==============================================================================
-# Build and run the Cut-through Stream Parser unit testbench under Verilator.
+# Convenience wrapper: run the 'parser' bench.
 #
-#   ./sim/run_parser_tb.sh
+#   ./sim/run_parser_tb.sh [+PLUSARG=value ...]
 #
-# Requires Verilator 5.x (uses --binary --timing).
+# Sources live in sim/filelists/parser.f and the top module in sim/benches.sh,
+# both shared with the xsim flow. To run the same bench under Vivado:
+#
+#   ./sim/run_xsim.sh parser
 #==============================================================================
 set -euo pipefail
-
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$REPO_ROOT"
-
-OBJ_DIR="sim/obj_parser_tb"
-
-verilator \
-  --binary \
-  --timing \
-  --trace \
-  -Irtl/common \
-  --top-module cut_through_parser_tb \
-  --Mdir "$OBJ_DIR" \
-  -Wno-fatal \
-  -Wno-TIMESCALEMOD \
-  rtl/common/ct_pkg.sv \
-  rtl/parser/cut_through_parser.sv \
-  tb/parser/cut_through_parser_tb.sv
-
-"./$OBJ_DIR/Vcut_through_parser_tb"
+exec "$(dirname "${BASH_SOURCE[0]}")/run_verilator.sh" parser "$@"
