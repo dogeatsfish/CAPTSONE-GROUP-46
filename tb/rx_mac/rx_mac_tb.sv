@@ -62,32 +62,49 @@ module tb_rx_mac_core();
     // trailing 4-byte FCS, and an off-by-one in the sliding window would be
     // invisible to a $display-only monitor.
     // =========================================================================
-    logic [7:0] exp_payload [0:255];
-    int         exp_len;
-    int         rx_idx;         // bytes received for the current frame
-    int         rx_mismatch;    // byte-compare failures for the current frame
-    logic       rx_saw_tlast;
+    logic [7:0] rx_buf [0:255];   // bytes the DUT streamed up
+    int         rx_idx;           // how many, for the current frame
 
-    // rx_error is only meaningful on the single cycle the packet ends, so latch
-    // it for the whole frame rather than sampling at a fixed offset afterwards.
-    logic       rx_error_latched;
+    // Counters, not single-bit flags. rx_error is only meaningful on the one
+    // cycle the packet ends, so it has to be accumulated across the frame
+    // rather than sampled at a fixed offset afterwards -- and counting how
+    // many times it fired is strictly more informative than a sticky bit.
+    int         rx_tlast_n;
+    int         rx_error_n;
 
     initial begin
-        exp_len          = 0;
-        rx_idx           = 0;
-        rx_mismatch      = 0;
-        rx_saw_tlast     = 1'b0;
-        rx_error_latched = 1'b0;
-        forever begin
-            @(posedge rgmii_rx_clk);
-            #1;
-            if (rx_error) rx_error_latched = 1'b1;
-            if (m_axis_tvalid) begin
-                if (rx_idx < exp_len && m_axis_tdata !== exp_payload[rx_idx])
-                    rx_mismatch++;
-                rx_idx++;
-                if (m_axis_tlast) rx_saw_tlast = 1'b1;
-            end
+        rx_idx     = 0;
+        rx_tlast_n = 0;
+        rx_error_n = 0;
+    end
+
+    // PURE RECORDER. Two deliberate structural choices, both about portability:
+    //
+    //   1. A clocked `always` block, not `initial ... forever`. Under --timing
+    //      an initial/forever monitor becomes a coroutine whose scoreboard
+    //      writes were not reliably observed by the test process unless
+    //      waveform tracing happened to keep the signals alive -- a bench whose
+    //      result depends on --trace is a race, and it would resolve
+    //      differently again under xsim. An `always` block is a first-class
+    //      scheduled process in every simulator.
+    //
+    //   2. It only ever WRITES scoreboard state, never reads anything the test
+    //      process owns. Data flow stays one-way: record here, compare in
+    //      send_frame.
+    //
+    // Sampling is on the NEGEDGE, mid-cycle. m_axis_tvalid / tlast / rx_error
+    // are all combinational off flopped state, and reading them exactly ON the
+    // rising edge is a race -- you get the pre-edge or post-edge value
+    // depending on how the simulator orders the combinational settle. That is
+    // what made tlast and rx_error (both single-cycle pulses) read as 0 here.
+    // Half a cycle later everything is settled, in any simulator, and it needs
+    // no #delay so there is no timescale dependence either.
+    always @(negedge rgmii_rx_clk) begin
+        if (rx_error) rx_error_n++;
+        if (m_axis_tvalid) begin
+            if (rx_idx < 256) rx_buf[rx_idx] = m_axis_tdata;
+            rx_idx++;
+            if (m_axis_tlast) rx_tlast_n++;
         end
     end
 
@@ -127,6 +144,7 @@ module tb_rx_mac_core();
     );
         byte frame_data[];
         int frame_len;
+        int mismatches;
         logic [31:0] crc_val;
         
         // 14-byte Ethernet Header + Payload
@@ -144,23 +162,26 @@ module tb_rx_mac_core();
             frame_data[14 + i] = payload[i];
         end
 
-        // Arm the scoreboard: the DUT must hand up exactly this payload, with
-        // the L2 header and the FCS already stripped.
+        // Arm the recorder. The DUT must hand up exactly this payload, with the
+        // L2 header and the FCS already stripped.
         frame_num++;
-        for(int i = 0; i < payload.size(); i++) exp_payload[i] = payload[i];
-        exp_len          = payload.size();
-        rx_idx           = 0;
-        rx_mismatch      = 0;
-        rx_saw_tlast     = 1'b0;
-        rx_error_latched = 1'b0;
+        rx_idx     = 0;
+        rx_tlast_n = 0;
+        rx_error_n = 0;
         
-        // Compute Standard IEEE 802.3 CRC-32 (Right-Shifting)
+        // Compute Standard IEEE 802.3 CRC-32 (Right-Shifting).
+        //
+        // frame_data is `byte`, which is SIGNED. XORing it straight into a
+        // 32-bit accumulator leaves the width extension of any byte >= 0x80
+        // (every MAC address byte here, and half of payload_1) dependent on how
+        // the simulator resolves mixed-signedness operands. Mask to 8 bits
+        // explicitly so the value is unambiguous everywhere.
         crc_val = 32'hFFFFFFFF;
         for (int i = 0; i < frame_len; i++) begin
-            crc_val = crc_val ^ frame_data[i];
+            crc_val = crc_val ^ {24'h0, (frame_data[i] & 8'hFF)};
             for (int j = 0; j < 8; j++) begin
-                if (crc_val & 1) crc_val = (crc_val >> 1) ^ 32'hEDB88320;
-                else             crc_val = (crc_val >> 1);
+                if (crc_val[0]) crc_val = (crc_val >> 1) ^ 32'hEDB88320;
+                else            crc_val = (crc_val >> 1);
             end
         end
         crc_val = ~crc_val; // Invert to get final FCS
@@ -197,14 +218,18 @@ module tb_rx_mac_core();
         // Let the DDR pipeline and the sliding window flush.
         repeat(12) @(posedge rgmii_rx_clk);   // inter-frame gap
 
+        mismatches = 0;
+        for (int i = 0; i < payload.size() && i < rx_idx; i++)
+            if (rx_buf[i] !== payload[i]) mismatches++;
+
         check_int($sformatf("F%0d payload byte count", frame_num),
-                  rx_idx, exp_len);
+                  rx_idx, payload.size());
         check_int($sformatf("F%0d payload contents", frame_num),
-                  rx_mismatch, 0);
-        check_int($sformatf("F%0d tlast asserted", frame_num),
-                  int'(rx_saw_tlast), 1);
+                  mismatches, 0);
+        check_int($sformatf("F%0d tlast asserted exactly once", frame_num),
+                  rx_tlast_n, 1);
         check_int($sformatf("F%0d rx_error (CRC)", frame_num),
-                  int'(rx_error_latched), int'(corrupt_crc));
+                  (rx_error_n > 0) ? 1 : 0, int'(corrupt_crc));
     endtask
 
     // =========================================================================
