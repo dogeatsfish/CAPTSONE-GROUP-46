@@ -229,7 +229,13 @@ module tb_pre_trade_risk_gateway;
         $display(" >>>  FLAG: SOME TESTS FAILED. CHECK LOGS.  <<<");
     end
     $display("=================================================\n");
-    
+
+    // Machine-readable line in the shared format sim/run_all_tb.sh keys off.
+    // Keep it: the regression treats a missing summary as a failure, so that a
+    // bench which builds and runs but checks nothing cannot look green.
+    $display("  tb_pre_trade_risk_gateway : %0d checks, %0d failures",
+             tests_passed + tests_failed, tests_failed);
+
     $finish;
   end
 

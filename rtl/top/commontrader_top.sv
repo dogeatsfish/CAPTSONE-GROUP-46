@@ -7,18 +7,29 @@
 //                                                                   |
 //                    PHY <- TX MAC <- [TX CDC FIFO] <- TX Gen <- Risk Gateway
 //
-// Blocks in [brackets] are vendor IP (ND). Everything else is ours (D).
+// CLOCK DOMAINS
+//   rgmii_rx_clk  125 MHz   RX MAC, TX MAC, both FIFO PHY-side ports
+//   core_clk      250 MHz   parser, book, alpha, risk, TX gen
 //
-// This module also owns the SINGLE free-running timestamp counter shared by the
-// parser and the TX Generator. Both must sample the SAME counter, or the
-// latency subtraction has no common time origin and FS-12 is meaningless.
+// The two CDC FIFOs are the ONLY legal crossings for stream data. The few
+// single-bit control signals that also cross (rx_error, hw_kill_switch) go
+// through the explicit 2-flop synchronisers below -- never straight into logic.
+//
+// This module owns the SINGLE timestamp_counter instance shared by the parser
+// and the TX Generator. Both must read the SAME counter, or the latency
+// subtraction has no common time origin and FS-12 is meaningless.
 //==============================================================================
 
 module commontrader_top
   import ct_pkg::*;
 (
   // --- Board clocks / reset -------------------------------------------------
-  input  logic       sys_clk,          // board oscillator
+  /* verilator lint_off UNUSEDSIGNAL */
+  // The core clock is synthesised from the RGMII reference (the PHY is clock
+  // master), so the board oscillator is not currently a datapath source. Kept
+  // on the port list for the MMCM reference option and for board bring-up.
+  input  logic       sys_clk,
+  /* verilator lint_on UNUSEDSIGNAL */
   input  logic       sys_rst_n,
 
   // --- RGMII to/from the onboard PHY ----------------------------------------
@@ -30,44 +41,80 @@ module commontrader_top
   output logic       rgmii_tx_ctl,
 
   // --- Physical kill switch (FS-10) -----------------------------------------
-  input  logic       hw_kill_switch
+  input  logic       hw_kill_switch,
+
+  // --- Telemetry / status (ILA or status register; not board pins) ----------
+  output logic [15:0] order_drop_count,   // orders lost to a busy TX Generator
+  output logic        tx_fifo_overflow,   // sticky: TX CDC FIFO overran
+  output logic        ts_wrapped          // sticky: timestamp counter rolled over
 );
 
   //--------------------------------------------------------------------------
-  // Clocking
+  // Clocking and reset
   //--------------------------------------------------------------------------
-  logic core_clk;     // 250 MHz, from MMCM
+  logic core_clk;
   logic core_rst_n;
+  logic phy_rst_n;
 
-  // TODO: instantiate MMCM (Clocking Wizard) to generate the 250 MHz core clock
-  //       from the 125 MHz RGMII reference. Confirm which pin supplies the
-  //       reference on the AX7A200B.
+  clk_rst_gen u_clk_rst (
+    .sys_rst_n    (sys_rst_n),
+    .rgmii_rx_clk (rgmii_rx_clk),
+    .core_clk     (core_clk),
+    .core_rst_n   (core_rst_n),
+    .phy_rst_n    (phy_rst_n)
+  );
 
   //--------------------------------------------------------------------------
-  // Shared free-running timestamp counter
-  //
-  // ONE counter, read by BOTH the parser (packet in) and the TX Generator
-  // (order out). If these were separate counters, their difference would be
-  // meaningless. 16 bits @ 4 ns = 262 us range; cannot wrap in a measurement
-  // window.
+  // Shared free-running timestamp counter (FS-12)
   //--------------------------------------------------------------------------
   logic [TIMESTAMP_W-1:0] timestamp_now;
 
+  timestamp_counter #(
+    .WIDTH (TIMESTAMP_W)
+  ) u_timestamp (
+    .clk           (core_clk),
+    .rst_n         (core_rst_n),
+    .timestamp_now (timestamp_now),
+    .wrapped       (ts_wrapped)
+  );
+
+  //--------------------------------------------------------------------------
+  // Control-signal clock domain crossings
+  //
+  // rx_error is generated in the 125 MHz PHY domain and consumed in the 250 MHz
+  // core domain. Slow-to-fast, so a plain 2-flop level synchroniser captures any
+  // pulse at least one source cycle wide.
+  //
+  // hw_kill_switch is a physical input with no clock at all and MUST be
+  // synchronised before it reaches logic.
+  //--------------------------------------------------------------------------
+  logic rx_error;                       // PHY domain, from RX MAC
+  logic rx_error_meta, rx_error_sync;   // core domain
+  logic kill_meta,     kill_sync;
+
   always_ff @(posedge core_clk or negedge core_rst_n) begin
-    if (!core_rst_n) timestamp_now <= '0;
-    else             timestamp_now <= timestamp_now + 1'b1;
+    if (!core_rst_n) begin
+      rx_error_meta <= 1'b0;
+      rx_error_sync <= 1'b0;
+      kill_meta     <= 1'b0;
+      kill_sync     <= 1'b0;
+    end else begin
+      rx_error_meta <= rx_error;
+      rx_error_sync <= rx_error_meta;
+      kill_meta     <= hw_kill_switch;
+      kill_sync     <= kill_meta;
+    end
   end
 
   //--------------------------------------------------------------------------
-  // RX path
+  // RX MAC (125 MHz PHY domain)
   //--------------------------------------------------------------------------
   logic [7:0] mac_tdata;
   logic       mac_tvalid, mac_tlast;
-  logic       rx_error;
 
   rx_mac_core u_rx_mac (
     .rgmii_rx_clk  (rgmii_rx_clk),
-    .rgmii_rst_n   (sys_rst_n),
+    .rgmii_rst_n   (phy_rst_n),
     .rgmii_rxd     (rgmii_rxd),
     .rgmii_rx_ctl  (rgmii_rx_ctl),
     .m_axis_tdata  (mac_tdata),
@@ -76,18 +123,54 @@ module commontrader_top
     .rx_error      (rx_error)
   );
 
-  // --- RX CDC FIFO (ND): 125 MHz -> 250 MHz ---------------------------------
+  //--------------------------------------------------------------------------
+  // RX CDC FIFO: 125 MHz -> 250 MHz
+  //
+  // The read side drains at twice the write rate, so this only has to absorb
+  // reset/startup skew, not a sustained rate mismatch. 32 entries is ample.
+  // The RX MAC has no tready (the PHY cannot be back-pressured), so
+  // s_axis_tready is deliberately left unconsumed -- it must never go low, and
+  // the integration testbench asserts exactly that.
+  //--------------------------------------------------------------------------
   logic [7:0] rx_fifo_tdata;
   logic       rx_fifo_tvalid, rx_fifo_tlast, rx_fifo_tready;
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic       rx_fifo_wr_ready;
+  /* verilator lint_on UNUSEDSIGNAL */
 
-  // TODO: instantiate the vendor async FIFO IP here.
+  axis_cdc_fifo #(
+    .DATA_W (8),
+    .ADDR_W (5)               // 32 entries
+  ) u_rx_fifo (
+    .s_axis_aclk    (rgmii_rx_clk),
+    .s_axis_aresetn (phy_rst_n),
+    .s_axis_tdata   (mac_tdata),
+    .s_axis_tvalid  (mac_tvalid),
+    .s_axis_tlast   (mac_tlast),
+    .s_axis_tready  (rx_fifo_wr_ready),
+
+    .m_axis_aclk    (core_clk),
+    .m_axis_aresetn (core_rst_n),
+    .m_axis_tdata   (rx_fifo_tdata),
+    .m_axis_tvalid  (rx_fifo_tvalid),
+    .m_axis_tlast   (rx_fifo_tlast),
+    .m_axis_tready  (rx_fifo_tready)
+  );
 
   //--------------------------------------------------------------------------
-  // Parser
+  // Cut-through Stream Parser
   //--------------------------------------------------------------------------
   logic [BOOK_UPDATE_W-1:0] upd_tdata;
-  logic                     upd_tvalid, upd_tready;
+  logic                     upd_tvalid;
+  /* verilator lint_off UNUSEDSIGNAL */
+  // The Order Book ties tready high and the parser has no back-pressure input,
+  // so this is monitoring only. The integration testbench asserts it stays high.
+  logic                     upd_tready;
+  // Parser checksum result. DELIBERATELY UNCONNECTED: the Risk Gateway's
+  // viol_crc check is stubbed out (see the note at the Risk Gateway below), so
+  // there is nothing to drive yet. Wire this to viol_crc when that lands.
   logic                     r_valid;
+  /* verilator lint_on UNUSEDSIGNAL */
 
   cut_through_parser u_parser (
     .core_clk      (core_clk),
@@ -136,7 +219,7 @@ module commontrader_top
   );
 
   //--------------------------------------------------------------------------
-  // Alpha Engine  (user sandbox region, FS-8/FS-9)
+  // Alpha Engine (user sandbox region, FS-8/FS-9)
   //--------------------------------------------------------------------------
   logic [TRADE_W-1:0] order_tdata;
   logic               order_tuser, order_tvalid;
@@ -161,6 +244,12 @@ module commontrader_top
 
   //--------------------------------------------------------------------------
   // Pre-Trade Risk Gateway
+  //
+  // NOTE: rx_error_sync is connected, but the gateway's viol_crc check is
+  // currently stubbed (the violations vector hardwires that bit to 0), so this
+  // input has no effect yet. The synchroniser is in place so that enabling the
+  // check is a one-line change inside the gateway rather than a CDC redesign.
+  // Same for the blacklist check. 4 of the 6 required checks are live.
   //--------------------------------------------------------------------------
   logic [TRADE_W-1:0] tx_tdata;
   logic               tx_tuser, tx_tvalid;
@@ -171,8 +260,8 @@ module commontrader_top
     .s_axis_order_tdata  (order_tdata),
     .s_axis_order_tuser  (order_tuser),
     .s_axis_order_tvalid (order_tvalid),
-    .rx_error            (rx_error),
-    .hw_kill_switch      (hw_kill_switch),
+    .rx_error            (rx_error_sync),
+    .hw_kill_switch      (kill_sync),
     .m_axis_tx_tdata     (tx_tdata),
     .m_axis_tx_tuser     (tx_tuser),
     .m_axis_tx_tvalid    (tx_tvalid)
@@ -199,8 +288,79 @@ module commontrader_top
   );
 
   //--------------------------------------------------------------------------
-  // TX CDC FIFO (ND) + TX MAC Core (ND): 250 MHz -> 125 MHz -> RGMII
+  // Dropped-order telemetry
+  //
+  // The Risk Gateway has no tready input, so an approved trade arriving while
+  // the TX Generator is still serialising the previous one is LOST. This is a
+  // real ceiling, not a bug to paper over: the TX Generator needs 308 ns per
+  // order and a full Ethernet frame occupies the wire for 920 ns, so sustained
+  // order rates above ~1.09 M/s cannot physically be carried. Counting the
+  // losses makes the ceiling observable instead of silent.
   //--------------------------------------------------------------------------
-  // TODO: instantiate the vendor TX FIFO and TX MAC.
+  always_ff @(posedge core_clk or negedge core_rst_n) begin
+    if (!core_rst_n)                        order_drop_count <= 16'd0;
+    else if (tx_tvalid && !trade_tready &&
+             order_drop_count != 16'hFFFF)  order_drop_count <= order_drop_count + 16'd1;
+  end
+
+  //--------------------------------------------------------------------------
+  // TX CDC FIFO: 250 MHz -> 125 MHz
+  //
+  // DEPTH IS LOAD-BEARING. The TX Generator has no tready on its master port, so
+  // anything this FIFO refuses is dropped mid-frame and corrupts the packet.
+  // Peak occupancy: the MAC spends 22 byte-times (176 ns) on preamble + L2
+  // header before it starts draining, by which point the generator has already
+  // written 44 of its 77 bytes; the generator then finishes at 308 ns having
+  // outrun the MAC by a further ~17 bytes. Peak is ~61 bytes, so 32 entries
+  // WOULD OVERFLOW. 128 entries gives 2x margin.
+  //--------------------------------------------------------------------------
+  logic tx_fifo_wr_ready;
+
+  logic [7:0] tx_mac_tdata;
+  logic       tx_mac_tvalid, tx_mac_tlast, tx_mac_tready;
+
+  axis_cdc_fifo #(
+    .DATA_W (8),
+    .ADDR_W (7)               // 128 entries -- see note above
+  ) u_tx_fifo (
+    .s_axis_aclk    (core_clk),
+    .s_axis_aresetn (core_rst_n),
+    .s_axis_tdata   (tx_byte_tdata),
+    .s_axis_tvalid  (tx_byte_tvalid),
+    .s_axis_tlast   (tx_byte_tlast),
+    .s_axis_tready  (tx_fifo_wr_ready),
+
+    .m_axis_aclk    (rgmii_rx_clk),
+    .m_axis_aresetn (phy_rst_n),
+    .m_axis_tdata   (tx_mac_tdata),
+    .m_axis_tvalid  (tx_mac_tvalid),
+    .m_axis_tlast   (tx_mac_tlast),
+    .m_axis_tready  (tx_mac_tready)
+  );
+
+  // Sticky overflow flag: must never assert. If it ever does, the depth
+  // calculation above is wrong and frames are going out corrupted.
+  always_ff @(posedge core_clk or negedge core_rst_n) begin
+    if (!core_rst_n)                            tx_fifo_overflow <= 1'b0;
+    else if (tx_byte_tvalid && !tx_fifo_wr_ready) tx_fifo_overflow <= 1'b1;
+  end
+
+  //--------------------------------------------------------------------------
+  // TX MAC (125 MHz PHY domain)
+  //
+  // gmii_tx_clk is the RGMII receive clock: the PHY is clock master for both
+  // directions on this board. See the note in clk_rst_gen if that ever changes.
+  //--------------------------------------------------------------------------
+  tx_mac_core u_tx_mac (
+    .gmii_tx_clk   (rgmii_rx_clk),
+    .rst_n         (phy_rst_n),
+    .s_axis_tdata  (tx_mac_tdata),
+    .s_axis_tvalid (tx_mac_tvalid),
+    .s_axis_tlast  (tx_mac_tlast),
+    .s_axis_tready (tx_mac_tready),
+    .rgmii_txc     (rgmii_tx_clk),
+    .rgmii_txd     (rgmii_txd),
+    .rgmii_tx_ctl  (rgmii_tx_ctl)
+  );
 
 endmodule

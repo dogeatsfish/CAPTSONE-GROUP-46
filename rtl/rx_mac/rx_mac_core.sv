@@ -38,7 +38,12 @@ module rx_mac_core
   logic       sdr_error;
   logic       phy_error;
 
-  genvar i; 
+  // The IDDR primitives are `ifdef`-guarded with a behavioural equivalent so the
+  // whole RX MAC still elaborates without vendor libraries -- the same pattern
+  // tx_mac_core uses for its ODDR stage. Everything below the DDR stage is plain
+  // RTL and is what the unit and integration testbenches exercise.
+`ifdef SYNTHESIS
+  genvar i;
   generate
     // Input Data IDDR
     for (i = 0; i < 4; i = i + 1) begin: RGMII_RX_DATA
@@ -72,9 +77,54 @@ module rx_mac_core
       .R(~rgmii_rst_n),
       .S(0)
     );
-  endgenerate 
+  endgenerate
 
-  assign phy_error = sdr_data_valid ^ sdr_error; 
+`else
+  //--------------------------------------------------------------------------
+  // Behavioural DDR-to-SDR. Mirrors IDDR in SAME_EDGE_PIPELINED mode: the
+  // rising-edge nibble and the falling-edge nibble that FOLLOWS it are paired
+  // and presented together one full cycle later.
+  //
+  // RGMII sends the low nibble on the rising edge and the high nibble on the
+  // falling edge, which is exactly the ordering tx_mac_core emits.
+  //--------------------------------------------------------------------------
+  logic [3:0] rx_nib_rise, rx_nib_fall;
+  logic       rx_ctl_rise, rx_ctl_fall;
+
+  always_ff @(posedge rgmii_rx_clk or negedge rgmii_rst_n) begin
+    if (!rgmii_rst_n) begin
+      rx_nib_rise <= 4'h0;
+      rx_ctl_rise <= 1'b0;
+    end else begin
+      rx_nib_rise <= rgmii_rxd;
+      rx_ctl_rise <= rgmii_rx_ctl;
+    end
+  end
+
+  always_ff @(negedge rgmii_rx_clk or negedge rgmii_rst_n) begin
+    if (!rgmii_rst_n) begin
+      rx_nib_fall <= 4'h0;
+      rx_ctl_fall <= 1'b0;
+    end else begin
+      rx_nib_fall <= rgmii_rxd;
+      rx_ctl_fall <= rgmii_rx_ctl;
+    end
+  end
+
+  always_ff @(posedge rgmii_rx_clk or negedge rgmii_rst_n) begin
+    if (!rgmii_rst_n) begin
+      sdr_data       <= 8'h00;
+      sdr_data_valid <= 1'b0;
+      sdr_error      <= 1'b0;
+    end else begin
+      sdr_data       <= {rx_nib_fall, rx_nib_rise};
+      sdr_data_valid <= rx_ctl_rise;
+      sdr_error      <= rx_ctl_fall;
+    end
+  end
+`endif
+
+  assign phy_error = sdr_data_valid ^ sdr_error;
 
   //--------------------------------------------------------------------------
   // Stage 2: Cut-through FSM
