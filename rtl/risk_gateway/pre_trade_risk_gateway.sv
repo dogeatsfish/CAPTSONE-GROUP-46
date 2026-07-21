@@ -52,7 +52,7 @@ module pre_trade_risk_gateway
   logic [2:0] viol_max_qty;      // combinational: quantity > MAX_QTY 
   logic viol_max_value;         // 2 cycle (DSP):  price * quantity > MAX_ORDER_VAL 
   logic viol_blacklist[0:1];    // 1 cycle (BRAM): ticker is restricted
-  logic viol_rate_limit;        // combinational: token bucket empty
+  logic [2:0] viol_rate_limit;        // combinational: token bucket empty
   logic viol_kill_switch;       // combinational: hw_kill_switch asserted 
   logic viol_crc[0:1];          // combinational: rx_error asserted 
 
@@ -83,7 +83,20 @@ module pre_trade_risk_gateway
   // No pipeline since it is not related to any one packet
   logic [$clog2(RATE_PERIOD)-1:0] cycle_cnt; 
   logic refill_pulse; 
-  logic [$clog2(RATE_TOKENS)-1:0] token_bucket; 
+  logic [$clog2(RATE_TOKENS):0] token_bucket; 
+  logic refund_pulse;
+  logic non_rate_limit_violation;  
+  
+  // Refund a token on egress if trade is rejected
+  assign non_rate_limit_violation = viol_max_qty[2] | viol_max_value | viol_kill_switch;
+  assign refund_pulse = tvalid[2] & non_rate_limit_violation & ~viol_rate_limit[2];
+  
+  // Handle refill and refund collision
+  logic [1:0] tokens_to_add;
+  logic       tokens_to_sub; 
+  
+  assign tokens_to_add = refill_pulse + refund_pulse;
+  assign tokens_to_sub = s_axis_order_tvalid; 
 
   always_ff @(posedge clk_250mhz or negedge rst_n) begin: Rate_Limiter_Counter
     if (~rst_n) begin
@@ -100,19 +113,44 @@ module pre_trade_risk_gateway
     end
   end
 
-  always_ff @(posedge clk_250mhz or negedge rst_n) begin: Token_Bucket
-    if (~rst_n) begin
-      token_bucket <= RATE_TOKENS; 
-    end else if (m_axis_tx_tvalid && refill_pulse) begin
-      token_bucket <= token_bucket; 
-    end else if (m_axis_tx_tvalid) begin
-      token_bucket <= (token_bucket > 0) ? token_bucket - 1 : token_bucket; 
-    end else if (refill_pulse) begin
-      token_bucket <= (token_bucket < RATE_TOKENS) ? token_bucket + 1 : token_bucket; 
+    always_ff @(posedge clk_250mhz or negedge rst_n) begin: Token_Bucket
+      if (~rst_n) begin
+          token_bucket <= RATE_TOKENS;
+      end else begin
+          automatic integer next_bucket = token_bucket + tokens_to_add - tokens_to_sub; 
+            
+          if (next_bucket > RATE_TOKENS) begin
+              token_bucket <= RATE_TOKENS; 
+          end else if (next_bucket < 0) begin
+              token_bucket <= 0; 
+          end else begin
+              token_bucket <= next_bucket[4:0];
+          end
+       end
     end
-  end
 
-  assign viol_rate_limit = (token_bucket == 0);
+    always_ff @(posedge clk_250mhz or negedge rst_n) begin: Rate_Limiter_Pipeline
+      if (~rst_n) begin
+        viol_rate_limit <= '0;
+      end else begin
+        viol_rate_limit[0] <= s_axis_order_tvalid ? ((token_bucket + tokens_to_add) == 0) : 0;
+        viol_rate_limit[1] <= viol_rate_limit[0]; 
+        viol_rate_limit[2] <= viol_rate_limit[1]; 
+      end
+    end
+
+//  always_ff @(posedge clk_250mhz or negedge rst_n) begin: Token_Bucket
+//    if (~rst_n) begin
+//      token_bucket <= RATE_TOKENS; 
+//    end else if (m_axis_tx_tvalid && refill_pulse) begin
+//      token_bucket <= token_bucket; 
+//    end else if (m_axis_tx_tvalid) begin
+//      token_bucket <= (token_bucket > 0) ? token_bucket - 1 : token_bucket; 
+//    end else if (refill_pulse) begin
+//      token_bucket <= (token_bucket < RATE_TOKENS) ? token_bucket + 1 : token_bucket; 
+//    end
+//  end
+
 
   // Max Value Check 
 
@@ -164,11 +202,9 @@ module pre_trade_risk_gateway
     end else begin
       tuser   <= {tuser[1:0], s_axis_order_tuser};
       tvalid  <= {tvalid[1:0], s_axis_order_tvalid};  
-      if (s_axis_order_tvalid) begin
-        trade[0] <= trade_in;
-        trade[1] <= trade[0];
-        trade[2] <= trade[1]; 
-      end
+      trade[0] <= trade_in;
+      trade[1] <= trade[0];
+      trade[2] <= trade[1]; 
     end
   end
 
@@ -179,7 +215,7 @@ module pre_trade_risk_gateway
 logic [5:0] violations;
 logic violation;
 
-assign violations = {viol_max_qty[2], viol_max_value, viol_rate_limit, viol_kill_switch, 0, 0/*, viol_crc[2], viol_blacklist[1]*/};
+assign violations = {viol_max_qty[2], viol_max_value, viol_rate_limit[2], viol_kill_switch, 1'b0, 1'b0/*, viol_crc[2], viol_blacklist[1]*/};
 assign violation = |violations; 
 
 always_ff @(posedge clk_250mhz or negedge rst_n) begin
