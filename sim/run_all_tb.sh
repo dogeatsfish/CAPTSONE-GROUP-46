@@ -2,9 +2,19 @@
 #==============================================================================
 # Full regression: every unit testbench plus the full-chip integration bench.
 #
-#   ./sim/run_all_tb.sh                    all benches under Verilator
-#   ./sim/run_all_tb.sh --sim xsim         same benches under Vivado xsim
-#   ./sim/run_all_tb.sh -q                 summary only, no failure excerpts
+#   ./sim/run_all_tb.sh                        all benches under Verilator
+#   ./sim/run_all_tb.sh --sim xsim             same benches under Vivado xsim
+#   ./sim/run_all_tb.sh -q                     summary only, no failure excerpts
+#   ./sim/run_all_tb.sh +SEED=42               forward a plusarg to every bench
+#   ./sim/run_all_tb.sh order_book_crv +NTXN=50000
+#                                              run only the named bench(es)
+#
+# Any +NAME=value argument is forwarded verbatim to every bench. Benches that do
+# not read a given plusarg simply ignore it, so a global +SEED is safe even
+# though only the two constrained-random benches act on it.
+#
+# Bare arguments are treated as bench names, which is how you soak one bench
+# without sitting through the whole regression.
 #
 # Bench list, top modules and source lists all come from sim/benches.sh and
 # sim/filelists/, shared with both runners -- so "it passes in Verilator but not
@@ -28,13 +38,33 @@ source sim/benches.sh
 
 SIM="verilator"
 QUIET=0
+PLUSARGS=()
+SELECTED=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sim) SIM="${2:-}"; shift 2 ;;
     -q)    QUIET=1; shift ;;
-    *)     echo "usage: $0 [--sim verilator|xsim] [-q]" >&2; exit 2 ;;
+    +*)    PLUSARGS+=("$1"); shift ;;
+    -*)    echo "usage: $0 [--sim verilator|xsim] [-q] [+PLUSARG=v ...] [bench ...]" >&2
+           exit 2 ;;
+    *)     SELECTED+=("$1"); shift ;;
   esac
 done
+
+# Validate any explicitly named benches before running anything, so a typo fails
+# immediately instead of after the rest of the regression has gone by.
+if [[ ${#SELECTED[@]} -gt 0 ]]; then
+  for b in "${SELECTED[@]}"; do
+    if [[ -z "${BENCH_TOP[$b]:-}" ]]; then
+      echo "unknown bench '$b'" >&2
+      echo "benches: ${BENCH_ORDER[*]}" >&2
+      exit 2
+    fi
+  done
+  RUN_LIST=("${SELECTED[@]}")
+else
+  RUN_LIST=("${BENCH_ORDER[@]}")
+fi
 
 case "$SIM" in
   verilator) RUNNER="sim/run_verilator.sh" ;;
@@ -50,14 +80,16 @@ total_fails=0
 failed_benches=()
 
 echo "simulator: $SIM"
+[[ ${#PLUSARGS[@]} -gt 0 ]] && echo "plusargs : ${PLUSARGS[*]}"
 echo
 printf '%-28s %10s %8s   %s\n' "BENCH" "CHECKS" "FAILS" "STATUS"
 printf '%s\n' "-----------------------------------------------------------------"
 
-for name in "${BENCH_ORDER[@]}"; do
+for name in "${RUN_LIST[@]}"; do
   log="$LOG_DIR/${name}.log"
 
-  if ! bash "$RUNNER" "$name" >"$log" 2>&1; then
+  # ${PLUSARGS[@]+...} guards against an unbound empty array under `set -u`.
+  if ! bash "$RUNNER" "$name" ${PLUSARGS[@]+"${PLUSARGS[@]}"} >"$log" 2>&1; then
     printf '%-28s %10s %8s   %s\n' "$name" "-" "-" "BUILD/RUN ERROR"
     failed_benches+=("$name")
     total_fails=$((total_fails + 1))
@@ -93,7 +125,7 @@ printf '%-28s %10s %8s\n' "TOTAL" "$total_checks" "$total_fails"
 
 if [[ ${#failed_benches[@]} -eq 0 ]]; then
   echo
-  echo "REGRESSION PASSED  ($total_checks checks across ${#BENCH_ORDER[@]} benches, $SIM)"
+  echo "REGRESSION PASSED  ($total_checks checks across ${#RUN_LIST[@]} benches, $SIM)"
   echo "Logs in $LOG_DIR/"
   exit 0
 else
