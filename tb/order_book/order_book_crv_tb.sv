@@ -395,7 +395,7 @@ module order_book_crv_tb
 
     void'($value$plusargs("SEED=%d", SEED));
     void'($value$plusargs("NTXN=%d", NTXN));
-    void'($urandom(SEED));
+    process::self().srandom(SEED);
 
     $display("\n==============================================================");
     $display(" Order Book constrained-random torture bench");

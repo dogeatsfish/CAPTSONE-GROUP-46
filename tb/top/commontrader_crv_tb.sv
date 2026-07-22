@@ -527,10 +527,11 @@ module commontrader_crv_tb
 
       // F1: geometry.
       //
-      // A truncated frame while tx_fifo_overflow is set is the documented
-      // consequence of KNOWN GAP L1 (see docs/known_limitations.md), not a new
-      // defect -- label it rather than failing. A truncated frame WITHOUT an
-      // overflow is unexplained and still fails hard.
+      // A truncated frame while tx_fifo_overflow is set is a symptom of the TX
+      // CDC FIFO overflow, which is failed once as invariant C1 below -- label
+      // the frames here (and count them) rather than failing each one, so a
+      // single root cause is not inflated into N failures. A truncated frame
+      // WITHOUT an overflow is unexplained and still fails hard.
       if (flen[fi] != 103) begin
         if (tx_fifo_overflow) begin
           gap_frames++;
@@ -730,7 +731,7 @@ module commontrader_crv_tb
     void'($value$plusargs("NPKT_A=%d",  N_PKT_A));
     void'($value$plusargs("NPKT_B=%d",  N_PKT_B));
     void'($value$plusargs("NPKT_C=%d",  N_PKT_C));
-    void'($urandom(SEED));
+    process::self().srandom(SEED);
 
     $display("\n==============================================================");
     $display(" CommonTrader constrained-random integration bench");
@@ -849,16 +850,15 @@ module commontrader_crv_tb
     check_int("I2 Order Book never stalled parser",    inv_book_stall, 0);
     check_int("I3 tob_updated never asserted while busy", inv_upd_busy, 0);
     check_int("I4 no X on telemetry or top-of-book",   inv_x_seen,     0);
-    // KNOWN GAP L1: reported loudly but not counted as a failure, so the
-    // regression stays able to gate a merge. Any frame defect NOT explained by
-    // the overflow is still a hard failure below.
-    if (tx_fifo_overflow) begin
+    // TX CDC FIFO overflow is a HARD FAILURE. It is a real defect under active
+    // repair, so the regression must count it rather than wave it through. The
+    // sticky tx_fifo_overflow flag latches an overrun anywhere in the run, so a
+    // single end-of-test check is sufficient; when it fires, the truncated-frame
+    // tally is printed alongside for context (see docs/known_limitations.md L1).
+    if (tx_fifo_overflow)
       $display("  [GAP L1] TX CDC FIFO overflowed; %0d frame(s) truncated as a result",
                gap_frames);
-      $display("           docs/known_limitations.md -- not counted as a failure");
-    end else begin
-      check_int("C1 TX CDC FIFO never overflowed",      0,              0);
-    end
+    check_int("C1 TX CDC FIFO never overflowed",      int'(tx_fifo_overflow), 0);
     check_int("F  egress frame defects (excl. known gap)", frame_errors, 0);
 
     // Measured across the WHOLE run, not just phase C. The Risk Gateway's token

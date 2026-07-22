@@ -6,9 +6,12 @@ Everything needed to run and extend the CommonTrader testbenches.
 ./sim/run_all_tb.sh                        # everything (~0.7 s warm, ~78 s cold)
 ./sim/run_all_tb.sh order_book_crv         # just one bench
 ./sim/run_all_tb.sh +SEED=42               # every bench, specific seed
-./sim/run_all_tb.sh --sim xsim             # everything under Vivado
+./sim/run_all_tb.sh --sim xsim             # everything under Vivado (xsim)
+./sim/regression_crv.sh                    # both CRV benches across seeds 1..20 (xsim)
 ./sim/clean.sh                             # reclaim build artifacts
 ```
+
+Running under Vivado xsim (command line **and** GUI): **[`vivado/README.md`](../vivado/README.md)**.
 
 Full plusarg reference and multi-seed soak recipes: **[section 2](#2-running-tests-and-soaking-seeds)**.
 
@@ -70,14 +73,17 @@ define `SYNTHESIS`, so `rx_mac_core`'s IDDR stage, `tx_mac_core`'s ODDR stage an
 `clk_rst_gen`'s MMCM all fall back to behavioural equivalents — no vendor
 libraries needed.
 
-### `sim/run_xsim.sh <bench> [+PLUSARGS]`
+### `sim/run_xsim.sh <bench> [+PLUSARGS] [--gui]`
 
-Same inputs, `xvlog` → `xelab` → `xsim`. Set `SYNTH=1` to define `SYNTHESIS` and
-elaborate against the real `unisims_ver` primitives instead — useful for checking
+Same inputs, `xvlog` → `xelab` → `xsim`. `--gui` builds the bench and opens the
+xsim waveform viewer instead of running headless; `SYNTH=1` defines `SYNTHESIS`
+and elaborates against the real `unisims_ver` primitives — useful for checking
 the DDR stages before board bring-up.
 
-> **Untested.** This flow was written but never executed; there is no Vivado on
-> the machine it was developed on. Expect to shake out a wrinkle on first run.
+> **Verified on Vivado 2025.2** — all 12 benches pass under xsim (173,400 checks,
+> 0 failures in the default-seed run). Full xsim + Vivado-GUI setup, and the
+> 2025.2 quirks the flow works around, are in
+> **[`vivado/README.md`](../vivado/README.md)**.
 
 ### `sim/run_all_tb.sh`
 
@@ -167,6 +173,24 @@ done
 ./sim/run_order_book_crv_tb.sh +SEED=3237998081
 ```
 
+### `regression_crv.sh` — the CRV seed regression (xsim)
+
+For the two constrained-random benches specifically, `sim/regression_crv.sh` runs
+the multi-seed sweep for you. Unlike the `|| break` recipes above it **does not
+stop on the first failure** — it runs the whole range and reports which seeds
+failed. Each bench is elaborated once and re-run per seed, so it is far quicker
+than a rebuild-per-seed loop.
+
+```bash
+./sim/regression_crv.sh                 # both CRV benches, seeds 1..20
+./sim/regression_crv.sh --seeds 1 100   # seeds 1..100
+./sim/regression_crv.sh +NPKT_C=400     # forward extra plusargs to every run
+```
+
+xsim-only. Per-seed logs land in `sim/xsim_regression_<bench>/run_seed<N>.log`,
+and the summary ends with a compact `failing seeds:` line. (Today `+SEED=1` is a
+standing repro of the TX CDC FIFO overflow — `integration_crv` fails there.)
+
 ### Reading the result
 
 ```
@@ -181,7 +205,8 @@ otherwise a bench that silently stopped checking anything would look green.
 Some checks are labelled `KNOWN GAP` — a defect that is understood, documented in
 `docs/known_limitations.md`, and deliberately not fixed. Those report loudly but
 do not fail the regression, and they invert into real failures once the
-underlying defect is fixed.
+underlying defect is fixed. (Exception: the TX CDC FIFO overflow, L1, is now a
+counted failure — `integration_crv` fails whenever it overflows.)
 
 ---
 
@@ -214,11 +239,15 @@ The three that matter most, and why they are not redundant:
   erroneous ticks.
 - **`integration_crv`** randomises traffic shape and timing and checks invariants
   that need no golden model. This is what found the TX CDC FIFO overflow
-  recorded as L1 in `docs/known_limitations.md`.
+  recorded as L1 in `docs/known_limitations.md` — now promoted to a **hard
+  failure** (invariant `C1`), so an overflow fails the regression outright rather
+  than reporting quietly.
 
 Benches pin known defects rather than hiding them: a check labelled `KNOWN GAP`
 reports loudly, does not fail the regression, and inverts into a real failure the
-moment the underlying defect is fixed. See `docs/known_limitations.md`.
+moment the underlying defect is fixed. The TX CDC FIFO overflow (L1) has now been
+promoted from a `KNOWN GAP` to a hard failure, so it fails the regression today.
+See `docs/known_limitations.md`.
 
 ---
 

@@ -111,6 +111,7 @@ module tx_mac_core #(
   logic [7:0]  crc_data;
   logic        crc_en;
   logic [31:0] fcs;
+  logic [7:0]  hdr_byte;      // L2 header byte select, computed below
 
   assign fcs = ~crc_reg;      // final XOR
 
@@ -140,7 +141,6 @@ module tx_mac_core #(
   //--------------------------------------------------------------------------
   // Byte selects
   //--------------------------------------------------------------------------
-  logic [7:0] hdr_byte;
   always_comb begin
     case (hdr_cnt)
       4'd0:    hdr_byte = DST_MAC[47:40];

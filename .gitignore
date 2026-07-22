@@ -1,6 +1,8 @@
 # Vivado
 *.jou
 *.log
+*.pb
+dfx_runtime.txt
 *.str
 *.dcp
 *.bit
