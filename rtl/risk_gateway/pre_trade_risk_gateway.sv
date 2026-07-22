@@ -54,9 +54,11 @@ module pre_trade_risk_gateway
   logic viol_blacklist[0:1];    // 1 cycle (BRAM): ticker is restricted
   logic [2:0] viol_rate_limit;        // combinational: token bucket empty
   logic viol_kill_switch;       // combinational: hw_kill_switch asserted 
-  logic viol_crc[0:1];          // combinational: rx_error asserted 
+  logic viol_crc[0:1];          // combinational: rx_error asserted
 
-
+  logic [2:0] tvalid;            // data-pipeline valid shift reg, declared here
+                                  // (ahead of Data_Pipeline below) since the
+                                  // rate limiter's refund_pulse reads tvalid[2]
 
   // TODO: Blacklist      -- hash trade_in.ticker into a BRAM address; the BRAM
   //                         is preloaded at bitstream generation from a .coe.
@@ -190,7 +192,6 @@ module pre_trade_risk_gateway
 
   trade_t trade [0:2];
   logic   [2:0] tuser;
-  logic   [2:0] tvalid;
 
   always_ff @(posedge clk_250mhz or negedge rst_n) begin: Data_Pipeline
     if (~rst_n) begin
