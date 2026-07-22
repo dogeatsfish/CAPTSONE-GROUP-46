@@ -14,7 +14,7 @@ adds the Project Manager and a waveform viewer on top.
 ## Prerequisites
 
 - AMD/Xilinx **Vivado 2025.2** with `xvlog` / `xelab` / `xsim` on `PATH`
-  (run from the Vivado shell, or `source settings64.sh` first). -> C:\AMDDesignTools\2025.2\Vivado\settings64.sh
+  (run from the Vivado shell, or `source settings64.sh` first). -> `C:\AMDDesignTools\2025.2\Vivado\settings64.sh` is where mine was located
 - Only for the `replay` bench — generate its stimulus once:
   `python sim/csv_to_itch.py --events 400 --out sim/replay`
 
