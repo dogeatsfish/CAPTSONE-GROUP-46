@@ -188,8 +188,9 @@ than a rebuild-per-seed loop.
 ```
 
 xsim-only. Per-seed logs land in `sim/xsim_regression_<bench>/run_seed<N>.log`,
-and the summary ends with a compact `failing seeds:` line. (Today `+SEED=1` is a
-standing repro of the TX CDC FIFO overflow — `integration_crv` fails there.)
+and the summary ends with a compact `failing seeds:` line. (`+SEED=1` and
+`+SEED=3` were the standing repros of the TX CDC FIFO overflow before it was
+fixed — L1 in `docs/known_limitations.md`; both pass now.)
 
 ### Reading the result
 
@@ -205,8 +206,8 @@ otherwise a bench that silently stopped checking anything would look green.
 Some checks are labelled `KNOWN GAP` — a defect that is understood, documented in
 `docs/known_limitations.md`, and deliberately not fixed. Those report loudly but
 do not fail the regression, and they invert into real failures once the
-underlying defect is fixed. (Exception: the TX CDC FIFO overflow, L1, is now a
-counted failure — `integration_crv` fails whenever it overflows.)
+underlying defect is fixed. (The TX CDC FIFO overflow, L1, was made a hard check
+and then fixed — its invariant `C1` now passes and guards against regression.)
 
 ---
 
@@ -238,16 +239,15 @@ The three that matter most, and why they are not redundant:
   an independent software model. Real data, real price distribution, real
   erroneous ticks.
 - **`integration_crv`** randomises traffic shape and timing and checks invariants
-  that need no golden model. This is what found the TX CDC FIFO overflow
-  recorded as L1 in `docs/known_limitations.md` — now promoted to a **hard
-  failure** (invariant `C1`), so an overflow fails the regression outright rather
-  than reporting quietly.
+  that need no golden model. This is what found the TX CDC FIFO overflow recorded
+  as L1 in `docs/known_limitations.md` — **since fixed** (a write-side start gate
+  on the TX FIFO); its invariant `C1` now passes and stands as a regression guard.
 
 Benches pin known defects rather than hiding them: a check labelled `KNOWN GAP`
 reports loudly, does not fail the regression, and inverts into a real failure the
-moment the underlying defect is fixed. The TX CDC FIFO overflow (L1) has now been
-promoted from a `KNOWN GAP` to a hard failure, so it fails the regression today.
-See `docs/known_limitations.md`.
+moment the underlying defect is fixed. The TX CDC FIFO overflow (L1) went the full
+route — `KNOWN GAP` → hard failure → fixed — and its check `C1` now passes, failing
+again only if the defect returns. See `docs/known_limitations.md`.
 
 ---
 

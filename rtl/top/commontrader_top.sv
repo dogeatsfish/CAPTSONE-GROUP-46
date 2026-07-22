@@ -273,6 +273,7 @@ module commontrader_top
   logic [7:0] tx_byte_tdata;
   logic       tx_byte_tvalid, tx_byte_tlast;
   logic       trade_tready;
+  logic       tx_fifo_almost_full;    // from the TX CDC FIFO write side
 
   outbound_tx_generator u_tx_gen (
     .core_clk            (core_clk),
@@ -281,6 +282,7 @@ module commontrader_top
     .s_axis_trade_tuser  (tx_tuser),
     .s_axis_trade_tvalid (tx_tvalid),
     .s_axis_trade_tready (trade_tready),
+    .fifo_has_room       (~tx_fifo_almost_full),
     .timestamp_now       (timestamp_now),
     .m_axis_tdata        (tx_byte_tdata),
     .m_axis_tvalid       (tx_byte_tvalid),
@@ -291,11 +293,13 @@ module commontrader_top
   // Dropped-order telemetry
   //
   // The Risk Gateway has no tready input, so an approved trade arriving while
-  // the TX Generator is still serialising the previous one is LOST. This is a
-  // real ceiling, not a bug to paper over: the TX Generator needs 308 ns per
-  // order and a full Ethernet frame occupies the wire for 920 ns, so sustained
-  // order rates above ~1.09 M/s cannot physically be carried. Counting the
-  // losses makes the ceiling observable instead of silent.
+  // trade_tready is low is LOST. trade_tready is low while the TX Generator is
+  // serialising a frame AND while the TX CDC FIFO cannot hold another frame, so
+  // under sustained load the generator paces itself to the wire and the excess
+  // is dropped HERE -- cleanly, and counted -- rather than overrunning the FIFO
+  // mid-frame. This is a real ceiling, not a bug to paper over: a full Ethernet
+  // frame occupies the wire for 920 ns, so sustained order rates above ~1.09 M/s
+  // cannot physically be carried. Counting the losses makes it observable.
   //--------------------------------------------------------------------------
   always_ff @(posedge core_clk or negedge core_rst_n) begin
     if (!core_rst_n)                        order_drop_count <= 16'd0;
@@ -306,40 +310,50 @@ module commontrader_top
   //--------------------------------------------------------------------------
   // TX CDC FIFO: 250 MHz -> 125 MHz
   //
-  // DEPTH IS LOAD-BEARING. The TX Generator has no tready on its master port, so
-  // anything this FIFO refuses is dropped mid-frame and corrupts the packet.
-  // Peak occupancy: the MAC spends 22 byte-times (176 ns) on preamble + L2
-  // header before it starts draining, by which point the generator has already
-  // written 44 of its 77 bytes; the generator then finishes at 308 ns having
-  // outrun the MAC by a further ~17 bytes. Peak is ~61 bytes, so 32 entries
-  // WOULD OVERFLOW. 128 entries gives 2x margin.
+  // The TX Generator produces bytes ~3x faster than the wire can carry them and
+  // has no per-byte back-pressure, so this crossing is kept LOSSLESS by a START
+  // GATE rather than by depth alone. s_axis_almost_full asserts once the FIFO can
+  // no longer hold a whole outbound frame; the generator will not START a frame
+  // while it is high (u_tx_gen.fifo_has_room). Excess orders are then dropped
+  // cleanly at the gateway boundary (order_drop_count) instead of being truncated
+  // mid-frame on the wire. (Previously the depth alone was load-bearing and a
+  // second order 308-920 ns behind the first overran the FIFO -- L1.)
+  //
+  // DEPTH must be >= one frame: the generator starts only with >= TX_FRAME_BYTES
+  // free and then writes up to TX_FRAME_BYTES, so peak occupancy is bounded by
+  // the depth. 128 (ADDR_W=7) is the smallest power of two >= 77.
   //--------------------------------------------------------------------------
+  localparam int TX_FRAME_BYTES = 77;   // = outbound_tx_generator PKT_LEN
+
   logic tx_fifo_wr_ready;
 
   logic [7:0] tx_mac_tdata;
   logic       tx_mac_tvalid, tx_mac_tlast, tx_mac_tready;
 
   axis_cdc_fifo #(
-    .DATA_W (8),
-    .ADDR_W (7)               // 128 entries -- see note above
+    .DATA_W             (8),
+    .ADDR_W             (7),              // 128 entries -- see note above
+    .ALMOST_FULL_THRESH (TX_FRAME_BYTES)  // hold off a frame that would not fit
   ) u_tx_fifo (
-    .s_axis_aclk    (core_clk),
-    .s_axis_aresetn (core_rst_n),
-    .s_axis_tdata   (tx_byte_tdata),
-    .s_axis_tvalid  (tx_byte_tvalid),
-    .s_axis_tlast   (tx_byte_tlast),
-    .s_axis_tready  (tx_fifo_wr_ready),
+    .s_axis_aclk        (core_clk),
+    .s_axis_aresetn     (core_rst_n),
+    .s_axis_tdata       (tx_byte_tdata),
+    .s_axis_tvalid      (tx_byte_tvalid),
+    .s_axis_tlast       (tx_byte_tlast),
+    .s_axis_tready      (tx_fifo_wr_ready),
+    .s_axis_almost_full (tx_fifo_almost_full),
 
-    .m_axis_aclk    (rgmii_rx_clk),
-    .m_axis_aresetn (phy_rst_n),
-    .m_axis_tdata   (tx_mac_tdata),
-    .m_axis_tvalid  (tx_mac_tvalid),
-    .m_axis_tlast   (tx_mac_tlast),
-    .m_axis_tready  (tx_mac_tready)
+    .m_axis_aclk        (rgmii_rx_clk),
+    .m_axis_aresetn     (phy_rst_n),
+    .m_axis_tdata       (tx_mac_tdata),
+    .m_axis_tvalid      (tx_mac_tvalid),
+    .m_axis_tlast       (tx_mac_tlast),
+    .m_axis_tready      (tx_mac_tready)
   );
 
-  // Sticky overflow flag: must never assert. If it ever does, the depth
-  // calculation above is wrong and frames are going out corrupted.
+  // Sticky overflow flag: with the almost-full start gate above, this must never
+  // assert. If it ever does, the gate or the threshold is wrong and frames are
+  // going out corrupted -- pinned as a hard invariant (integration_crv C1).
   always_ff @(posedge core_clk or negedge core_rst_n) begin
     if (!core_rst_n)                            tx_fifo_overflow <= 1'b0;
     else if (tx_byte_tvalid && !tx_fifo_wr_ready) tx_fifo_overflow <= 1'b1;

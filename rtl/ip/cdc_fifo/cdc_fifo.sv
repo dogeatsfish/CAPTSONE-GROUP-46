@@ -24,8 +24,10 @@
 //==============================================================================
 
 module cdc_fifo #(
-  parameter int DATA_W = 9,     // payload width
-  parameter int ADDR_W = 5      // depth = 2**ADDR_W
+  parameter int DATA_W = 9,             // payload width
+  parameter int ADDR_W = 5,             // depth = 2**ADDR_W
+  parameter int ALMOST_FULL_THRESH = 0  // wr_almost_full asserts when fewer than
+                                        // THRESH entries are free (0 = never)
 )(
   // --- write domain ---------------------------------------------------------
   input  logic              wr_clk,
@@ -33,6 +35,7 @@ module cdc_fifo #(
   input  logic              wr_en,
   input  logic [DATA_W-1:0] wr_data,
   output logic              wr_full,
+  output logic              wr_almost_full,
 
   // --- read domain ----------------------------------------------------------
   input  logic              rd_clk,
@@ -103,6 +106,36 @@ module cdc_fifo #(
   always_ff @(posedge wr_clk or negedge wr_rst_n) begin
     if (!wr_rst_n) wr_full <= 1'b0;
     else           wr_full <= wr_full_val;
+  end
+
+  //--------------------------------------------------------------------------
+  // Programmable almost-full (write domain).
+  //
+  // Asserts when fewer than ALMOST_FULL_THRESH entries are free -- i.e. the FIFO
+  // can no longer promise room for another THRESH writes. The TX Generator uses
+  // this (threshold = one full outbound frame) to hold off starting a packet it
+  // could not fit, which keeps the crossing lossless. Default 0 -> never asserts.
+  //
+  // Occupancy needs the read pointer as BINARY in the write domain, so the
+  // synchronised Gray read pointer is converted back. That pointer lags the true
+  // one by up to two cycles, so occupancy is OVER-estimated and the flag is
+  // conservative (asserts early), never optimistic -- exactly the safe direction.
+  // Registered like wr_full, for the same timing reasons; it does not gate the
+  // write pointer, so there is no combinational loop to worry about.
+  //--------------------------------------------------------------------------
+  function automatic logic [ADDR_W:0] gray2bin(input logic [ADDR_W:0] g);
+    logic [ADDR_W:0] b;
+    b[ADDR_W] = g[ADDR_W];
+    for (int i = ADDR_W - 1; i >= 0; i--) b[i] = b[i+1] ^ g[i];
+    return b;
+  endfunction
+
+  logic [ADDR_W:0] wr_occ;      // 0..DEPTH, wrap-safe unsigned subtraction
+  assign wr_occ = wbin - gray2bin(wq2_rgray);
+
+  always_ff @(posedge wr_clk or negedge wr_rst_n) begin
+    if (!wr_rst_n) wr_almost_full <= 1'b0;
+    else           wr_almost_full <= (wr_occ > (ADDR_W+1)'(DEPTH - ALMOST_FULL_THRESH));
   end
 
   //--------------------------------------------------------------------------

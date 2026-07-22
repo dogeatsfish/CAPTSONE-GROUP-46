@@ -54,6 +54,7 @@ module outbound_tx_generator_tb
   logic                   s_axis_trade_tuser;
   logic                   s_axis_trade_tvalid;
   logic                   s_axis_trade_tready;
+  logic                   fifo_has_room;
   logic [TIMESTAMP_W-1:0] timestamp_now;
   logic [7:0]             m_axis_tdata;
   logic                   m_axis_tvalid;
@@ -75,6 +76,7 @@ module outbound_tx_generator_tb
     .s_axis_trade_tuser  (s_axis_trade_tuser),
     .s_axis_trade_tvalid (s_axis_trade_tvalid),
     .s_axis_trade_tready (s_axis_trade_tready),
+    .fifo_has_room       (fifo_has_room),
     .timestamp_now       (timestamp_now),
     .m_axis_tdata        (m_axis_tdata),
     .m_axis_tvalid       (m_axis_tvalid),
@@ -295,6 +297,7 @@ module outbound_tx_generator_tb
     s_axis_trade_tdata  = '0;
     s_axis_trade_tuser  = 1'b0;
     s_axis_trade_tvalid = 1'b0;
+    fifo_has_room       = 1'b1;      // FIFO has room throughout T1/T2
     tready_low_seen     = 1'b0;
 
     // reset
@@ -347,6 +350,55 @@ module outbound_tx_generator_tb
     // Symbol big-endian sanity: first ClOrdID byte is a space, symbol starts 'M'
     check_byte("T2 symbol[0] = 'M'", cap[38], 8'h4D);
     check_byte("T2 ClOrdID[0] = space", cap[59], OUCH_SPACE);
+
+    //------------------------------------------------------------------ T3
+    // Start gate (L1 fix): with the TX FIFO reporting no room, the generator
+    // must NOT accept a trade -- tready stays low and no bytes are emitted --
+    // and must resume the instant room appears.
+    $display("\n[T3] FIFO start gate: no room -> stall, then accept");
+    begin
+      trade_t tv3;
+      int     bytes_while_full;
+      logic   ready_while_full;
+      logic   started_after_room;
+
+      tv3.timestamp = 16'd0;
+      tv3.ticker    = 64'h4747_4C45_2020_2020;   // "GGLE"
+      tv3.quantity  = 32'd500;
+      tv3.price     = 32'h0003_0D40;
+
+      @(negedge core_clk);
+      fifo_has_room       = 1'b0;                 // FIFO cannot hold a frame
+      s_axis_trade_tdata  = tv3;
+      s_axis_trade_tuser  = 1'b1;
+      s_axis_trade_tvalid = 1'b1;
+
+      bytes_while_full = 0;
+      ready_while_full = 1'b0;
+      repeat (20) begin
+        @(negedge core_clk);
+        if (s_axis_trade_tready) ready_while_full = 1'b1;
+        if (m_axis_tvalid)       bytes_while_full++;
+      end
+      check_int("no tready while FIFO full",         int'(ready_while_full), 0);
+      check_int("no bytes emitted while FIFO full",  bytes_while_full,       0);
+
+      // Open room: the pending trade must now be accepted and streamed.
+      fifo_has_room      = 1'b1;
+      started_after_room = 1'b0;
+      repeat (10) begin
+        @(negedge core_clk);
+        if (m_axis_tvalid) started_after_room = 1'b1;
+      end
+      check_int("frame starts once room appears", int'(started_after_room), 1);
+
+      // Deassert and let it drain back to idle.
+      s_axis_trade_tvalid = 1'b0;
+      s_axis_trade_tdata  = '0;
+      s_axis_trade_tuser  = 1'b0;
+      repeat (PKT_LEN + 8) @(negedge core_clk);
+      check_int("tready restored after frame", int'(s_axis_trade_tready), 1);
+    end
 
     //------------------------------------------------------------------ Summary
     $display("\n==================================================");

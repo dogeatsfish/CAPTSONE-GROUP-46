@@ -37,7 +37,16 @@ module outbound_tx_generator
   input  logic [TRADE_W-1:0]     s_axis_trade_tdata,   // trade_t, 144 bits
   input  logic                   s_axis_trade_tuser,   // 1 = Buy, 0 = Sell
   input  logic                   s_axis_trade_tvalid,
-  output logic                   s_axis_trade_tready,  // low while serialising
+  output logic                   s_axis_trade_tready,  // low while serialising OR
+                                                       // while the TX FIFO is too
+                                                       // full to hold a frame
+
+  // --- TX CDC FIFO write-room (from axis_cdc_fifo s_axis_almost_full) --------
+  // High when the FIFO can absorb a whole outbound frame. The serialiser has no
+  // per-byte back-pressure (it streams 77 bytes unconditionally once started),
+  // so a frame is only STARTED when the whole frame is guaranteed to fit. This
+  // is what keeps the crossing lossless -- see the drop note in commontrader_top.
+  input  logic                   fifo_has_room,
 
   // --- Shared free-running timestamp counter (top level) --------------------
   input  logic [TIMESTAMP_W-1:0] timestamp_now,
@@ -194,7 +203,12 @@ module outbound_tx_generator
         // is measured at the moment the order reaches the generator.
         //--------------------------------------------------------------------
         IDLE: begin
-          if (s_axis_trade_tvalid) begin
+          // Only accept (and start streaming) when the FIFO can hold the whole
+          // frame. Otherwise the trade is not taken this cycle; if it is still
+          // asserted it will be accepted once room appears, and any trade that
+          // the (tready-less) Risk Gateway presents meanwhile is dropped and
+          // counted at the top level -- a clean drop, not a mid-frame overrun.
+          if (s_axis_trade_tvalid && fifo_has_room) begin
             r_side    <= s_axis_trade_tuser ? SIDE_BUY : SIDE_SELL;
             r_qty     <= trade.quantity;
             r_symbol  <= trade.ticker;
@@ -327,7 +341,7 @@ module outbound_tx_generator
   //--------------------------------------------------------------------------
   // Stream handshake / framing
   //--------------------------------------------------------------------------
-  assign s_axis_trade_tready = (state == IDLE);
+  assign s_axis_trade_tready = (state == IDLE) && fifo_has_room;
   assign m_axis_tvalid       = (state == BUILD_HEADER)
                             || (state == STREAM_PAYLOAD)
                             || (state == FINALIZE);
