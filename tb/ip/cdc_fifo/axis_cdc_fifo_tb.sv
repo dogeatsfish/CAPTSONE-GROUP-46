@@ -26,8 +26,9 @@
 
 module axis_cdc_fifo_tb;
 
-  localparam int ADDR_W = 4;             // 16-entry FIFO
-  localparam int DEPTH  = 1 << ADDR_W;
+  localparam int ADDR_W    = 4;          // 16-entry FIFO
+  localparam int DEPTH     = 1 << ADDR_W;
+  localparam int AF_THRESH = 8;          // almost_full when < 8 entries free
 
   // 125 MHz = 8 ns, 250 MHz = 4 ns. Skewed slightly so edges are not aligned.
   localparam real P_SLOW = 8.0;
@@ -61,13 +62,14 @@ module axis_cdc_fifo_tb;
   //--------------------------------------------------------------------------
   // DUT B: fast -> slow (the TX crossing)
   //--------------------------------------------------------------------------
-  logic [7:0] b_s_tdata;  logic b_s_tvalid, b_s_tlast, b_s_tready;
+  logic [7:0] b_s_tdata;  logic b_s_tvalid, b_s_tlast, b_s_tready, b_almost_full;
   logic [7:0] b_m_tdata;  logic b_m_tvalid, b_m_tlast, b_m_tready;
 
-  axis_cdc_fifo #(.DATA_W(8), .ADDR_W(ADDR_W)) dut_tx (
+  axis_cdc_fifo #(.DATA_W(8), .ADDR_W(ADDR_W), .ALMOST_FULL_THRESH(AF_THRESH)) dut_tx (
     .s_axis_aclk(clk_fast), .s_axis_aresetn(rst_n),
     .s_axis_tdata(b_s_tdata), .s_axis_tvalid(b_s_tvalid),
     .s_axis_tlast(b_s_tlast), .s_axis_tready(b_s_tready),
+    .s_axis_almost_full(b_almost_full),
     .m_axis_aclk(clk_slow), .m_axis_aresetn(rst_n),
     .m_axis_tdata(b_m_tdata), .m_axis_tvalid(b_m_tvalid),
     .m_axis_tlast(b_m_tlast), .m_axis_tready(b_m_tready)
@@ -243,6 +245,33 @@ module axis_cdc_fifo_tb;
       for (int i = 0; i < DEPTH; i++) if (a_rx[i] !== 8'(i)) bad++;
       check_int("drained data intact", bad, 0);
     end
+
+    //------------------------------------------------------------------ T7
+    // Programmable almost_full (write-domain) on the fast->slow FIFO. The flag
+    // must stay low until fewer than AF_THRESH entries are free, then assert.
+    // This is the primitive the TX start gate (L1 fix) is built on.
+    $display("\n[T7] almost_full threshold (fast->slow)");
+    b_m_tready = 1'b1;
+    repeat (40) @(posedge clk_slow);              // ensure the tx FIFO is empty
+    check_int("almost_full low when empty", int'(b_almost_full), 0);
+
+    // Park the reader and fill to exactly DEPTH-AF_THRESH entries: free ==
+    // AF_THRESH, which is NOT yet almost_full (flag is 'free < AF_THRESH').
+    b_m_tready = 1'b0;
+    repeat (4) @(posedge clk_fast);               // let the parked read ptr settle
+    send_fast(DEPTH - AF_THRESH);
+    repeat (4) @(posedge clk_fast);
+    check_int("almost_full low at threshold boundary", int'(b_almost_full), 0);
+
+    // One more entry drops free below AF_THRESH -> almost_full asserts.
+    send_fast(1);
+    repeat (4) @(posedge clk_fast);
+    check_int("almost_full high past threshold", int'(b_almost_full), 1);
+
+    // Drain and confirm it clears.
+    b_m_tready = 1'b1;
+    repeat (60) @(posedge clk_slow);
+    check_int("almost_full clears after drain", int'(b_almost_full), 0);
 
     //------------------------------------------------------------------ Summary
     $display("\n==================================================");

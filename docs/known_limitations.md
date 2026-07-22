@@ -1,21 +1,22 @@
 # Known Limitations
 
-Defects and design gaps that are **understood, measured, and deliberately not
-fixed** at the time of writing. Each entry records what it is, how it was found,
-what it costs, and what fixing it would take.
+Defects and design gaps that are **understood and measured**. Each entry records
+what it is, how it was found, what it costs, and what fixing it would take — or,
+for a resolved entry, how it was fixed.
 
-Anything in this file is pinned by a testbench check so it cannot be forgotten.
-When a limitation is fixed, the corresponding check **fails** and points at the
-expectation that needs updating.
+Anything in this file is pinned by a testbench check so it cannot be forgotten. A
+resolved entry keeps its check as a permanent regression guard (e.g. L1's `C1`,
+which now passes and fails again if the defect ever returns).
 
 ---
 
-## L1 — TX CDC FIFO overflows and corrupts outbound frames
+## L1 — TX CDC FIFO overflow (RESOLVED)
 
-**Severity: high.** Reachable in ordinary traffic. Silently truncates Ethernet
-frames on the wire.
+**Status: FIXED.** Was **high severity** — silently truncated Ethernet frames on
+the wire. The write-side start gate described below eliminates it; the pinning
+check `commontrader_crv_tb` **C1** now passes and stands as a regression guard.
 
-### Evidence
+### What it was
 
 Found by `tb/top/commontrader_crv_tb.sv` (constrained-random integration bench),
 reproducible on 3 of 4 seeds:
@@ -25,61 +26,71 @@ TX FIFO OVERFLOW  byte_idx=51  wbin=78  rbin=206  occ=128  macstate=2
 [FAIL] egress frame 7 length 78, expected 103
 ```
 
-The FIFO is genuinely full (128/128) while the TX Generator is at byte 51 of a
-77-byte packet. The bytes it writes during the overflow are lost, and the TX MAC
-emits a truncated frame.
-
-Observed with two approved orders **444 ns apart** — normal Phase A traffic, not
-an artificial burst.
+The FIFO went genuinely full (128/128) while the TX Generator was at byte 51 of a
+77-byte packet; the bytes written during the overflow were lost and the TX MAC
+emitted a truncated frame. Seen with two approved orders only **444 ns apart** —
+ordinary Phase A traffic, not an artificial burst.
 
 ### Root cause
 
-The backpressure boundary is in the wrong place.
-`rtl/tx_gen/outbound_tx_generator.sv`:
+The backpressure boundary was in the wrong place — the TX Generator's ready
+reflected only its own serialiser state, not whether the FIFO could absorb another
+frame:
 
 ```systemverilog
-assign s_axis_trade_tready = (state == IDLE);
+assign s_axis_trade_tready = (state == IDLE);   // says nothing about FIFO room
 ```
-
-That reflects only the TX Generator's own serialiser state. It says nothing
-about whether the downstream TX CDC FIFO can absorb another 77 bytes.
 
 | | Duration |
 |---|---|
 | TX Gen serialises one packet | 308 ns (77 B @ 250 MHz) |
 | A full Ethernet frame occupies the wire | 920 ns (115 byte-times @ 125 MHz) |
 
-Two approved orders spaced anywhere in the **308–920 ns** window are therefore
-both accepted, both serialised, and the second overruns the FIFO.
+The generator produces frames roughly **3× faster** than the wire carries them, so
+two approved orders spaced anywhere in the **308–920 ns** window were both
+accepted, both serialised, and the second overran the FIFO. A bigger FIFO cannot
+fix this: at a 3× production/drain ratio any finite depth overflows and depth only
+widens the window. (The original "peak ≈ 61 B → 128 is ample" sizing was correct
+for *one frame in isolation*, not for two overlapping orders.)
 
-### Why a bigger FIFO does not fix it
+### The fix (applied)
 
-TX Gen produces frames roughly **3× faster** than the wire can carry them. Any
-finite depth overflows under sustained load; increasing `ADDR_W` only widens the
-window before it happens. The earlier depth calculation (peak ≈ 61 bytes → 128 is
-ample) was correct for *one frame in isolation* and does not hold once two orders
-overlap.
+Move the backpressure boundary to the FIFO and make the crossing lossless with a
+**start gate**: the generator refuses to *begin* a frame it cannot fully fit,
+instead of overrunning mid-frame.
 
-### Fix, when someone takes it
+1. `rtl/ip/cdc_fifo/cdc_fifo.sv` + `axis_cdc_fifo.sv` — new `ALMOST_FULL_THRESH`
+   parameter and `s_axis_almost_full` output. Write-domain occupancy is derived by
+   converting the synchronised Gray read pointer back to binary
+   (`wbin − gray2bin(wq2_rgray)`); because that pointer lags, occupancy is
+   over-estimated and the flag is conservative (asserts early, never optimistic).
+2. `rtl/tx_gen/outbound_tx_generator.sv` — new `fifo_has_room` input; the FSM
+   accepts a trade only while it is high, and
+   `assign s_axis_trade_tready = (state == IDLE) && fifo_has_room;`.
+3. `rtl/top/commontrader_top.sv` — the TX FIFO is instanced with
+   `ALMOST_FULL_THRESH = TX_FRAME_BYTES (77)`, and its `s_axis_almost_full` drives
+   the generator's `fifo_has_room` (inverted). The 128-deep FIFO is kept: the gate
+   needs depth ≥ one frame, and 128 is the smallest power of two ≥ 77.
 
-1. Expose write-domain free space from `axis_cdc_fifo` — an `almost_full` flag
-   with a threshold of ≥ 77 entries is enough. The occupancy is already computed
-   internally from `wbin` and the synchronised read pointer.
-2. Gate the TX Generator's ready on it:
-   ```systemverilog
-   assign s_axis_trade_tready = (state == IDLE) && fifo_has_room;
-   ```
+The generator now paces itself to the wire; orders it cannot send are dropped
+**cleanly** at the gateway and counted by `order_drop_count` (the ceiling in L4) —
+never truncated mid-frame. Because the drop stays at that lossy boundary, no
+back-pressure propagates into the cut-through ingress path.
 
-This converts silent frame corruption into a clean drop, already counted by
-`order_drop_count`. It touches `axis_cdc_fifo` and `outbound_tx_generator` plus
-their unit benches.
+### Verification
+
+- `axis_cdc_fifo_tb` **T7** — `almost_full` asserts exactly below the free-entry
+  threshold and clears on drain.
+- `outbound_tx_generator_tb` **T3** — the generator stalls while there is no room
+  (no bytes emitted) and resumes the instant room appears.
+- `commontrader_crv_tb` **C1** — no overflow across seeds 1–20 (previously failed
+  on seeds 1 and 3); **C2** still confirms the clean drop path fires. Reproduce
+  with `./sim/regression_crv.sh`.
 
 ### Pinned by
 
-`commontrader_crv_tb`, check **C1**. The bench reports `KNOWN GAP L1` when the
-overflow occurs and does not count the resulting frame defects as failures.
-Frame defects **without** an overflow are still hard failures. Once the fix
-lands, C1 stops reporting and the frame checks tighten automatically.
+`commontrader_crv_tb`, check **C1** — now a hard invariant that passes, and fails
+again the moment an overflow reappears.
 
 ---
 
@@ -153,12 +164,16 @@ costing ~5.9 µs and contradicting FS-1.
 ## L4 — Approved orders can be dropped without backpressure
 
 The Risk Gateway has no `tready` input and the Alpha Engine fires on every
-qualifying `tob_updated`, so an approved trade arriving while the TX Generator is
-serialising is lost.
+qualifying `tob_updated`, so an approved trade arriving while `trade_tready` is
+low is lost. Since the L1 fix, `trade_tready` is low both while the TX Generator
+is serialising a frame **and** while the TX CDC FIFO cannot hold another one, so
+the generator paces itself to the wire and the excess is dropped here.
 
 This is a real ceiling rather than a bug to paper over — see L2 for why the
 binding constraint is actually the rate limiter. Losses are counted by
 `order_drop_count` at the top level so they are observable rather than silent.
+This is exactly the clean drop L1's fix relies on: pressure stops at this lossy
+boundary and never reaches the cut-through ingress path.
 
 **Pinned by** `commontrader_crv_tb`, check **C2**, which asserts the drop path is
 actually exercised (3–6 drops per run).
