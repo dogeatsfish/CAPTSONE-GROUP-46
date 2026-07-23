@@ -117,7 +117,7 @@ module commontrader_crv_tb
   logic        rgmii_tx_clk;
   logic [3:0]  rgmii_txd;
   logic        rgmii_tx_ctl;
-  logic        hw_kill_switch;
+  logic        hw_kill_switch_n;   // active-low (board key idles high)
   logic [15:0] order_drop_count;
   logic        tx_fifo_overflow;
   logic        ts_wrapped;
@@ -131,7 +131,7 @@ module commontrader_crv_tb
     .rgmii_tx_clk     (rgmii_tx_clk),
     .rgmii_txd        (rgmii_txd),
     .rgmii_tx_ctl     (rgmii_tx_ctl),
-    .hw_kill_switch   (hw_kill_switch),
+    .hw_kill_switch_n (hw_kill_switch_n),
     .order_drop_count (order_drop_count),
     .tx_fifo_overflow (tx_fifo_overflow),
     .ts_wrapped       (ts_wrapped)
@@ -742,7 +742,7 @@ module commontrader_crv_tb
     sys_rst_n      = 1'b0;
     rgmii_rxd      = 4'h0;
     rgmii_rx_ctl   = 1'b0;
-    hw_kill_switch = 1'b0;
+    hw_kill_switch_n = 1'b1;   // active-low: idle high = kill NOT asserted
     n_live         = 0;
     next_ref       = 1;
 

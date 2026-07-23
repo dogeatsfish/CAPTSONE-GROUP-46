@@ -41,7 +41,17 @@ module commontrader_top
   output logic       rgmii_tx_ctl,
 
   // --- Physical kill switch (FS-10) -----------------------------------------
-  input  logic       hw_kill_switch,
+  // ACTIVE-LOW at the pin: the AX7A200B user keys idle HIGH (pull-up) and pull
+  // LOW when pressed, so pressing the key asserts the kill. Inverted to the
+  // internal active-high convention below. (_n suffix = active-low, matching
+  // sys_rst_n / core_rst_n / phy_rst_n.)  [FIX: board-polarity mismatch]
+  input  logic       hw_kill_switch_n,
+
+  // --- Ethernet PHY hardware reset (active-low, to JL2121 on the board) ------
+  // The PHY holds its RGMII RX clock in reset until this is released, and that
+  // RX clock is the ONLY clock in the design (the MMCM derives core_clk from
+  // it). See the driver + rationale near clk_rst_gen.  [FIX: was missing]
+  output logic       eth_phy_rst_n,
 
   // --- Telemetry / status (ILA or status register; not board pins) ----------
   output logic [15:0] order_drop_count,   // orders lost to a busy TX Generator
@@ -65,6 +75,21 @@ module commontrader_top
   );
 
   //--------------------------------------------------------------------------
+  // Ethernet PHY hardware reset (active-low), driven from the async board reset.
+  //
+  // The PHY must come out of reset before it drives the 125 MHz RGMII RX clock,
+  // and that clock is the ONLY clock in the whole design (the MMCM in
+  // clk_rst_gen makes core_clk from it). There is therefore NO on-chip clock
+  // available to sequence a timed reset pulse -- so the PHY is simply held in
+  // reset while the board reset is asserted and released otherwise, relying on
+  // the PHY's own power-on reset at power-up. A robust timed power-on reset
+  // would need an independent free-running board oscillator (the 200 MHz
+  // crystal on R4/T4, via IBUFGDS + a counter); deferred, this is enough for
+  // bring-up. WITHOUT this the PHY never leaves reset and the board looks dead.
+  //--------------------------------------------------------------------------
+  assign eth_phy_rst_n = sys_rst_n;
+
+  //--------------------------------------------------------------------------
   // Shared free-running timestamp counter (FS-12)
   //--------------------------------------------------------------------------
   logic [TIMESTAMP_W-1:0] timestamp_now;
@@ -85,8 +110,11 @@ module commontrader_top
   // core domain. Slow-to-fast, so a plain 2-flop level synchroniser captures any
   // pulse at least one source cycle wide.
   //
-  // hw_kill_switch is a physical input with no clock at all and MUST be
-  // synchronised before it reaches logic.
+  // hw_kill_switch_n is a physical input with no clock at all and MUST be
+  // synchronised before it reaches logic. It is ACTIVE-LOW at the pin (the board
+  // key idles high), so it is inverted here into the internal ACTIVE-HIGH kill
+  // convention the Risk Gateway expects. [FIX: previously fed straight through,
+  // which left the kill permanently asserted with the board's idle-high key.]
   //--------------------------------------------------------------------------
   logic rx_error;                       // PHY domain, from RX MAC
   logic rx_error_meta, rx_error_sync;   // core domain
@@ -101,7 +129,7 @@ module commontrader_top
     end else begin
       rx_error_meta <= rx_error;
       rx_error_sync <= rx_error_meta;
-      kill_meta     <= hw_kill_switch;
+      kill_meta     <= ~hw_kill_switch_n;   // active-low pin -> active-high kill
       kill_sync     <= kill_meta;
     end
   end
