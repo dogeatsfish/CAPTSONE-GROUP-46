@@ -189,6 +189,11 @@ module rx_mac_core
       DROP_FCS: begin
         next = IDLE; 
       end
+
+      // Illegal/unused state encodings recover to IDLE. Also makes the case
+      // fully specified so 'next' is always assigned -> no inferred latch
+      // (fixes Vivado INFER-1 / INFER-2 on this decoder).
+      default: next = IDLE;
     endcase
   end
 
