@@ -14,18 +14,20 @@ OrderBook::OrderBook() {
 // ---------------------------------------------------------
 // Public Methods
 // ---------------------------------------------------------
-void OrderBook::process_add(Order& aggressive_order, uint64_t timestamp_ns) {
+FillReport OrderBook::process_add(Order& aggressive_order, uint64_t timestamp_ns) {
+    FillReport report;
     if (aggressive_order.side == 'B') {
-        match(aggressive_order, asks, true, timestamp_ns);
+        report = match(aggressive_order, asks, true, timestamp_ns);
         if (aggressive_order.size > 0) {
             insert_order(aggressive_order, bids, true);
         }
     } else {
-        match(aggressive_order, bids, false, timestamp_ns);
+        report = match(aggressive_order, bids, false, timestamp_ns);
         if (aggressive_order.size > 0) {
             insert_order(aggressive_order, asks, false);
         }
     }
+    return report;
 }
 
 void OrderBook::process_cancel(uint64_t order_id, char side) {
@@ -48,7 +50,10 @@ L1State OrderBook::get_l1_state() const {
 // ---------------------------------------------------------
 // Private Helper Methods
 // ---------------------------------------------------------
-void OrderBook::match(Order& aggressive_order, std::vector<Order>& passive_book, bool is_bid, uint64_t timestamp_ns) {
+FillReport OrderBook::match(Order& aggressive_order, std::vector<Order>& passive_book, bool is_bid, uint64_t timestamp_ns) {
+    FillReport report;
+    double notional = 0.0; // sum of price * size across all fills
+
     while (!passive_book.empty() && aggressive_order.size > 0) {
         auto& best_passive = passive_book.front();
 
@@ -69,10 +74,20 @@ void OrderBook::match(Order& aggressive_order, std::vector<Order>& passive_book,
             aggressive_order.order_id
         });
 
+        // Accumulate execution telemetry
+        report.filled_size += trade_size;
+        notional += trade_size * best_passive.price;
+
         if (best_passive.size == 0) {
             passive_book.erase(passive_book.begin()); // Pop front
         }
     }
+
+    // Volume-weighted average execution price for this aggressive order
+    if (report.filled_size > 0.0) {
+        report.avg_fill_price = notional / report.filled_size;
+    }
+    return report;
 }
 
 void OrderBook::insert_order(const Order& order, std::vector<Order>& book, bool descending) {
