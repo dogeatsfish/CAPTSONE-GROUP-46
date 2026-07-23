@@ -132,11 +132,13 @@ limiter throttles long before the TX Generator becomes the constraint. The drops
 that *are* observed come from ordinary traffic where two orders happen to land
 inside one serialisation window.
 
-### Open question for the Risk Gateway's owner
+### Resolved: 1 token/ms is intended
 
-Whether 1 token/ms is intended. If the intent was "16 orders per millisecond",
-the refill needs to add `RATE_TOKENS` per period, or `RATE_PERIOD` should be
-`250_000/16`. Not changed here — this is a policy decision, not a bug fix.
+The Detailed Design Report confirms it: the FastAPI/logging subsystem is sized
+for **exactly 1000 orders/s** (4000 audit records/s), so the token bucket (1
+token per 1 ms = 1000/s sustained) is a deliberate design point, not an
+oversight. No change needed. Anyone quoting the ~1.09 M/s wire ceiling as the
+system's order rate is still wrong — the binding limit is this rate limiter.
 
 ---
 
