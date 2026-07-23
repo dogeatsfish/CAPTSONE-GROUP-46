@@ -22,3 +22,9 @@ struct L1State {
     double best_bid = 0.0;
     double best_ask = 0.0;
 };
+
+// Summary of what actually executed when an aggressive order hit the book.
+struct FillReport {
+    double filled_size = 0.0;     // total volume that executed against the book
+    double avg_fill_price = 0.0;  // volume-weighted average execution price
+};
