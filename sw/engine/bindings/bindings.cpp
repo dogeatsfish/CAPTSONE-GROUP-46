@@ -49,7 +49,7 @@ PYBIND11_MODULE(engine_sim, m) {
         .def_readonly("trades", &SimulationResult::trades)
         .def_readonly("pnl_curve", &SimulationResult::pnl_curve)
         .def_readonly("total_trades", &SimulationResult::total_trades)
-        .def_readonly("compute_time_ms", &SimulationResult::compute_time_ms);
+        .def_readonly("compute_time_us", &SimulationResult::compute_time_us);
 
     py::class_<OfflineSimulation>(m, "OfflineSimulation")
         .def(py::init<const std::string&>(), py::arg("file_path"),

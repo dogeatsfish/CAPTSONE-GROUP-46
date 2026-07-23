@@ -24,7 +24,8 @@ int main(int argc, char* argv[]) {
 
     // 5. Report summary stats (the hot loop itself does no I/O)
     std::cout << "\n=== Simulation Complete ===\n";
-    std::cout << "Execution time:    " << result.compute_time_ms << " ms\n";
+    std::cout << "Execution time:    " << result.compute_time_us << " us ("
+              << (result.compute_time_us / 1000.0) << " ms)\n";
     std::cout << "Total trades:      " << result.total_trades << "\n";
     std::cout << "PnL samples:       " << result.pnl_curve.size() << "\n";
     if (!result.pnl_curve.empty()) {

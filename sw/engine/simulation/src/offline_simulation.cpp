@@ -97,8 +97,8 @@ SimulationResult OfflineSimulation::run() {
     std::fclose(fp);
 
     auto end_sim_time = std::chrono::high_resolution_clock::now();
-    result.compute_time_ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(end_sim_time - start_sim_time).count();
+    result.compute_time_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(end_sim_time - start_sim_time).count();
     result.total_trades = result.trades.size();
 
     return result;

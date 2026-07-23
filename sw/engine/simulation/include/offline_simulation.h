@@ -54,7 +54,7 @@ struct SimulationResult {
 
     // Summary stats
     uint64_t total_trades   = 0;
-    int64_t  compute_time_ms = 0;
+    int64_t  compute_time_us = 0; // microseconds
 };
 
 class OfflineSimulation {
