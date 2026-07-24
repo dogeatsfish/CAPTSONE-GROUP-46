@@ -15,6 +15,7 @@ vivado/*.gen/
 vivado/*.hw/
 vivado/*.ip_user_files/
 vivado/*.sim/
+vivado/report_*.txt
 
 # Simulation
 sim/obj*

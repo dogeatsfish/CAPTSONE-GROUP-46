@@ -103,29 +103,42 @@ module clk_rst_gen #(
 
   //--------------------------------------------------------------------------
   // Reset synchronisers: async assert, sync release.
+  //
+  // TIMING: the final flop of each synchroniser drives the async clear/preset
+  // pin of every flop in its domain (core_rst_n reached ~13,600 loads), and the
+  // synchronous RELEASE of that net is timed (recovery). One flop driving the
+  // whole die failed recovery by -3.1 ns on route delay alone. MAX_FANOUT tells
+  // synthesis to replicate the final flop (replicas keep the async-assert pin),
+  // turning one die-spanning net into ~50 short regional ones.
   //--------------------------------------------------------------------------
   logic core_rst_meta, phy_rst_meta;
   logic core_rst_src;
 
+  (* max_fanout = 256 *) logic core_rst_n_q;
+  (* max_fanout = 256 *) logic phy_rst_n_q;
+
   assign core_rst_src = sys_rst_n & mmcm_locked;
+
+  assign core_rst_n = core_rst_n_q;
+  assign phy_rst_n  = phy_rst_n_q;
 
   always_ff @(posedge core_clk or negedge core_rst_src) begin
     if (!core_rst_src) begin
       core_rst_meta <= 1'b0;
-      core_rst_n    <= 1'b0;
+      core_rst_n_q  <= 1'b0;
     end else begin
       core_rst_meta <= 1'b1;
-      core_rst_n    <= core_rst_meta;
+      core_rst_n_q  <= core_rst_meta;
     end
   end
 
   always_ff @(posedge rgmii_rx_clk or negedge sys_rst_n) begin
     if (!sys_rst_n) begin
       phy_rst_meta <= 1'b0;
-      phy_rst_n    <= 1'b0;
+      phy_rst_n_q  <= 1'b0;
     end else begin
       phy_rst_meta <= 1'b1;
-      phy_rst_n    <= phy_rst_meta;
+      phy_rst_n_q  <= phy_rst_meta;
     end
   end
 

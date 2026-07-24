@@ -60,8 +60,13 @@ set_property ASYNC_REG TRUE [get_cells -hierarchical -filter {NAME =~ *wq1_rgray
 set_property ASYNC_REG TRUE [get_cells -hierarchical -filter {NAME =~ *wq2_rgray_reg*}]
 set_property ASYNC_REG TRUE [get_cells -hierarchical -filter {NAME =~ *rq1_wgray_reg*}]
 set_property ASYNC_REG TRUE [get_cells -hierarchical -filter {NAME =~ *rq2_wgray_reg*}]
-set_property ASYNC_REG TRUE [get_cells -hierarchical -filter {NAME =~ *rx_error_meta_reg*}]
-set_property ASYNC_REG TRUE [get_cells -hierarchical -filter {NAME =~ *rx_error_sync_reg*}]
+# -quiet: these two flops are PRUNED by synthesis today -- the Risk Gateway's
+# viol_crc check is stubbed (docs/known_limitations.md L3), so the rx_error
+# synchroniser drives nothing and is optimised away. Without -quiet the empty
+# get_cells makes set_property a Critical Warning (Common 17-55). The constraint
+# must STAY so it re-arms automatically the day viol_crc is wired up.
+set_property -quiet ASYNC_REG TRUE [get_cells -quiet -hierarchical -filter {NAME =~ *rx_error_meta_reg*}]
+set_property -quiet ASYNC_REG TRUE [get_cells -quiet -hierarchical -filter {NAME =~ *rx_error_sync_reg*}]
 set_property ASYNC_REG TRUE [get_cells -hierarchical -filter {NAME =~ *kill_meta_reg*}]
 set_property ASYNC_REG TRUE [get_cells -hierarchical -filter {NAME =~ *kill_sync_reg*}]
 set_property ASYNC_REG TRUE [get_cells -hierarchical -filter {NAME =~ *core_rst_meta_reg*}]

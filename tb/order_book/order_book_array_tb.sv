@@ -14,7 +14,7 @@
 //   T7  delete top bid           -> next level promoted, depth shifts up, strobe
 //   T8  ask side ordering        -> ascending, ToB tracks the lowest ask
 //   T9  per-asset isolation      -> updates on one book never touch another
-//   T10 full-book top insertion  -> 19-cycle worst case, book_busy width bound
+//   T10 full-book top insertion  -> 21-cycle worst case, book_busy width bound
 //   T11 depth read latency       -> data valid exactly one cycle after enable
 //
 // The DUT never back-pressures (s_axis_tready is tied high), so the bench issues
@@ -88,7 +88,9 @@ module order_book_array_tb
   int unsigned tob_upd_count [NUM_ASSETS];
 
   // Guards that the strobe is genuinely a single-cycle pulse, and that
-  // book_busy never exceeds the documented 19-cycle worst case.
+  // book_busy never exceeds the documented 21-cycle worst case
+  // (1 decode + 2 search + NUM_LEVELS shift + 2 commit -- the search and
+  // commit stages were each split in two for 250 MHz timing closure).
   logic [NUM_ASSETS-1:0] prev_upd;
   int unsigned           busy_run;
   int unsigned           busy_max;
@@ -318,8 +320,8 @@ module order_book_array_tb
     send(3, SIDE_BID, 32'd17, 32'd100, MSG_ADD, 16'hD0FF); // insert into FULL book
     expect_tob_bid(3, 32'd17, 32'd100);
     expect_depth(3, SIDE_BID, 1, 32'd16, 32'd100);         // previous top demoted
-    // Documented worst case: 1 decode + 1 search + NUM_LEVELS shift + 1 commit.
-    check_int("book_busy worst-case <= 19 cyc", (busy_max <= (NUM_LEVELS + 3)) ? 1 : 0, 1);
+    // Documented worst case: 1 decode + 2 search + NUM_LEVELS shift + 2 commit.
+    check_int("book_busy worst-case <= 21 cyc", (busy_max <= (NUM_LEVELS + 5)) ? 1 : 0, 1);
     $display("       observed max book_busy run = %0d cycles", busy_max);
 
     //------------------------------------------------------------------ T11
