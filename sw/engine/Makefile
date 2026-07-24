@@ -40,7 +40,7 @@ PY_SUFFIX   := $(shell python3-config --extension-suffix)
 PY_TARGET   := $(PY_MODULE)$(PY_SUFFIX)
 PY_SRCS     := bindings/bindings.cpp $(CORE_SRCS)
 
-.PHONY: all run pymodule clean
+.PHONY: all run pymodule stress-book stress-sim clean
 
 all: $(TARGET)
 
@@ -56,5 +56,23 @@ $(PY_TARGET): $(PY_SRCS)
 	$(CXX) $(CXXFLAGS) -shared -fPIC -undefined dynamic_lookup \
 		$(INCLUDES) $(PY_INCLUDES) $(PY_SRCS) -o $(PY_TARGET)
 
+# ---------------------------------------------------------
+# Stress / correctness tests
+# ---------------------------------------------------------
+# C++ OrderBook stress + correctness harness.
+STRESS_BOOK_BIN  := tests/stress_orderbook
+STRESS_BOOK_SRCS := tests/stress_orderbook.cpp match/src/orderbook.cpp
+
+# Python interpreter used to run the simulation stress test (must be able to
+# import the built engine_sim*.so). Override with PY=... if needed.
+PY ?= ../service/.venv/bin/python
+
+stress-book: $(STRESS_BOOK_SRCS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(STRESS_BOOK_SRCS) -o $(STRESS_BOOK_BIN)
+	./$(STRESS_BOOK_BIN)
+
+stress-sim: pymodule
+	$(PY) tests/stress_simulation.py
+
 clean:
-	rm -f $(TARGET) $(PY_MODULE)*.so
+	rm -f $(TARGET) $(PY_MODULE)*.so $(STRESS_BOOK_BIN)

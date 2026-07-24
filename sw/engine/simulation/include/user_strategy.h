@@ -28,4 +28,8 @@ private:
     double position_size;    // signed: positive = long, negative = short
     double avg_entry_price;  // weighted-average cost of the open position
     double realized_pnl;     // cumulative realized PnL
+    bool   have_last_l1;     // false until the first two-sided quote is seen
+    double last_bid;
+    double last_ask;
+    double last_spread;
 };
