@@ -49,16 +49,16 @@ module pre_trade_risk_gateway
   // Six parallel risk checks.
   // Convention: each flag is asserted HIGH ON VIOLATION.
   //--------------------------------------------------------------------------
-  logic [2:0] viol_max_qty;      // combinational: quantity > MAX_QTY 
-  logic viol_max_value;         // 2 cycle (DSP):  price * quantity > MAX_ORDER_VAL 
+  logic [3:0] viol_max_qty;      // combinational: quantity > MAX_QTY 
+  logic viol_max_value;         // 3 cycle (DSP):  price * quantity > MAX_ORDER_VAL 
   logic viol_blacklist[0:1];    // 1 cycle (BRAM): ticker is restricted
-  logic [2:0] viol_rate_limit;        // combinational: token bucket empty
+  logic [3:0] viol_rate_limit;        // combinational: token bucket empty
   logic viol_kill_switch;       // combinational: hw_kill_switch asserted 
   logic viol_crc[0:1];          // combinational: rx_error asserted
 
-  logic [2:0] tvalid;            // data-pipeline valid shift reg, declared here
+  logic [3:0] tvalid;            // data-pipeline valid shift reg, declared here
                                   // (ahead of Data_Pipeline below) since the
-                                  // rate limiter's refund_pulse reads tvalid[2]
+                                  // rate limiter's refund_pulse reads tvalid[3]
 
   // TODO: Blacklist      -- hash trade_in.ticker into a BRAM address; the BRAM
   //                         is preloaded at bitstream generation from a .coe.
@@ -78,6 +78,8 @@ module pre_trade_risk_gateway
       viol_max_qty[1] <= viol_max_qty[0];
       // Cycle 2
       viol_max_qty[2] <= viol_max_qty[1]; 
+      // Cycle 3
+      viol_max_qty[3] <= viol_max_qty[2]; 
     end
   end
 
@@ -90,8 +92,8 @@ module pre_trade_risk_gateway
   logic non_rate_limit_violation;  
   
   // Refund a token on egress if trade is rejected
-  assign non_rate_limit_violation = viol_max_qty[2] | viol_max_value | viol_kill_switch;
-  assign refund_pulse = tvalid[2] & non_rate_limit_violation & ~viol_rate_limit[2];
+  assign non_rate_limit_violation = viol_max_qty[3] | viol_max_value | viol_kill_switch;
+  assign refund_pulse = tvalid[3] & non_rate_limit_violation & ~viol_rate_limit[3];
   
   // Handle refill and refund collision
   logic [1:0] tokens_to_add;
@@ -155,6 +157,7 @@ module pre_trade_risk_gateway
                                                   : 1'b0;
         viol_rate_limit[1] <= viol_rate_limit[0]; 
         viol_rate_limit[2] <= viol_rate_limit[1]; 
+        viol_rate_limit[3] <= viol_rate_limit[2]; 
       end
     end
 
@@ -179,46 +182,25 @@ module pre_trade_risk_gateway
   // (reject everything) cannot produce a null slice.
   localparam int MOV_BITS = (MAX_ORDER_VAL <= 0) ? 1 : $clog2(MAX_ORDER_VAL + 1);
 
-  (* use_dsp = "yes" *) logic [31:0] price_s1;
-  (* use_dsp = "yes" *) logic [31:0] quantity_s1;
-  (* use_dsp = "yes" *) logic [63:0] product_s2;
+  logic [31:0] price_s1;
+  logic [31:0] quantity_s1;
+  logic [63:0] product [1:3];
 
-  // SYNCHRONOUS reset (DRC DPOR-1 / DPOP / DPIP): the DSP48 registers only have
-  // SYNCHRONOUS reset, so an async reset on the multiply pipeline blocks DSP
-  // register merge (MREG/PREG) -- the source of the DPOR/DPOP/DPIP violations.
-  //
-  // TIMING (run 5, -2.190 ns WNS): viol_max_value is now REGISTERED off
-  // product_s2 rather than a COMBINATIONAL compare off a product_s3 delay reg.
-  // The old form chained a 64-bit magnitude compare (product_s3 > MAX_ORDER_VAL,
-  // ~9 CARRY4) straight into the token-bucket saturating arithmetic in ONE cycle
-  // (17 logic levels). Registering the compare gives it its own cycle and leaves
-  // the token bucket reading a single flag. Latency/alignment are UNCHANGED:
-  // product_s2 is valid the cycle before viol_max_value exactly as product_s3
-  // was, so viol_max_value still lands aligned with viol_max_qty[2]/tvalid[2].
+  always_ff @(posedge clk_250mhz) begin: Max_Value_Pipeline
+    price_s1    <= trade_in.price;
+    quantity_s1 <= trade_in.quantity;
+      
+    product[1] <= price_s1 * quantity_s1;
+    product[2] <= product[1];
+    product[3] <= product[2];
+  end
+
   always_ff @(posedge clk_250mhz) begin: Max_Value
     if (~rst_n) begin
-      price_s1       <= '0;
-      quantity_s1    <= '0;
-      product_s2     <= '0;
       viol_max_value <= 1'b0;
     end else begin
-      if (s_axis_order_tvalid) begin
-        price_s1    <= trade_in.price;
-        quantity_s1 <= trade_in.quantity;
-      end
-      product_s2 <= price_s1 * quantity_s1;
-      // TIMING (ROUND 9 -> 13): comparing the full 64-bit product against
-      // MAX_ORDER_VAL synthesises to a ~12-deep CARRY4 ripple -- logic-bound, so
-      // phys-opt cannot help it. Round 9 split off the upper 32 bits, but that
-      // still left a 32-bit compare (11 CARRY4 measured in run 13). The cap only
-      // occupies MOV_BITS bits (20 for the 1e6 default), so the split point is
-      // derived from the parameter instead: ANY set bit at or above MOV_BITS
-      // already exceeds the cap, because 2**MOV_BITS > MAX_ORDER_VAL by
-      // construction. What remains is a cheap OR-reduce of the high bits in
-      // PARALLEL with a MOV_BITS-wide compare (~5 CARRY4 for the default).
-      // Bit-identical for unsigned operands.
-      viol_max_value <= (|product_s2[63:MOV_BITS])
-                        || (product_s2[MOV_BITS-1:0] > MOV_BITS'(MAX_ORDER_VAL));
+      viol_max_value <= (|product[3][63:MOV_BITS])
+                       || (product[3][MOV_BITS-1:0] > MOV_BITS'(MAX_ORDER_VAL));
     end
   end
 
@@ -234,22 +216,24 @@ module pre_trade_risk_gateway
     end
   end
 
-  trade_t trade [0:2];
-  logic   [2:0] tuser;
+  trade_t trade [0:3];
+  logic   [3:0] tuser;
 
   always_ff @(posedge clk_250mhz) begin: Data_Pipeline
     if (~rst_n) begin
       trade[0]  <= '0;
       trade[1]  <= '0;
       trade[2]  <= '0;
+      trade[3]  <= '0;
       tuser  <= '0;
       tvalid <= '0;
     end else begin
-      tuser   <= {tuser[1:0], s_axis_order_tuser};
-      tvalid  <= {tvalid[1:0], s_axis_order_tvalid};  
+      tuser   <= {tuser[2:0], s_axis_order_tuser};
+      tvalid  <= {tvalid[2:0], s_axis_order_tvalid};  
       trade[0] <= trade_in;
       trade[1] <= trade[0];
       trade[2] <= trade[1]; 
+      trade[3] <= trade[2]; 
     end
   end
 
@@ -260,7 +244,7 @@ module pre_trade_risk_gateway
 logic [5:0] violations;
 logic violation;
 
-assign violations = {viol_max_qty[2], viol_max_value, viol_rate_limit[2], viol_kill_switch, 1'b0, 1'b0/*, viol_crc[2], viol_blacklist[1]*/};
+assign violations = {viol_max_qty[3], viol_max_value, viol_rate_limit[3], viol_kill_switch, 1'b0, 1'b0/*, viol_crc[3], viol_blacklist[2]*/};
 assign violation = |violations; 
 
 always_ff @(posedge clk_250mhz) begin
@@ -269,7 +253,7 @@ always_ff @(posedge clk_250mhz) begin
     m_axis_tx_tdata  <= '0; 
     m_axis_tx_tuser  <= 0; 
   end else begin
-    if (tvalid[2]) begin
+    if (tvalid[3]) begin
       if (violation) begin
         m_axis_tx_tvalid <= 0;
         m_axis_tx_tdata  <= '0;
@@ -277,8 +261,8 @@ always_ff @(posedge clk_250mhz) begin
       end else begin
         // Approved Trade
         m_axis_tx_tvalid <= 1;
-        m_axis_tx_tdata  <= trade[2];
-        m_axis_tx_tuser  <= tuser[2];
+        m_axis_tx_tdata  <= trade[3];
+        m_axis_tx_tuser  <= tuser[3];
       end
     end else begin
       m_axis_tx_tvalid <= 0;
