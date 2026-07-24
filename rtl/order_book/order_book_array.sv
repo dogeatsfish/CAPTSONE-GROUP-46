@@ -16,9 +16,38 @@
 // forwarded toward the TX Generator for latency telemetry (FS-12).
 //
 // Worst-case update (top-of-book insertion into a full book):
-//   1 (decode) + 1 (search) + NUM_LEVELS (shift) + 1 (commit) = 19 cycles
+//   1 (decode) + 2 (search) + NUM_LEVELS (shift) + 2 (commit) = 21 cycles
 // versus 168 cycles of minimum packet inter-arrival, so s_axis_tready never
 // needs to de-assert.
+//
+// TIMING PIPELINE (250 MHz closure -- see docs/timing_closure.md)
+//   The first synthesis run failed timing by -6.7 ns: SEARCH resolved the
+//   asset/side mux + 16 parallel 32-bit comparators + a serial 16-level
+//   priority cascade in ONE cycle, and WRITE_COMMIT read a variable-indexed
+//   level, aggregated, and gated the ToB registers' clock-enable through a
+//   64-bit compare in ONE cycle (19 logic levels end to end). Both are now
+//   split in two:
+//     SEARCH  -> SEARCH_CMP (register per-level match/insert bits)
+//              + SEARCH_ENC (priority-encode the registered bits)
+//     COMMIT  -> WRITE_COMMIT (write level, register the ToB candidate)
+//              + TOB_COMMIT  (compare candidate vs ToB, commit atomically)
+//   Each stage is now a shallow cone; the cost is +2 cycles on an update,
+//   absorbed trivially by the 168-cycle budget.
+//
+//   ROUND 3 -- LOCAL WORKING SLICE ("load-modify-store"). Splitting the cones
+//   was not enough: the book is NUM_ASSETS x 2 x NUM_LEVELS registers scattered
+//   across the die, so ANY cone that muxed book[tgt_asset][tgt_side][*] and the
+//   high-fanout control nets (tgt_asset fo=452, hit_idx fo=162) that steer it
+//   were route-bound (78-90% route), not logic-bound -- pipelining logic depth
+//   could not help. Fix: the transaction now copies the active slice into a
+//   compact local array `sel[NUM_LEVELS]` in LOAD, does ALL search/shift/
+//   compare/write on `sel` (which the placer keeps together -> short routes),
+//   and writes `sel` back to the book in STORE. The only die-spanning steps are
+//   the LOAD mux and the STORE demux -- both shallow (mux/CE, no arithmetic).
+//   hit_idx/shift_idx now address only the 16-entry `sel`, so their fanout and
+//   the max_fanout replicas (and the async-reset artifacts those produced) are
+//   gone. State count and every cycle latency are UNCHANGED (LOAD replaces
+//   DECODE, STORE replaces TOB_COMMIT), so the verification timing is identical.
 //
 // FS-6 (real-time database, zero-wait), FS-7 (feeds Alpha Engine)
 //==============================================================================
@@ -75,19 +104,36 @@ module order_book_array
   logic [TIMESTAMP_W-1:0] tob_ts  [NUM_ASSETS];
 
   //--------------------------------------------------------------------------
-  // Latched update fields (captured on accept, held for the whole transaction)
+  // Local working slice (TIMING -- see the ROUND 3 note in the header).
+  //
+  // A transaction copies book[tgt_asset][tgt_side][*] into `sel` in LOAD and
+  // operates exclusively on `sel` thereafter; STORE writes it back. `sel` is a
+  // fixed 16-entry array the placer keeps together, so the comparators, the
+  // shift, and the ToB compare read/write LOCAL flops instead of the book
+  // registers scattered across the die. This is what turns the route-bound
+  // (78-90% route) search/shift cones into short local ones.
   //--------------------------------------------------------------------------
-  logic [ASSET_IDX_W-1:0] tgt_asset;
-  logic                   tgt_side;
+  level_t sel [NUM_LEVELS];
+
+  //--------------------------------------------------------------------------
+  // Latched update fields (captured on accept, held for the whole transaction)
+  //
+  // MAX_FANOUT (TIMING): tgt_asset/tgt_side still steer the book slice mux in
+  // LOAD and the write-enable decode in STORE (~10k flops), so they remain
+  // high-fanout and are replicated into regional copies. hit_idx/shift_idx now
+  // address only the 16-entry `sel`, so they no longer need replication.
+  //--------------------------------------------------------------------------
+  (* max_fanout = 512 *) logic [ASSET_IDX_W-1:0] tgt_asset;
+  (* max_fanout = 512 *) logic                   tgt_side;
   logic [PRICE_W-1:0]     tgt_price;
   logic [QTY_W-1:0]       tgt_qty;
   msg_type_e              tgt_type;
   logic [TIMESTAMP_W-1:0] tgt_ts;
 
   //--------------------------------------------------------------------------
-  // Search results (registered out of the SEARCH state)
+  // Search results (registered out of the search stages)
   //--------------------------------------------------------------------------
-  logic [LEVEL_IDX_W-1:0] hit_idx;    // level index the update targets
+  logic [LEVEL_IDX_W-1:0] hit_idx;    // level the update targets
   logic                   hit_exact;  // price matches an existing level
   logic                   hit_valid;  // a level was found / insertion point valid
 
@@ -97,27 +143,67 @@ module order_book_array
   logic [LEVEL_IDX_W:0]   shift_idx;  // one extra bit: counts to NUM_LEVELS
 
   //--------------------------------------------------------------------------
+  // Commit pipeline registers (TIMING)
+  //   hit_qty    -- quantity of the exact-match level, pre-read in SHIFT's
+  //                 pass-through cycle so WRITE_COMMIT's aggregate-add starts
+  //                 from a flop rather than a variable-indexed array mux.
+  //   commit_tob -- the ToB candidate, registered in WRITE_COMMIT so the
+  //                 64-bit "did the top change" compare and the ToB registers'
+  //                 clock-enables live in their own cycle (STORE).
+  //--------------------------------------------------------------------------
+  logic [QTY_W-1:0] hit_qty;
+  level_t           commit_tob;
+
+  //--------------------------------------------------------------------------
   // FSM
   //--------------------------------------------------------------------------
   typedef enum logic [2:0] {
     IDLE,
-    DECODE,
-    SEARCH,
+    LOAD,           // copy the active book slice into `sel`, mark book busy
+    SEARCH_CMP,     // stage 1: register the per-level comparator results
+    SEARCH_ENC,     // stage 2: priority-encode the registered results
     SHIFT,
-    WRITE_COMMIT
+    WRITE_COMMIT,   // write the level into `sel`, register the ToB candidate
+    STORE           // write `sel` back to the book, commit ToB atomically
   } book_state_e;
 
-  book_state_e state;
+  (* max_fanout = 512 *) book_state_e state;
 
   //--------------------------------------------------------------------------
-  // SEARCH: parallel comparator bank.
+  // SEARCH stage 1 (SEARCH_CMP): parallel comparator bank.
   //
-  // Scans all NUM_LEVELS of the target side in one cycle and reports:
-  //   - the index of an exact price match (modify / decrement in place), or
-  //   - the index where a new price should be inserted to preserve ordering.
+  // For every level of the target side, compute two bits:
+  //   cmp_exact[l]  -- occupied level whose price matches exactly
+  //   cmp_insert[l] -- empty slot, or a level priced worse than the update
+  // The two are mutually exclusive per level (an exact match can be neither
+  // empty nor worse-priced). Bids are sorted descending, asks ascending, so
+  // the "worse price" comparison flips with the side.
   //
-  // Bids are sorted descending (highest first), asks ascending (lowest first),
-  // so the "better price" comparison flips with the side.
+  // TIMING: the results are REGISTERED here rather than fed straight into the
+  // priority encode -- the comparators alone are a full cycle at 250 MHz.
+  // Chaining the 16-level priority cascade behind them was the original -6.7 ns
+  // critical path. The operands are now the LOCAL `sel` slice (loaded in LOAD),
+  // not the die-spanning book -- that removed the -3.1 ns route-bound residue.
+  //--------------------------------------------------------------------------
+  logic [NUM_LEVELS-1:0] cmp_exact_next, cmp_insert_next;   // combinational
+  logic [NUM_LEVELS-1:0] cmp_exact,      cmp_insert;        // registered
+
+  always_comb begin
+    for (int unsigned l = 0; l < NUM_LEVELS; l++) begin
+      automatic level_t lvl = sel[l];
+
+      cmp_exact_next[l]  = (lvl.quantity != '0) && (lvl.price == tgt_price);
+      cmp_insert_next[l] = (lvl.quantity == '0) ||
+                           (tgt_side == SIDE_BID ? tgt_price > lvl.price
+                                                 : tgt_price < lvl.price);
+    end
+  end
+
+  //--------------------------------------------------------------------------
+  // SEARCH stage 2 (SEARCH_ENC): priority encode over the REGISTERED bits.
+  // First level (lowest index = best price) that matches or accepts an insert
+  // wins -- identical semantics to the original serial scan, but the encode now
+  // starts from flops instead of the far end of 16 comparators.
   //--------------------------------------------------------------------------
   logic [LEVEL_IDX_W-1:0] srch_idx;
   logic                   srch_exact;
@@ -129,21 +215,9 @@ module order_book_array
     srch_valid = 1'b0;
 
     for (int unsigned l = 0; l < NUM_LEVELS; l++) begin
-      automatic level_t lvl = book[tgt_asset][tgt_side][l];
-
-      // Exact price match on an occupied level -> modify in place.
-      if (!srch_valid && lvl.quantity != '0 && lvl.price == tgt_price) begin
+      if (!srch_valid && (cmp_exact[l] || cmp_insert[l])) begin
         srch_idx   = LEVEL_IDX_W'(l);
-        srch_exact = 1'b1;
-        srch_valid = 1'b1;
-      end
-      // Empty slot, or a level whose price is worse than ours -> insert here.
-      else if (!srch_valid &&
-               (lvl.quantity == '0 ||
-                (tgt_side == SIDE_BID ? tgt_price > lvl.price
-                                      : tgt_price < lvl.price))) begin
-        srch_idx   = LEVEL_IDX_W'(l);
-        srch_exact = 1'b0;
+        srch_exact = cmp_exact[l];
         srch_valid = 1'b1;
       end
     end
@@ -172,6 +246,18 @@ module order_book_array
       book_busy   <= '0;
       tob_updated <= '0;
       shift_idx   <= '0;
+
+      // Reset the transaction control registers too. Functionally they are
+      // don't-care until loaded, but giving them a reset makes synthesis infer
+      // plain resettable flops (FDCE) rather than no-reset flops it is free to
+      // implement with logic-driven async set/reset -- the round-2 max_fanout
+      // build produced exactly those (self-preset FDPE on hit_idx/tgt_asset),
+      // which then failed recovery. Clean async-clear-from-core_rst_n only.
+      tgt_asset <= '0;
+      tgt_side  <= '0;
+      hit_idx   <= '0;
+      hit_exact <= 1'b0;
+      hit_valid <= 1'b0;
 
       for (int unsigned a = 0; a < NUM_ASSETS; a++) begin
         tob_ts[a] <= '0;
@@ -204,22 +290,37 @@ module order_book_array
             tgt_qty   <= upd.quantity;
             tgt_type  <= upd.msg_type;
             tgt_ts    <= upd.timestamp;
-            state     <= DECODE;
+            state     <= LOAD;
           end
         end
 
         //--------------------------------------------------------------------
-        // Select the target book and mark it busy for the duration.
+        // LOAD: copy the target book slice into the local working array `sel`
+        // and mark the book busy. This is the one die-spanning read of the
+        // transaction (a mux per level, no arithmetic behind it); everything
+        // downstream operates on `sel` (TIMING -- see the ROUND 3 header note).
         //--------------------------------------------------------------------
-        DECODE: begin
+        LOAD: begin
+          for (int unsigned l = 0; l < NUM_LEVELS; l++) begin
+            sel[l] <= book[tgt_asset][tgt_side][l];
+          end
           book_busy[tgt_asset] <= 1'b1;
-          state                <= SEARCH;
+          state                <= SEARCH_CMP;
         end
 
         //--------------------------------------------------------------------
-        // Register the parallel comparator result.
+        // Register the per-level comparator results (search stage 1).
         //--------------------------------------------------------------------
-        SEARCH: begin
+        SEARCH_CMP: begin
+          cmp_exact  <= cmp_exact_next;
+          cmp_insert <= cmp_insert_next;
+          state      <= SEARCH_ENC;
+        end
+
+        //--------------------------------------------------------------------
+        // Priority-encode the registered results (search stage 2).
+        //--------------------------------------------------------------------
+        SEARCH_ENC: begin
           hit_idx   <= srch_idx;
           hit_exact <= srch_exact;
           hit_valid <= srch_valid;
@@ -246,19 +347,23 @@ module order_book_array
           automatic logic [LEVEL_IDX_W:0] dst_i;
 
           if (!needs_shift) begin
-            state <= WRITE_COMMIT;
+            // Pass-through cycle (modify, or add aggregating into an existing
+            // level): pre-read the hit level's quantity into a register so the
+            // aggregate-add in WRITE_COMMIT starts from a flop. `sel` is local,
+            // but keeping the pre-read preserves the exact cycle count.
+            hit_qty <= sel[hit_idx].quantity;
+            state   <= WRITE_COMMIT;
           end else if (is_removal) begin
             // Shift up: dst = hit_idx + shift_idx, src = dst + 1
             dst_i = {1'b0, hit_idx} + shift_idx;
             src_i = dst_i + 1'b1;
 
             if (src_i < (LEVEL_IDX_W+1)'(NUM_LEVELS)) begin
-              book[tgt_asset][tgt_side][dst_i[LEVEL_IDX_W-1:0]] <=
-                book[tgt_asset][tgt_side][src_i[LEVEL_IDX_W-1:0]];
+              sel[dst_i[LEVEL_IDX_W-1:0]] <= sel[src_i[LEVEL_IDX_W-1:0]];
               shift_idx <= shift_idx + 1'b1;
             end else begin
               // Tail slot is now vacant.
-              book[tgt_asset][tgt_side][NUM_LEVELS-1] <= '0;
+              sel[NUM_LEVELS-1] <= '0;
               state <= WRITE_COMMIT;
             end
           end else begin
@@ -268,8 +373,7 @@ module order_book_array
             src_i = dst_i - 1'b1;
 
             if (dst_i > {1'b0, hit_idx}) begin
-              book[tgt_asset][tgt_side][dst_i[LEVEL_IDX_W-1:0]] <=
-                book[tgt_asset][tgt_side][src_i[LEVEL_IDX_W-1:0]];
+              sel[dst_i[LEVEL_IDX_W-1:0]] <= sel[src_i[LEVEL_IDX_W-1:0]];
               shift_idx <= shift_idx + 1'b1;
             end else begin
               state <= WRITE_COMMIT;
@@ -278,14 +382,14 @@ module order_book_array
         end
 
         //--------------------------------------------------------------------
-        // WRITE_COMMIT: write the affected level, then commit the ToB
-        // registers ATOMICALLY in the same cycle. tob_updated pulses only if
-        // the top of book actually changed -- a deep-level update must not
-        // wake the Alpha Engine and burn its FS-7 budget for nothing.
+        // WRITE_COMMIT: write the affected level into the local slice and
+        // REGISTER the ToB candidate. The "did the top change" compare and the
+        // ToB commit moved to STORE so the level-mux/adder and the 64-bit
+        // compare + ToB clock-enables are two shallow cycles instead of one
+        // deep one (TIMING: this was the -6.7 ns critical path).
         //--------------------------------------------------------------------
         WRITE_COMMIT: begin
           automatic level_t new_lvl;
-          automatic level_t new_tob;
 
           new_lvl.price    = tgt_price;
           new_lvl.quantity = tgt_qty;
@@ -293,16 +397,16 @@ module order_book_array
           unique case (tgt_type)
             MSG_ADD: begin
               if (hit_exact) begin
-                // Aggregate into the existing level.
-                new_lvl.quantity = book[tgt_asset][tgt_side][hit_idx].quantity
-                                 + tgt_qty;
+                // Aggregate into the existing level (hit_qty was pre-read into
+                // a register during SHIFT's pass-through cycle).
+                new_lvl.quantity = hit_qty + tgt_qty;
               end
-              book[tgt_asset][tgt_side][hit_idx] <= new_lvl;
+              sel[hit_idx] <= new_lvl;
             end
 
             MSG_MODIFY: begin
               // Quantity-only change at an existing price.
-              book[tgt_asset][tgt_side][hit_idx] <= new_lvl;
+              sel[hit_idx] <= new_lvl;
             end
 
             MSG_DELETE: begin
@@ -313,16 +417,33 @@ module order_book_array
           endcase
 
           // The new top of book is level 0 after this update. For a delete the
-          // shift has already moved the successor into place; for an insert at
-          // index 0 the new level is what we are writing this cycle.
+          // shift has already moved the successor into place (sel[0] is final
+          // by now); for an add/modify at index 0 it is the level being written
+          // this cycle.
           if (tgt_type != MSG_DELETE && hit_idx == '0) begin
-            new_tob = new_lvl;
+            commit_tob <= new_lvl;
           end else begin
-            new_tob = book[tgt_asset][tgt_side][0];
+            commit_tob <= sel[0];
           end
 
-          if (new_tob != tob[tgt_asset][tgt_side]) begin
-            tob[tgt_asset][tgt_side] <= new_tob;
+          state <= STORE;
+        end
+
+        //--------------------------------------------------------------------
+        // STORE: write the (now final) working slice back to the book, and
+        // commit the ToB ATOMICALLY. This is the one die-spanning write of the
+        // transaction (a demux per level -- data from local `sel`, clock-enable
+        // gated by the asset/side match, no arithmetic). tob_updated pulses
+        // only if the top of book actually changed -- a deep-level update must
+        // not wake the Alpha Engine and burn its FS-7 budget for nothing.
+        //--------------------------------------------------------------------
+        STORE: begin
+          for (int unsigned l = 0; l < NUM_LEVELS; l++) begin
+            book[tgt_asset][tgt_side][l] <= sel[l];
+          end
+
+          if (commit_tob != tob[tgt_asset][tgt_side]) begin
+            tob[tgt_asset][tgt_side] <= commit_tob;
             tob_ts[tgt_asset]        <= tgt_ts;
             tob_updated[tgt_asset]   <= 1'b1;
           end
