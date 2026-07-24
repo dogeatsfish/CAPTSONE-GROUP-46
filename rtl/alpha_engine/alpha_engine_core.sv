@@ -24,8 +24,10 @@
 //   cycle 2 : S1 -- mid computed and EMA delta formed (the only stage with two
 //             chained adders); spread pre-terms computed in parallel.
 //   cycle 3 : S2 -- EMA accumulator write-back, spread deltas, signal select.
-//   cycle 4 : S3 -- threshold compare, trade packed, tvalid asserted; spread
-//             accumulator write-back.
+//   cycle 4 : S3 -- trade packed from the S2-registered buy/sell decision,
+//             tvalid asserted; spread accumulator write-back. (ROUND 7: the
+//             threshold compare that used to sit here moved into S2 -- it was
+//             the -1.107 ns path chained ahead of the trade clock-enables.)
 //
 // The original 2-cycle version evaluated select + mux + THREE chained 34-bit
 // adders in a single 4 ns cycle (17 logic levels, -4.7 ns slack at 250 MHz).
@@ -287,7 +289,7 @@ module alpha_engine_core
   //--------------------------------------------------------------------------
   logic                    s2_valid;
   logic [ASSET_IDX_W-1:0]  s2_asset;
-  logic signed [MW-1:0]    s2_sig;                        // strategy-selected signal
+  logic                    s2_do_buy, s2_do_sell;         // registered threshold decision
   logic signed [MW-1:0]    s2_spread_delta, s2_spread_c;
   logic                    s2_is_leg, s2_spread_primed;
   logic [PRICE_W-1:0]      s2_bid_price, s2_ask_price;
@@ -300,9 +302,27 @@ module alpha_engine_core
   assign sp_delta_c = s1_leg_a ? (s1_mid_c - s1_pre_b) : (s1_pre_a - s1_mid_c);
   assign sp_c_c     = s1_leg_a ? (s1_mid_c - s1_mid_b) : (s1_mid_a - s1_mid_c);
 
+  // The strategy-selected signal (formerly registered as s2_sig), computed
+  // combinationally so the threshold compare can be REGISTERED here in S2
+  // (TIMING -- ROUND 7). The compare (sig < -THR / > THR) is a ~4-CARRY4 cone;
+  // leaving it in S3 chained it ahead of the issue/qty LUTs and the trade-
+  // register clock-enables, all in one cycle (the -1.107 ns path). Both operands
+  // feeding s2_sig_next are S1 registers and S2 has slack, so the compare moves
+  // here for free and S3 keeps only the shallow LUT issue/qty logic. The signal
+  // itself no longer needs its own register -- only the decision bits are used
+  // downstream, and they are bit-identical to the old S3 do_buy/do_sell.
+  logic signed [MW-1:0] s2_sig_next;
+  always_comb begin
+    if (STRATEGY_SEL == 0)
+      s2_sig_next = s1_ema_primed ? s1_ema_delta_raw : '0;
+    else
+      s2_sig_next = ((s1_leg_a || s1_leg_b) && s1_spread_primed) ? sp_delta_c : '0;
+  end
+
   always_ff @(posedge core_clk or negedge core_rst_n) begin
     if (!core_rst_n) begin
-      s2_valid <= 1'b0;  s2_asset <= '0;  s2_sig <= '0;
+      s2_valid <= 1'b0;  s2_asset <= '0;
+      s2_do_buy <= 1'b0;  s2_do_sell <= 1'b0;
       s2_spread_delta <= '0;  s2_spread_c <= '0;
       s2_is_leg <= 1'b0;      s2_spread_primed <= 1'b0;
       s2_bid_price <= '0;  s2_ask_price <= '0;
@@ -322,13 +342,11 @@ module alpha_engine_core
           ema_avg[s1_sel] <= s1_ema_avg + (s1_ema_delta_raw >>> EMA_SHIFT);
         end
 
-        //-- Signal select (no signal on a priming sample) --------------------
-        if (STRATEGY_SEL == 0) begin
-          s2_sig <= s1_ema_primed ? s1_ema_delta_raw : '0;
-        end else begin
-          s2_sig <= ((s1_leg_a || s1_leg_b) && s1_spread_primed) ? sp_delta_c
-                                                                 : '0;
-        end
+        //-- REGISTERED threshold decision (S3 was the -1.107 ns path). The
+        //   compare moves off the S3 critical cone into S2; s2_do_buy/s2_do_sell
+        //   equal the old S3 do_buy/do_sell exactly (same value, same cycle).
+        s2_do_buy  <= (s2_sig_next < -THR);
+        s2_do_sell <= (s2_sig_next >  THR);
 
         //-- Spread state toward S3 write-back --------------------------------
         s2_spread_delta  <= sp_delta_c;
@@ -378,8 +396,10 @@ module alpha_engine_core
           end
         end
 
-        do_buy  = (s2_sig < -THR);
-        do_sell = (s2_sig >  THR);
+        // Threshold decision was registered in S2 (TIMING -- ROUND 7); S3 keeps
+        // only the shallow issue/qty LUT logic and the trade write.
+        do_buy  = s2_do_buy;
+        do_sell = s2_do_sell;
 
         avail = do_buy ? s2_ask_qty : s2_bid_qty;
         qty   = (avail < QTY_W'(LOT_SIZE)) ? avail : QTY_W'(LOT_SIZE);

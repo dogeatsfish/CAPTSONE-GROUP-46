@@ -20,6 +20,15 @@
 #==============================================================================
 
 #------------------------------------------------------------------------------
+# Device configuration (DRC CFGBVS-1)
+# Bank 0 (configuration) on the AX7A200B is a 3.3 V rail, so config-bank voltage
+# select follows VCCO. Without these two properties write_bitstream errors on
+# CFGBVS-1. Verify 3.3 V against the board manual's power table before taping out.
+#------------------------------------------------------------------------------
+set_property CFGBVS VCCO        [current_design]
+set_property CONFIG_VOLTAGE 3.3 [current_design]
+
+#------------------------------------------------------------------------------
 # Clock and reset
 #------------------------------------------------------------------------------
 # 125 MHz RGMII receive clock from the PHY (create_clock is in the timing xdc).
@@ -75,6 +84,12 @@ set_property -dict {PACKAGE_PIN L13 IOSTANDARD LVCMOS33} [get_ports tx_fifo_over
 set_property -dict {PACKAGE_PIN M13 IOSTANDARD LVCMOS33} [get_ports ts_wrapped]       ;# LED2
 # order_drop_count[15:0] -> ILA (add the Integrated Logic Analyzer and mark the net
 # for debug). If you must use pins, only 2 LEDs remain (K14, K13).
+#
+# order_drop_count has no board pins (16 bits, only 2 LEDs free -- it is an
+# ILA/status-register signal, see commontrader_top port comment). Give it an
+# IOSTANDARD so it does not trip NSTD-1; the missing-LOC check (UCIO-1) is waived
+# for it in vivado/constraints/bitstream_drc_waivers.xdc. See docs/DRC_fix.md.
+set_property IOSTANDARD LVCMOS33 [get_ports {order_drop_count[*]}]
 
 #==============================================================================
 # RGMII I/O TIMING  --  the PHY is in RGMII-ID mode (Table 3-2-1: TXDLY + RXDLY,
