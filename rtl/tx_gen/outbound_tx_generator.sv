@@ -144,27 +144,45 @@ module outbound_tx_generator
 
   //--------------------------------------------------------------------------
   // IPv4 header checksum: one's-complement sum of the ten 16-bit header words
-  // with the checksum field taken as zero. Most words are constant, so this
-  // folds to (constant + total_length + identification) after synthesis.
+  // with the checksum field zero. Nine words are constant; only Identification
+  // (ip_ident) varies, so the whole checksum is a function of ip_ident alone.
+  //
+  // TIMING (ROUND 5/6, -1.4 ns): the checksum is ~fold(fold(BASE + ip_ident)).
+  // The base add plus the two DEPENDENT carry folds are ~13 CARRY4 -- too deep
+  // for one 250 MHz cycle. Constant-folding the header words did NOT help,
+  // because the depth is the fold CHAIN, not the constant adds. Since ip_ident
+  // changes only once per packet (>=168 cycles apart), the checksum is PRECOMPUTED
+  // continuously in a 2-stage pipeline (ip_csum_raw -> ip_csum_pre) and simply
+  // latched at accept. r_ip_csum is bit-identical -- read from a register instead
+  // of a deep combinational cone. Total Length is the constant PKT_LEN, so it is
+  // baked into BASE too; only Identification is added live.
   //--------------------------------------------------------------------------
-  function automatic logic [15:0] ip_checksum(input logic [15:0] tot_len,
-                                              input logic [15:0] id16);
-    logic [31:0] s;
-    s = 32'h0;
-    s = s + 32'h0000_4500;                 // Version/IHL, DSCP/ECN
-    s = s + {16'h0, tot_len};              // Total Length
-    s = s + {16'h0, id16};                 // Identification
-    s = s + 32'h0000_4000;                 // Flags/Fragment (Don't Fragment)
-    s = s + {16'h0, IP_TTL, IP_PROTO};     // TTL, Protocol   (0x4011)
-    // checksum field == 0 (skipped)
-    s = s + {16'h0, SRC_IP[31:16]};
-    s = s + {16'h0, SRC_IP[15:0]};
-    s = s + {16'h0, DST_IP[31:16]};
-    s = s + {16'h0, DST_IP[15:0]};
-    s = (s & 32'h0000_FFFF) + (s >> 16);   // fold carries
-    s = (s & 32'h0000_FFFF) + (s >> 16);
-    return ~s[15:0];
-  endfunction
+  localparam logic [31:0] IP_CSUM_CONST =
+        32'h0000_4500                     // Version/IHL, DSCP/ECN
+      + 32'h0000_4000                     // Flags/Fragment (Don't Fragment)
+      + {16'h0, IP_TTL, IP_PROTO}         // TTL, Protocol (0x4011)
+      + {16'h0, SRC_IP[31:16]}
+      + {16'h0, SRC_IP[15:0]}
+      + {16'h0, DST_IP[31:16]}
+      + {16'h0, DST_IP[15:0]};            // checksum field == 0 (skipped)
+  localparam logic [31:0] IP_CSUM_BASE = IP_CSUM_CONST + 32'(PKT_LEN); // + Total Length
+
+  logic [17:0] ip_csum_raw;   // stage 1: IP_CSUM_BASE + ip_ident (pre-fold)
+  logic [15:0] ip_csum_pre;   // stage 2: folded + inverted checksum for ip_ident
+
+  always_ff @(posedge core_clk or negedge core_rst_n) begin
+    if (!core_rst_n) begin
+      ip_csum_raw <= 18'd0;
+      ip_csum_pre <= 16'd0;
+    end else begin
+      automatic logic [16:0] fold1;
+      // stage 1: base + identification (single 18-bit add, no carry-out)
+      ip_csum_raw <= IP_CSUM_BASE[17:0] + 18'(ip_ident);
+      // stage 2: fold the two overflow bits back in, then the final carry, invert
+      fold1        = 17'(ip_csum_raw[15:0]) + 17'(ip_csum_raw[17:16]);
+      ip_csum_pre <= ~(fold1[15:0] + 16'(fold1[16]));
+    end
+  end
 
   //--------------------------------------------------------------------------
   // Serialiser FSM
@@ -218,7 +236,7 @@ module outbound_tx_generator
             r_ident   <= ip_ident;
             r_ip_len  <= 16'(PKT_LEN);
             r_udp_len <= 16'(PKT_LEN - IP_HDR_LEN);
-            r_ip_csum <= ip_checksum(16'(PKT_LEN), ip_ident);
+            r_ip_csum <= ip_csum_pre;   // precomputed for the current ip_ident
 
             user_ref_num <= user_ref_num + 32'd1;
             ip_ident     <= ip_ident + 16'd1;

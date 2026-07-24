@@ -16,7 +16,8 @@
 // forwarded toward the TX Generator for latency telemetry (FS-12).
 //
 // Worst-case update (top-of-book insertion into a full book):
-//   1 (decode) + 2 (search) + NUM_LEVELS (shift) + 2 (commit) = 21 cycles
+//   1 (load) + 2 (search) + 1 (shift) + 3 (commit) = 7 cycles  (ROUND 8: the
+//   shift is now a single parallel cycle, was NUM_LEVELS sequential slides)
 // versus 168 cycles of minimum packet inter-arrival, so s_axis_tready never
 // needs to de-assert.
 //
@@ -48,6 +49,32 @@
 //   the max_fanout replicas (and the async-reset artifacts those produced) are
 //   gone. State count and every cycle latency are UNCHANGED (LOAD replaces
 //   DECODE, STORE replaces TOB_COMMIT), so the verification timing is identical.
+//
+//   ROUND 4 -- two residual order-book paths, both now closed:
+//     (a) SETUP (-1.862 ns): STORE evaluated `commit_tob != tob[tgt][side]` --
+//         a 64-bit compare that read the die-spanning ToB cache AND gated the
+//         ToB/timestamp clock-enables in ONE cycle (11 logic levels, 6xCARRY4).
+//         Split off into a new STORE_CMP state: the "did the top change"
+//         decision is now a clean reg->compare->flag cycle over LOCAL flops
+//         (`commit_tob` vs `orig_tob`, the ToB captured at LOAD), and STORE
+//         just does a flag-gated write. +1 cycle (21 -> 22), still << 168.
+//     (b) RECOVERY (-1.086 ns): the ~11k book/tob/tob_ts flops were ASYNC-reset,
+//         so core_rst_n's release was a recovery arc on a 13k-load, 3.6 ns net.
+//         ROUND 4 moved to a synchronous reset; ROUND 6 then found that still
+//         failed SETUP (core_rst_sync -> book_reg/R at -1.78 ns, pure route) --
+//         11k scattered flops are long-route to reach with ANY reset. FINAL:
+//         book/tob/tob_ts carry NO runtime reset and are GSR-initialised at
+//         configuration; only the ~1.3k control/`sel` flops keep the sync reset.
+//         See the storage-declaration note for the behavioural implication.
+//
+//   ROUND 8 -- SINGLE-CYCLE PARALLEL SHIFT (-0.748 ns). Once every other cone
+//   closed, the last WNS was the SHIFT slide: `sel[dst_i] <= sel[src_i]` with
+//   variable indices is a 16:1 read mux over `sel` steered by hit_idx -- 4 logic
+//   levels but 77% route (hit_idx -> sel_reg/D). Replaced by a fixed-neighbour
+//   shift (each level reads sel[k-1]/sel[k+1], gated by k vs hit_idx) done in one
+//   cycle; the placer keeps each lane local so the long mux net is gone. Also
+//   collapses the slide from NUM_LEVELS cycles to 1 (worst-case update 22 -> 7).
+//   Behaviour/final book contents identical (non-blocking reads the old slice).
 //
 // FS-6 (real-time database, zero-wait), FS-7 (feeds Alpha Engine)
 //==============================================================================
@@ -94,14 +121,28 @@ module order_book_array
   //
   // book[asset][side][level] holds the full depth. Level 0 is the best price
   // (highest bid / lowest ask). Levels are kept price-ordered at all times.
+  //
+  // POWER-UP INIT, NO RUNTIME RESET (TIMING -- ROUND 6). The market-data state
+  // (book/tob/tob_ts, ~11k flops) is initialised to zero by the declaration
+  // initialiser, which synthesis maps to the flops' INIT attribute -> the FPGA
+  // global set/reset (GSR) clears them at configuration. It is NOT in the
+  // runtime reset branch below. Reason: whether the reset was async (recovery)
+  // or synchronous (setup, ROUND 4), a reset net reaching ~11k flops SCATTERED
+  // across a 5%-utilised die is inherently long-route -- the round-6 report
+  // showed the replicated sync-reset -> book_reg/R paths failing at -1.78 ns
+  // (0 logic levels, pure route), ~24 of the 30 worst paths. Removing the net
+  // removes the whole class. The control/FSM path IS still reset (below), so on
+  // a runtime core_rst_n the engine restarts cleanly in IDLE; the accumulated
+  // book is simply not wiped (it is rebuilt from the feed). book, tob and tob_ts
+  // are dropped together so the "tob mirrors book[0]" invariant is preserved.
   //--------------------------------------------------------------------------
-  level_t book [NUM_ASSETS][2][NUM_LEVELS];
+  level_t book [NUM_ASSETS][2][NUM_LEVELS] = '{default: '0};
 
-  // Registered top-of-book cache. Mirrors book[asset][side][0], committed
-  // atomically in the same cycle as the BRAM write so the Alpha Engine can
-  // never observe a torn top-of-book.
-  level_t                tob      [NUM_ASSETS][2];
-  logic [TIMESTAMP_W-1:0] tob_ts  [NUM_ASSETS];
+  // Top-of-book cache. Mirrors book[asset][side][0], committed atomically in the
+  // same cycle as the book write so the Alpha Engine never observes a torn top.
+  // GSR-initialised with the book (see the storage note above).
+  level_t                tob      [NUM_ASSETS][2]   = '{default: '0};
+  logic [TIMESTAMP_W-1:0] tob_ts  [NUM_ASSETS]      = '{default: '0};
 
   //--------------------------------------------------------------------------
   // Local working slice (TIMING -- see the ROUND 3 note in the header).
@@ -118,41 +159,69 @@ module order_book_array
   //--------------------------------------------------------------------------
   // Latched update fields (captured on accept, held for the whole transaction)
   //
-  // MAX_FANOUT (TIMING): tgt_asset/tgt_side still steer the book slice mux in
-  // LOAD and the write-enable decode in STORE (~10k flops), so they remain
-  // high-fanout and are replicated into regional copies. hit_idx/shift_idx now
-  // address only the 16-entry `sel`, so they no longer need replication.
+  // MAX_FANOUT (TIMING): tgt_asset/tgt_side steer the book slice mux in LOAD and
+  // the write-enable decode in STORE (~10k flops), so they are replicated into
+  // regional copies. tgt_type steers the sel write-enable decode across the
+  // 16x64 `sel` array (ROUND 4 report: tgt_type -> sel_reg/CE was route-bound),
+  // so it is replicated too.
   //--------------------------------------------------------------------------
   (* max_fanout = 512 *) logic [ASSET_IDX_W-1:0] tgt_asset;
   (* max_fanout = 512 *) logic                   tgt_side;
-  logic [PRICE_W-1:0]     tgt_price;
+  // tgt_price feeds BOTH comparators of EVERY level in SEARCH_CMP
+  // (lvl.price == tgt_price, and tgt_price >/< lvl.price), i.e. ~32 comparator
+  // instances spread across the whole `sel` array. Round 13 showed
+  // tgt_price_reg -> cmp_exact_reg[12]/D as the WNS at 63% route -- the same
+  // high-fanout-control-over-a-spread-array profile that made hit_idx the
+  // -1.48 ns path until it was replicated. Replicated here for the same reason.
+  (* max_fanout = 16 *) logic [PRICE_W-1:0]     tgt_price;
   logic [QTY_W-1:0]       tgt_qty;
-  msg_type_e              tgt_type;
+  (* max_fanout = 32 *) msg_type_e              tgt_type;
   logic [TIMESTAMP_W-1:0] tgt_ts;
 
   //--------------------------------------------------------------------------
   // Search results (registered out of the search stages)
+  //
+  // MAX_FANOUT (TIMING -- ROUND 5): hit_idx steers the WRITE_COMMIT level write
+  // and the per-level shift compares over the 16x64 `sel` array. Round 5 showed
+  // it at fanout 158 (the dominant -1.48 ns order-book failure), so it is
+  // replicated. SAFE only because the module is synchronous-reset (ROUND 4):
+  // the round-2/3 reason for dropping the attribute was the async self-preset
+  // FDPE artifact max_fanout produced on no-reset flops -- FDRE cells have no
+  // async set/reset, so it cannot recur. (ROUND 8 removed the old shift counter
+  // `shift_idx` when the multi-cycle slide became the single-cycle parallel one.)
   //--------------------------------------------------------------------------
-  logic [LEVEL_IDX_W-1:0] hit_idx;    // level the update targets
+  (* max_fanout = 16 *) logic [LEVEL_IDX_W-1:0] hit_idx;    // level the update targets
   logic                   hit_exact;  // price matches an existing level
   logic                   hit_valid;  // a level was found / insertion point valid
 
   //--------------------------------------------------------------------------
-  // Shift bookkeeping
-  //--------------------------------------------------------------------------
-  logic [LEVEL_IDX_W:0]   shift_idx;  // one extra bit: counts to NUM_LEVELS
-
-  //--------------------------------------------------------------------------
   // Commit pipeline registers (TIMING)
-  //   hit_qty    -- quantity of the exact-match level, pre-read in SHIFT's
-  //                 pass-through cycle so WRITE_COMMIT's aggregate-add starts
-  //                 from a flop rather than a variable-indexed array mux.
+  //   agg_qty    -- per-level aggregate (sel[l].quantity + tgt_qty), computed for
+  //                 ALL levels in SEARCH_CMP (ROUND 13). An ADD at an existing
+  //                 price needs sel[hit_idx].quantity + tgt_qty; doing that in
+  //                 WRITE_COMMIT put a 32-bit add (7xCARRY4) IN FRONT of the
+  //                 sel write demux -- 11 logic levels, 56 % logic, one of the
+  //                 last two logic-bound cones. Computing it here instead costs
+  //                 16 adders (free at ~5 % utilisation) but needs no hit_idx,
+  //                 so it is a clean reg->add->reg cycle, and WRITE_COMMIT is
+  //                 left with only a mux. Valid because an exact-price ADD never
+  //                 shifts (needs_shift is false), so sel is unchanged between
+  //                 SEARCH_CMP and WRITE_COMMIT for the case that reads it.
   //   commit_tob -- the ToB candidate, registered in WRITE_COMMIT so the
   //                 64-bit "did the top change" compare and the ToB registers'
-  //                 clock-enables live in their own cycle (STORE).
+  //                 clock-enables live in their own cycle (STORE_CMP -> STORE).
+  //   orig_tob   -- the top-of-book as it stood at LOAD (= book[tgt][side][0],
+  //                 which the ToB cache mirrors), captured BEFORE any shift or
+  //                 write touched `sel`. STORE_CMP compares commit_tob against
+  //                 this LOCAL register instead of muxing the die-spanning ToB
+  //                 cache -- identical result, short routes (ROUND 4).
+  //   tob_changed-- registered "top of book actually changed" decision, so STORE
+  //                 is a flag-gated write with no wide compare in its cone.
   //--------------------------------------------------------------------------
-  logic [QTY_W-1:0] hit_qty;
+  logic [QTY_W-1:0] agg_qty [NUM_LEVELS];
   level_t           commit_tob;
+  level_t           orig_tob;
+  logic             tob_changed;
 
   //--------------------------------------------------------------------------
   // FSM
@@ -164,10 +233,19 @@ module order_book_array
     SEARCH_ENC,     // stage 2: priority-encode the registered results
     SHIFT,
     WRITE_COMMIT,   // write the level into `sel`, register the ToB candidate
+    STORE_CMP,      // decide (and register) whether the top of book changed
     STORE           // write `sel` back to the book, commit ToB atomically
   } book_state_e;
 
-  (* max_fanout = 512 *) book_state_e state;
+  // max_fanout tightened 512 -> 64 (ROUND 13). `state` gates the write-enable of
+  // every book AND `sel` flop, so at 512 each replica still had to physically
+  // reach ~512 loads spread across the array -- run 13 showed
+  // state_reg[0] -> book_reg/CE at 83 % route on a TWO-logic-level path, and
+  // state_reg[2]_rep -> sel_reg/D at 80 % route on ONE level. With the congestion
+  // report clean ("no congestion windows above level 5") and ~90 % of the die
+  // unused, the long routes are pure fanout reach, not detours -- so more, shorter
+  // replicas are both safe and the correct lever.
+  (* max_fanout = 64 *) book_state_e state;
 
   //--------------------------------------------------------------------------
   // SEARCH stage 1 (SEARCH_CMP): parallel comparator bank.
@@ -238,36 +316,52 @@ module order_book_array
   end
 
   //--------------------------------------------------------------------------
+  // Synchronous reset for the CONTROL path only (TIMING -- ROUND 4 / ROUND 6).
+  //
+  // Only the FSM/control registers and the working slice `sel` are reset here
+  // (~1.3k flops). The big market-data arrays (book/tob/tob_ts, ~11k flops) are
+  // GSR-initialised instead and carry no runtime reset -- see the storage note.
+  //
+  // History: ROUND 4 moved the whole module from async to synchronous reset to
+  // kill the -1.086 ns reset-RELEASE recovery arc. That worked, but ROUND 6
+  // showed the ~11k-flop book clear then failed SETUP (replicated core_rst_sync
+  // -> book_reg/R at -1.78 ns, 0 logic levels, pure route): a reset reaching 11k
+  // scattered flops is long-route no matter which kind. GSR init removes that
+  // net entirely; the small control clear that remains routes fine. `core_rst_sync`
+  // is registered/replicated and takes effect one cycle after core_rst_n, which
+  // is immaterial (the block is idle throughout reset).
+  //--------------------------------------------------------------------------
+  (* max_fanout = 256 *) logic core_rst_sync;
+  always_ff @(posedge core_clk) begin
+    core_rst_sync <= ~core_rst_n;
+  end
+
+  //--------------------------------------------------------------------------
   // Main sequential process
   //--------------------------------------------------------------------------
-  always_ff @(posedge core_clk or negedge core_rst_n) begin
-    if (!core_rst_n) begin
+  always_ff @(posedge core_clk) begin
+    if (core_rst_sync) begin
       state       <= IDLE;
       book_busy   <= '0;
       tob_updated <= '0;
-      shift_idx   <= '0;
 
       // Reset the transaction control registers too. Functionally they are
       // don't-care until loaded, but giving them a reset makes synthesis infer
-      // plain resettable flops (FDCE) rather than no-reset flops it is free to
-      // implement with logic-driven async set/reset -- the round-2 max_fanout
-      // build produced exactly those (self-preset FDPE on hit_idx/tgt_asset),
-      // which then failed recovery. Clean async-clear-from-core_rst_n only.
-      tgt_asset <= '0;
-      tgt_side  <= '0;
-      hit_idx   <= '0;
-      hit_exact <= 1'b0;
-      hit_valid <= 1'b0;
+      // plain resettable flops rather than no-reset flops it is free to
+      // implement with logic-driven set/reset. With the synchronous reset
+      // (ROUND 4) these are FDRE, so there are no async set/reset artifacts at
+      // all -- the round-2 self-preset FDPE recovery arcs cannot recur.
+      tgt_asset   <= '0;
+      tgt_side    <= '0;
+      hit_idx     <= '0;
+      hit_exact   <= 1'b0;
+      hit_valid   <= 1'b0;
+      orig_tob    <= '0;
+      tob_changed <= 1'b0;
 
-      for (int unsigned a = 0; a < NUM_ASSETS; a++) begin
-        tob_ts[a] <= '0;
-        for (int unsigned s = 0; s < 2; s++) begin
-          tob[a][s] <= '0;
-          for (int unsigned l = 0; l < NUM_LEVELS; l++) begin
-            book[a][s][l] <= '0;
-          end
-        end
-      end
+      // NOTE: book / tob / tob_ts are deliberately NOT reset here -- they are
+      // GSR-initialised at configuration (see the storage declaration). A runtime
+      // reset restarts the control path only; the market-data state is not wiped.
 
     end else begin
       // tob_updated is a single-cycle strobe.
@@ -304,6 +398,10 @@ module order_book_array
           for (int unsigned l = 0; l < NUM_LEVELS; l++) begin
             sel[l] <= book[tgt_asset][tgt_side][l];
           end
+          // Snapshot the current top of book (level 0) for the STORE_CMP
+          // change-detect. Taken from the same die-spanning read as sel[0], so
+          // it costs nothing extra and stays a LOCAL flop thereafter (ROUND 4).
+          orig_tob             <= book[tgt_asset][tgt_side][0];
           book_busy[tgt_asset] <= 1'b1;
           state                <= SEARCH_CMP;
         end
@@ -314,7 +412,17 @@ module order_book_array
         SEARCH_CMP: begin
           cmp_exact  <= cmp_exact_next;
           cmp_insert <= cmp_insert_next;
-          state      <= SEARCH_ENC;
+
+          // Precompute the aggregate for EVERY level (TIMING -- ROUND 13, see
+          // the agg_qty note above). hit_idx is not known yet, which is exactly
+          // why this works: no mux in front of the adder, both operands are S0/
+          // LOAD registers, so it is a clean reg -> add -> reg cycle and the
+          // 32-bit add leaves WRITE_COMMIT's write path entirely.
+          for (int unsigned l = 0; l < NUM_LEVELS; l++) begin
+            agg_qty[l] <= sel[l].quantity + tgt_qty;
+          end
+
+          state <= SEARCH_ENC;
         end
 
         //--------------------------------------------------------------------
@@ -324,7 +432,6 @@ module order_book_array
           hit_idx   <= srch_idx;
           hit_exact <= srch_exact;
           hit_valid <= srch_valid;
-          shift_idx <= '0;
 
           // A price worse than every tracked level, on a full book, falls
           // outside the maintained depth window and is simply dropped.
@@ -337,56 +444,54 @@ module order_book_array
         end
 
         //--------------------------------------------------------------------
-        // SHIFT: keep each side price-ordered.
+        // SHIFT: keep each side price-ordered, in a SINGLE cycle.
         //   insert -> slide levels [hit_idx .. N-2] down one slot
         //   remove -> slide levels [hit_idx+1 .. N-1] up one slot
-        // A modify at an existing price skips this entirely.
+        // A modify at an existing price skips the slide entirely.
+        //
+        // TIMING (ROUND 8): the previous version slid ONE slot per cycle using a
+        // variable-indexed copy `sel[dst_i] <= sel[src_i]`. That is a 16:1 read
+        // mux over the whole `sel` array, steered by hit_idx/shift_idx, whose
+        // output fans to every level -- route-bound (77% route, the -0.748 ns
+        // WNS: hit_idx -> sel_reg/D). Here every level instead reads a FIXED
+        // neighbour (sel[k+1] on a remove, sel[k-1] on an insert), gated by a
+        // per-level compare of the constant k against hit_idx. Fixed neighbours
+        // let the placer keep each 64-bit lane as a local chain, so the long mux
+        // net is gone. Non-blocking assignment reads the OLD slice, so doing all
+        // levels at once is equivalent to the old tail-to-head ordering. The
+        // whole slide now costs 1 cycle instead of up to NUM_LEVELS (worst-case
+        // update 22 -> ~7); the benches wait a fixed 30 cycles and bound
+        // book_busy by <= NUM_LEVELS+5, both of which a shorter slide satisfies.
         //--------------------------------------------------------------------
         SHIFT: begin
-          automatic logic [LEVEL_IDX_W:0] src_i;
-          automatic logic [LEVEL_IDX_W:0] dst_i;
-
+          // No aggregate pre-read here any more (ROUND 13): the per-level sums
+          // are precomputed in SEARCH_CMP, so a pass-through simply holds.
           if (!needs_shift) begin
-            // Pass-through cycle (modify, or add aggregating into an existing
-            // level): pre-read the hit level's quantity into a register so the
-            // aggregate-add in WRITE_COMMIT starts from a flop. `sel` is local,
-            // but keeping the pre-read preserves the exact cycle count.
-            hit_qty <= sel[hit_idx].quantity;
-            state   <= WRITE_COMMIT;
+            // Pass-through (modify, or add aggregating into an existing level):
+            // nothing to slide.
           end else if (is_removal) begin
-            // Shift up: dst = hit_idx + shift_idx, src = dst + 1
-            dst_i = {1'b0, hit_idx} + shift_idx;
-            src_i = dst_i + 1'b1;
-
-            if (src_i < (LEVEL_IDX_W+1)'(NUM_LEVELS)) begin
-              sel[dst_i[LEVEL_IDX_W-1:0]] <= sel[src_i[LEVEL_IDX_W-1:0]];
-              shift_idx <= shift_idx + 1'b1;
-            end else begin
-              // Tail slot is now vacant.
-              sel[NUM_LEVELS-1] <= '0;
-              state <= WRITE_COMMIT;
-            end
+            // Remove level hit_idx: levels [hit_idx .. N-2] take their successor,
+            // the tail is vacated.
+            for (int unsigned k = 0; k < NUM_LEVELS-1; k++)
+              if (k >= hit_idx) sel[k] <= sel[k+1];
+            sel[NUM_LEVELS-1] <= '0;
           end else begin
-            // Insertion: shift down from the tail toward hit_idx, so we never
-            // overwrite a level we still need.
-            dst_i = (LEVEL_IDX_W+1)'(NUM_LEVELS-1) - shift_idx;
-            src_i = dst_i - 1'b1;
-
-            if (dst_i > {1'b0, hit_idx}) begin
-              sel[dst_i[LEVEL_IDX_W-1:0]] <= sel[src_i[LEVEL_IDX_W-1:0]];
-              shift_idx <= shift_idx + 1'b1;
-            end else begin
-              state <= WRITE_COMMIT;
-            end
+            // Insert at hit_idx: levels [hit_idx+1 .. N-1] take their predecessor
+            // (opening the hit_idx slot, which WRITE_COMMIT fills); the old tail
+            // level falls off the bottom.
+            for (int unsigned k = 1; k < NUM_LEVELS; k++)
+              if (k > hit_idx) sel[k] <= sel[k-1];
           end
+          state <= WRITE_COMMIT;
         end
 
         //--------------------------------------------------------------------
         // WRITE_COMMIT: write the affected level into the local slice and
         // REGISTER the ToB candidate. The "did the top change" compare and the
-        // ToB commit moved to STORE so the level-mux/adder and the 64-bit
-        // compare + ToB clock-enables are two shallow cycles instead of one
-        // deep one (TIMING: this was the -6.7 ns critical path).
+        // ToB commit moved downstream (STORE_CMP then STORE) so the level-mux/
+        // adder, the 64-bit compare, and the ToB clock-enables are three shallow
+        // cycles instead of one deep one (TIMING: was the -6.7 ns and -1.86 ns
+        // critical paths).
         //--------------------------------------------------------------------
         WRITE_COMMIT: begin
           automatic level_t new_lvl;
@@ -396,12 +501,13 @@ module order_book_array
 
           unique case (tgt_type)
             MSG_ADD: begin
-              if (hit_exact) begin
-                // Aggregate into the existing level (hit_qty was pre-read into
-                // a register during SHIFT's pass-through cycle).
-                new_lvl.quantity = hit_qty + tgt_qty;
-              end
-              sel[hit_idx] <= new_lvl;
+              // No adder in this path (ROUND 13): the aggregate was computed for
+              // every level back in SEARCH_CMP, so this is a mux over registered
+              // sums. An exact-price ADD takes the precomputed aggregate; a new
+              // price takes tgt_qty outright. hit_exact selects between two
+              // REGISTERED values, so it is one LUT level, not a carry chain.
+              new_lvl.quantity = hit_exact ? agg_qty[hit_idx] : tgt_qty;
+              sel[hit_idx]     <= new_lvl;
             end
 
             MSG_MODIFY: begin
@@ -426,7 +532,22 @@ module order_book_array
             commit_tob <= sel[0];
           end
 
-          state <= STORE;
+          state <= STORE_CMP;
+        end
+
+        //--------------------------------------------------------------------
+        // STORE_CMP (TIMING -- ROUND 4): decide whether the top of book
+        // actually changed, in its OWN cycle. `commit_tob` and `orig_tob` are
+        // both plain LOCAL registers by now, so this is a clean reg -> 64-bit
+        // compare -> flag-reg path: no die-spanning ToB-cache mux and no
+        // clock-enable gating share this cone. `orig_tob` is the ToB as it stood
+        // at LOAD (book[tgt][side][0], which the ToB cache mirrors), so
+        // `commit_tob != orig_tob` is identical to the old
+        // `commit_tob != tob[tgt_asset][tgt_side]` -- just on local flops.
+        //--------------------------------------------------------------------
+        STORE_CMP: begin
+          tob_changed <= (commit_tob != orig_tob);
+          state       <= STORE;
         end
 
         //--------------------------------------------------------------------
@@ -434,15 +555,16 @@ module order_book_array
         // commit the ToB ATOMICALLY. This is the one die-spanning write of the
         // transaction (a demux per level -- data from local `sel`, clock-enable
         // gated by the asset/side match, no arithmetic). tob_updated pulses
-        // only if the top of book actually changed -- a deep-level update must
-        // not wake the Alpha Engine and burn its FS-7 budget for nothing.
+        // only if the top of book actually changed (tob_changed, decided in
+        // STORE_CMP) -- a deep-level update must not wake the Alpha Engine and
+        // burn its FS-7 budget for nothing.
         //--------------------------------------------------------------------
         STORE: begin
           for (int unsigned l = 0; l < NUM_LEVELS; l++) begin
             book[tgt_asset][tgt_side][l] <= sel[l];
           end
 
-          if (commit_tob != tob[tgt_asset][tgt_side]) begin
+          if (tob_changed) begin
             tob[tgt_asset][tgt_side] <= commit_tob;
             tob_ts[tgt_asset]        <= tgt_ts;
             tob_updated[tgt_asset]   <= 1'b1;
