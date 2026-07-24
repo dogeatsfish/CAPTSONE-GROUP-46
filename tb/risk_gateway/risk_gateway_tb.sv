@@ -65,19 +65,19 @@ module tb_pre_trade_risk_gateway;
 
   //==============================================================================
   // CYCLE-ACCURATE PIPELINE SCOREBOARD
-  // Validates that outputs arrive exactly 4 cycles after input insertion.
+  // Validates that outputs arrive exactly 5 cycles after input insertion.
   //==============================================================================
   typedef struct {
       string name;
       logic  expected;
   } check_t;
 
-  check_t check_pipe [0:4];
+  check_t check_pipe [0:5];
 
   always @(negedge clk_250mhz) begin
       if (rst_n) begin
           // Shift the pipeline forward
-          for (int i = 4; i > 0; i--) begin
+          for (int i = 5; i > 0; i--) begin
               check_pipe[i] = check_pipe[i-1];
           end
           
@@ -85,21 +85,21 @@ module tb_pre_trade_risk_gateway;
           check_pipe[0].name     = current_test_name;
           check_pipe[0].expected = current_test_expected;
           
-          // Check the tail of the pipe (Cycle 4 output)
-          if (check_pipe[4].name != "IDLE") begin
-              if (m_axis_tx_tvalid === check_pipe[4].expected) begin
+          // Check the tail of the pipe (Cycle 5 output)
+          if (check_pipe[5].name != "IDLE") begin
+              if (m_axis_tx_tvalid === check_pipe[5].expected) begin
                   $display("[PASS] %s | Expected=%b, Got=%b", 
-                            check_pipe[4].name, check_pipe[4].expected, m_axis_tx_tvalid);
+                            check_pipe[5].name, check_pipe[5].expected, m_axis_tx_tvalid);
                   tests_passed++;
               end else begin
                   $display("[FAIL] %s | Expected=%b, Got=%b", 
-                            check_pipe[4].name, check_pipe[4].expected, m_axis_tx_tvalid);
+                            check_pipe[5].name, check_pipe[5].expected, m_axis_tx_tvalid);
                   tests_failed++;
                   all_tests_passed = 0;
               end
           end
       end else begin
-          for (int i = 0; i < 5; i++) begin
+          for (int i = 0; i < 6; i++) begin
               check_pipe[i].name = "IDLE";
               check_pipe[i].expected = 0;
           end
