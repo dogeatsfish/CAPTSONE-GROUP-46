@@ -38,7 +38,7 @@ PY_MODULE  := engine_sim
 PY_INCLUDES := $(shell python3 -m pybind11 --includes)
 PY_SUFFIX   := $(shell python3-config --extension-suffix)
 PY_TARGET   := $(PY_MODULE)$(PY_SUFFIX)
-PY_SRCS     := bindings/bindings.cpp $(CORE_SRCS)
+PY_SRCS     := bindings/src/bindings.cpp $(CORE_SRCS)
 
 .PHONY: all run pymodule stress-book stress-sim clean
 
