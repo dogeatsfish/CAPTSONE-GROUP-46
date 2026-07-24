@@ -13,11 +13,14 @@ pybind11 module) lives in ``routes.py``.
 import os
 import sys
 
-# Ensure this directory is importable so `import routes` works regardless of
-# the current working directory uvicorn is launched from.
-_SRC_DIR = os.path.dirname(os.path.abspath(__file__))
-if _SRC_DIR not in sys.path:
-    sys.path.insert(0, _SRC_DIR)
+# Ensure the source and config directories are importable so `import routes`
+# and `import config` work regardless of the working directory uvicorn is
+# launched from. (config.py handles the include/ and engine/ paths itself.)
+_SRC_DIR = os.path.dirname(os.path.abspath(__file__))  # service/api/src
+_CONFIG_DIR = os.path.join(os.path.dirname(_SRC_DIR), "config")  # service/api/config
+for _p in (_SRC_DIR, _CONFIG_DIR):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
