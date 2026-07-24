@@ -1,14 +1,3 @@
-"""Project paths and heavy imports for the API.
-
-Centralizes all filesystem wiring so the route handlers stay focused on
-request/response logic. Importing this module has two intentional side effects:
-
-  * puts the schema modules (api/include) on sys.path, so `import common` works
-  * puts the compiled C++ engine (engine/) on sys.path and imports `engine_sim`
-
-Both make plain imports work no matter which directory uvicorn is launched from.
-"""
-
 import sys
 from pathlib import Path
 

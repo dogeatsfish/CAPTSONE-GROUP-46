@@ -1,12 +1,3 @@
-"""API routes for the HFT engine service.
-
-Defines the FastAPI endpoints and bridges HTTP requests to the compiled C++
-``engine_sim`` module. All filesystem/path wiring lives in ``config.py``.
-
-The main endpoint is ``POST /simulate`` which runs an ``OfflineSimulation``
-over a packed binary MBO stream and returns the resulting telemetry.
-"""
-
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
