@@ -275,94 +275,112 @@ module outbound_tx_generator
   end
 
   //--------------------------------------------------------------------------
-  // Byte-select multiplexer: maps the current byte index onto the right field.
-  // Bytes not listed default to 0x00 (padding, DSCP/ECN, zeroed UDP checksum,
-  // price zero-extend, appendage length). ClOrdID (59..72) is space-padded.
+  // Byte-select multiplexer (Combinational)
   //--------------------------------------------------------------------------
+  logic [7:0] next_tdata;
   always_comb begin
-    m_axis_tdata = 8'h00;
+    next_tdata = 8'h00;
 
     case (byte_idx)
       // ---- IPv4 header ----
-      8'd0:  m_axis_tdata = 8'h45;              // Version 4, IHL 5
-      8'd2:  m_axis_tdata = r_ip_len[15:8];     // Total Length (hi)
-      8'd3:  m_axis_tdata = r_ip_len[7:0];      // Total Length (lo)
-      8'd4:  m_axis_tdata = r_ident[15:8];      // Identification (hi)
-      8'd5:  m_axis_tdata = r_ident[7:0];       // Identification (lo)
-      8'd6:  m_axis_tdata = 8'h40;              // Flags: Don't Fragment
-      8'd8:  m_axis_tdata = IP_TTL;
-      8'd9:  m_axis_tdata = IP_PROTO;
-      8'd10: m_axis_tdata = r_ip_csum[15:8];    // Header Checksum (hi)
-      8'd11: m_axis_tdata = r_ip_csum[7:0];     // Header Checksum (lo)
-      8'd12: m_axis_tdata = SRC_IP[31:24];
-      8'd13: m_axis_tdata = SRC_IP[23:16];
-      8'd14: m_axis_tdata = SRC_IP[15:8];
-      8'd15: m_axis_tdata = SRC_IP[7:0];
-      8'd16: m_axis_tdata = DST_IP[31:24];
-      8'd17: m_axis_tdata = DST_IP[23:16];
-      8'd18: m_axis_tdata = DST_IP[15:8];
-      8'd19: m_axis_tdata = DST_IP[7:0];
+      8'd0:  next_tdata = 8'h45;              // Version 4, IHL 5
+      8'd2:  next_tdata = r_ip_len[15:8];     // Total Length (hi)
+      8'd3:  next_tdata = r_ip_len[7:0];      // Total Length (lo)
+      8'd4:  next_tdata = r_ident[15:8];      // Identification (hi)
+      8'd5:  next_tdata = r_ident[7:0];       // Identification (lo)
+      8'd6:  next_tdata = 8'h40;              // Flags: Don't Fragment
+      8'd8:  next_tdata = IP_TTL;
+      8'd9:  next_tdata = IP_PROTO;
+      8'd10: next_tdata = r_ip_csum[15:8];    // Header Checksum (hi)
+      8'd11: next_tdata = r_ip_csum[7:0];     // Header Checksum (lo)
+      8'd12: next_tdata = SRC_IP[31:24];
+      8'd13: next_tdata = SRC_IP[23:16];
+      8'd14: next_tdata = SRC_IP[15:8];
+      8'd15: next_tdata = SRC_IP[7:0];
+      8'd16: next_tdata = DST_IP[31:24];
+      8'd17: next_tdata = DST_IP[23:16];
+      8'd18: next_tdata = DST_IP[15:8];
+      8'd19: next_tdata = DST_IP[7:0];
 
       // ---- UDP header ----
-      8'd20: m_axis_tdata = SRC_PORT[15:8];
-      8'd21: m_axis_tdata = SRC_PORT[7:0];
-      8'd22: m_axis_tdata = DST_PORT[15:8];
-      8'd23: m_axis_tdata = DST_PORT[7:0];
-      8'd24: m_axis_tdata = r_udp_len[15:8];    // UDP Length (hi)
-      8'd25: m_axis_tdata = r_udp_len[7:0];     // UDP Length (lo)
-      // 26,27: UDP checksum = 0 (default) -- legal in IPv4, required for
-      //        cut-through since the full packet is not buffered up front.
+      8'd20: next_tdata = SRC_PORT[15:8];
+      8'd21: next_tdata = SRC_PORT[7:0];
+      8'd22: next_tdata = DST_PORT[15:8];
+      8'd23: next_tdata = DST_PORT[7:0];
+      8'd24: next_tdata = r_udp_len[15:8];    // UDP Length (hi)
+      8'd25: next_tdata = r_udp_len[7:0];     // UDP Length (lo)
+      // 26,27: UDP checksum = 0 (default)
 
       // ---- OUCH 5.0 Enter Order ('O') ----
-      8'd28: m_axis_tdata = OUCH_TYPE_O;
-      8'd29: m_axis_tdata = r_userref[31:24];
-      8'd30: m_axis_tdata = r_userref[23:16];
-      8'd31: m_axis_tdata = r_userref[15:8];
-      8'd32: m_axis_tdata = r_userref[7:0];
-      8'd33: m_axis_tdata = r_side;
-      8'd34: m_axis_tdata = r_qty[31:24];
-      8'd35: m_axis_tdata = r_qty[23:16];
-      8'd36: m_axis_tdata = r_qty[15:8];
-      8'd37: m_axis_tdata = r_qty[7:0];
-      8'd38: m_axis_tdata = r_symbol[63:56];    // Symbol, MSB char first
-      8'd39: m_axis_tdata = r_symbol[55:48];
-      8'd40: m_axis_tdata = r_symbol[47:40];
-      8'd41: m_axis_tdata = r_symbol[39:32];
-      8'd42: m_axis_tdata = r_symbol[31:24];
-      8'd43: m_axis_tdata = r_symbol[23:16];
-      8'd44: m_axis_tdata = r_symbol[15:8];
-      8'd45: m_axis_tdata = r_symbol[7:0];
+      8'd28: next_tdata = OUCH_TYPE_O;
+      8'd29: next_tdata = r_userref[31:24];
+      8'd30: next_tdata = r_userref[23:16];
+      8'd31: next_tdata = r_userref[15:8];
+      8'd32: next_tdata = r_userref[7:0];
+      8'd33: next_tdata = r_side;
+      8'd34: next_tdata = r_qty[31:24];
+      8'd35: next_tdata = r_qty[23:16];
+      8'd36: next_tdata = r_qty[15:8];
+      8'd37: next_tdata = r_qty[7:0];
+      8'd38: next_tdata = r_symbol[63:56];    // Symbol, MSB char first
+      8'd39: next_tdata = r_symbol[55:48];
+      8'd40: next_tdata = r_symbol[47:40];
+      8'd41: next_tdata = r_symbol[39:32];
+      8'd42: next_tdata = r_symbol[31:24];
+      8'd43: next_tdata = r_symbol[23:16];
+      8'd44: next_tdata = r_symbol[15:8];
+      8'd45: next_tdata = r_symbol[7:0];
       // 46..49: Price upper 4 bytes = 0 (zero-extend, default)
-      8'd50: m_axis_tdata = r_price[31:24];
-      8'd51: m_axis_tdata = r_price[23:16];
-      8'd52: m_axis_tdata = r_price[15:8];
-      8'd53: m_axis_tdata = r_price[7:0];
-      8'd54: m_axis_tdata = DEF_TIF;
-      8'd55: m_axis_tdata = DEF_DISPLAY;
-      8'd56: m_axis_tdata = DEF_CAPACITY;
-      8'd57: m_axis_tdata = DEF_ISE;
-      8'd58: m_axis_tdata = DEF_CROSSTYPE;
+      8'd50: next_tdata = r_price[31:24];
+      8'd51: next_tdata = r_price[23:16];
+      8'd52: next_tdata = r_price[15:8];
+      8'd53: next_tdata = r_price[7:0];
+      8'd54: next_tdata = DEF_TIF;
+      8'd55: next_tdata = DEF_DISPLAY;
+      8'd56: next_tdata = DEF_CAPACITY;
+      8'd57: next_tdata = DEF_ISE;
+      8'd58: next_tdata = DEF_CROSSTYPE;
       // 59..72: ClOrdID = 14 spaces (handled by override below)
       // 73,74: Appendage Length = 0 (default)
 
       // ---- Latency telemetry ----
-      8'd75: m_axis_tdata = r_latency[15:8];
-      8'd76: m_axis_tdata = r_latency[7:0];
+      8'd75: next_tdata = r_latency[15:8];
+      8'd76: next_tdata = r_latency[7:0];
 
-      default: m_axis_tdata = 8'h00;
+      default: next_tdata = 8'h00;
     endcase
 
     // ClOrdID space padding (left-justified alpha field).
-    if (byte_idx >= 8'd59 && byte_idx <= 8'd72) m_axis_tdata = OUCH_SPACE;
+    if (byte_idx >= 8'd59 && byte_idx <= 8'd72) next_tdata = OUCH_SPACE;
   end
 
   //--------------------------------------------------------------------------
   // Stream handshake / framing
   //--------------------------------------------------------------------------
   assign s_axis_trade_tready = (state == IDLE) && fifo_has_room;
-  assign m_axis_tvalid       = (state == BUILD_HEADER)
-                            || (state == STREAM_PAYLOAD)
-                            || (state == FINALIZE);
-  assign m_axis_tlast        = (state == FINALIZE);
+  
+  logic next_tvalid;
+  logic next_tlast;
+  
+  assign next_tvalid = (state == BUILD_HEADER)
+                    || (state == STREAM_PAYLOAD)
+                    || (state == FINALIZE);
+  assign next_tlast  = (state == FINALIZE);
+
+  //--------------------------------------------------------------------------
+  // Output Pipeline Register
+  // Breaks the logic path from the huge byte-select MUX into the TX FIFO.
+  //--------------------------------------------------------------------------
+  always_ff @(posedge core_clk or negedge core_rst_n) begin
+    if (!core_rst_n) begin
+      m_axis_tdata  <= 8'h00;
+      m_axis_tvalid <= 1'b0;
+      m_axis_tlast  <= 1'b0;
+    end else begin
+      m_axis_tdata  <= next_tdata;
+      m_axis_tvalid <= next_tvalid;
+      m_axis_tlast  <= next_tlast;
+    end
+  end
 
 endmodule
