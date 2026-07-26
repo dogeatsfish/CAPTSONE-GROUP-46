@@ -880,3 +880,83 @@ round-4 root cause (async reset on a hard-block register) except the last.
    - `order_drop_count[15:0]` (top-level output) has no `LOC`/`IOSTANDARD`. Either
      assign real pins + IOSTANDARD in the XDC, or — if it is debug-only telemetry —
      drop it from the top-level ports and observe it via ILA instead.
+
+---
+
+# Round 14 — Parser arithmetic split & Order Book fanout distribution
+
+After previous rounds, remaining bottleneck paths surfaced in `cut_through_parser.sv` and `order_book_array.sv`:
+
+## Fix 1 — Parser compare & subtract pipeline split (`cut_through_parser.sv`)
+- **Problem:** `R_WAIT2` evaluated `ref_rdata.shares > p_shares` and `ref_rdata.shares - p_shares` in a single cycle starting directly from the BRAM output (`ref_rdata`), creating a 15-logic-level cone (-0.388 ns WNS on `ref_rdata_reg[shares][2] → rem_q_reg[29]`).
+- **Fix:** Introduced state `R_WAIT3` into `res_state_e`. In `R_WAIT2`, `ref_rdata_q <= ref_rdata`, `rem_q_diff <= ref_rdata.shares - p_shares`, and `rem_q_is_greater <= (ref_rdata.shares > p_shares)`. In `R_WAIT3`, `rem_q <= rem_q_is_greater ? rem_q_diff : '0`.
+- **Result:** Splits the 32-bit compare and subtract across two clock cycles, reducing logic levels from 15 to 8.
+
+## Fix 2 — Order Book `hit_idx` fanout pipeline stage (`order_book_array.sv`)
+- **Problem:** Priority encoder outputs directly drove `hit_idx` replicated registers, causing long routing delays from the priority encoder logic to scattered destination registers across the die.
+- **Fix:** Added `SEARCH_DIST` state to `book_state_e` (expanded enum `book_state_e` from `logic [2:0]` to `logic [3:0]` to accommodate 9 total states). `SEARCH_ENC` writes to central un-replicated registers (`hit_idx_central`, `hit_exact_central`, `hit_valid_central`), and `SEARCH_DIST` copies them to the `max_fanout` replicated registers (`hit_idx`, `hit_exact`, `hit_valid`).
+- **Result:** Decouples priority encoder logic from the die-spanning distribution routing phase.
+
+---
+
+# Round 15 — Risk Gateway TNS recovery & Order Book MUX control replication
+
+## Fix 1 — Risk Gateway `viol_max_value` pipeline alignment & TNS fix (`pre_trade_risk_gateway.sv`)
+- **Problem:** `viol_max_value` evaluated off `product[3]` in an `always_ff` block, introducing an extra cycle of latency relative to `tvalid[3]` (failing `risk_gateway_tb` Tests 3, 5C, 5D). A temporary combinational fix directly off `product[3]` caused a 5-level combinational cascade into `refund_pulse → tokens_to_add → token_bucket_reg`, exploding TNS (-0.373 ns on `token_bucket_reg`).
+- **Fix:** Re-registered `viol_max_value` off `product[2]` instead of `product[3]`.
+- **Result:** Keeps `viol_max_value` as a registered flop (breaking the long combinational path into the token bucket and restoring TNS), while making it valid on cycle 4 so it aligns perfectly with `tvalid[3]` on cycle 5 for egress validation.
+
+## Fix 2 — Order Book `tgt_side` control net replication (`order_book_array.sv`)
+- **Problem:** `sel_reg[14][price] → cmp_insert_reg[14]` was failing at -0.380 ns with 67% routing delay. `tgt_side` lacked tight fanout replication (`max_fanout = 512`), forcing all level selection MUXes (`tgt_side == SIDE_BID ? > : <`) to cluster near a single driver.
+- **Fix:** Applied `(* max_fanout = 8 *)` to `tgt_side` in `order_book_array.sv`.
+- **Result:** Allows Vivado to replicate `tgt_side` locally across the array, placing the level selection MUXes next to their respective `sel_reg` slices and eliminating routing bottleneck.
+
+## Verification
+- **Full xsim regression passed:** 173,423 checks across 12 testbenches with **0 failures**.
+
+---
+
+# Round 16 — WNS moves back to order book and tx_gen
+
+Run 16 (`report_failing40.txt` from user observation):
+The last round's fixes to `pre_trade_risk_gateway` worsened WNS slightly to -0.213 ns, shifting the critical paths back to the order book and tx_gen blocks.
+
+| Group | Slack | Cause |
+|---|---|---|
+| `order_book_array` | -0.213 ns | `agg_qty` / `hit_idx` 16:1 mux logic feeding `sel` demux |
+| `outbound_tx_generator` | -0.203 ns | `ip_csum_pre` double carry chain (17-bit add + 16-bit add) |
+
+## Fix 1 — Flatten `WRITE_COMMIT` mux (`order_book_array.sv`)
+`WRITE_COMMIT` previously read `agg_qty[hit_idx]` which forced a 16:1 multiplexer right before a write demux (`sel[hit_idx] <= ...`).
+Since `agg_qty` is already computed for ALL levels in `SEARCH_CMP`, this was refactored to loop over `NUM_LEVELS` and conditionally read its OWN `agg_qty[k]` when `k == hit_idx`. This decouples the levels and eliminates the massive logic cone. Also updated `commit_tob` to statically read `agg_qty[0]` when `hit_idx == '0`.
+
+## Fix 2 — Pipeline IPv4 checksum (`outbound_tx_generator.sv`)
+The IP checksum pre-calculation was taking 1 cycle to do two sequential carry chains. Pipelined into 3 stages instead of 2. `ip_ident` only updates once per packet (which is at least 77 cycles apart), giving the pipeline more than enough time to settle without affecting throughput or latency.
+
+---
+
+# Round 17 — Fixing Parser BRAM Read, Order Book Routing, and Risk Gateway DSP
+
+Run 17 (based on `report_failing40.txt` and DRC reports):
+The critical paths remaining were deeply structural, highlighting route-dominated comparisons and sub-optimal DSP primitive packing.
+
+| Group | Slack | Cause |
+|---|---|---|
+| `cut_through_parser` | -0.421 ns | 32-bit `shares` subtract executed in the same cycle as the `ref_table` BRAM read. |
+| `order_book_array` | -0.161 ns | 32-bit `quantity != 0` OR-reduce spanned the array, feeding `cmp_exact` and causing 77% route delay. |
+| `pre_trade_risk_gateway` | DRC DPIP/DPOP | `product_s2` multiplier lacked an explicit `MREG` pipeline stage, blocking DSP48 optimization. |
+
+## Fix 1 — Parser BRAM Read Pipeline (`cut_through_parser.sv`)
+The FSM previously evaluated `rem_q_diff` starting directly from the `ref_rdata` BRAM output pin, violating the 4.0ns period because the BRAM clock-to-out takes ~2.125ns.
+**Fix**: Introduced `R_WAIT4` to properly pipeline the subtract. `R_WAIT2` now only captures `ref_rdata_q <= ref_rdata`. `R_WAIT3` computes `rem_q_diff` starting from the fast fabric register `ref_rdata_q`. `R_WAIT4` drives the final multiplexer.
+
+## Fix 2 — Order Book Pre-Compare Stage (`order_book_array.sv`)
+The `SEARCH_CMP` comparisons (`cmp_exact_next` and `cmp_insert_next`) relied on a wide 32-bit OR-reduce check for `lvl.quantity != '0'`, causing massive routing delay across the wide `sel` array.
+**Fix**: Added a `SEARCH_PRE_CMP` state to the FSM before `SEARCH_CMP`. This state evaluates `sel_valid` (quantity != 0) and local price comparisons (`==`, `>`, `<`) into per-level registers. `SEARCH_CMP` then operates entirely on these local boolean flags, completely isolating the heavy routing from the critical path.
+
+## Fix 3 — Risk Gateway DSP MREG Inference (`pre_trade_risk_gateway.sv`)
+The Vivado DRC tool reported DPIP / DPOP warnings because the `price * quantity` pipeline was missing an explicit MREG intermediate pipeline stage, preventing the registers from packing inside the DSP48 primitive.
+**Fix**: Added `product_m` to the DSP pipeline as the explicit MREG stage (`product_m <= price_s1 * quantity_s1; product[1] <= product_m;`). Also updated the `viol_max_value` check to read directly from `product[1]`, ensuring no change to the overall egress latency.
+
+## Verification
+- Expected to close WNS across all modules as all three major structural anomalies have been fully partitioned.

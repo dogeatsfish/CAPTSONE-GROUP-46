@@ -184,13 +184,15 @@ module pre_trade_risk_gateway
 
   logic [31:0] price_s1;
   logic [31:0] quantity_s1;
+  logic [63:0] product_m;
   logic [63:0] product [1:3];
 
   always_ff @(posedge clk_250mhz) begin: Max_Value_Pipeline
     price_s1    <= trade_in.price;
     quantity_s1 <= trade_in.quantity;
       
-    product[1] <= price_s1 * quantity_s1;
+    product_m  <= price_s1 * quantity_s1;
+    product[1] <= product_m;
     product[2] <= product[1];
     product[3] <= product[2];
   end
@@ -199,8 +201,8 @@ module pre_trade_risk_gateway
     if (~rst_n) begin
       viol_max_value <= 1'b0;
     end else begin
-      viol_max_value <= (|product[3][63:MOV_BITS])
-                       || (product[3][MOV_BITS-1:0] > MOV_BITS'(MAX_ORDER_VAL));
+      viol_max_value <= (|product[1][63:MOV_BITS])
+                       || (product[1][MOV_BITS-1:0] > MOV_BITS'(MAX_ORDER_VAL));
     end
   end
 
