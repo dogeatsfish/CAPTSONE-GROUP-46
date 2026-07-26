@@ -168,19 +168,21 @@ module outbound_tx_generator
   localparam logic [31:0] IP_CSUM_BASE = IP_CSUM_CONST + 32'(PKT_LEN); // + Total Length
 
   logic [17:0] ip_csum_raw;   // stage 1: IP_CSUM_BASE + ip_ident (pre-fold)
-  logic [15:0] ip_csum_pre;   // stage 2: folded + inverted checksum for ip_ident
+  logic [16:0] ip_csum_fold1; // stage 2: folded overflow bits
+  logic [15:0] ip_csum_pre;   // stage 3: final fold and inverted checksum for ip_ident
 
   always_ff @(posedge core_clk or negedge core_rst_n) begin
     if (!core_rst_n) begin
-      ip_csum_raw <= 18'd0;
-      ip_csum_pre <= 16'd0;
+      ip_csum_raw   <= 18'd0;
+      ip_csum_fold1 <= 17'd0;
+      ip_csum_pre   <= 16'd0;
     end else begin
-      automatic logic [16:0] fold1;
       // stage 1: base + identification (single 18-bit add, no carry-out)
       ip_csum_raw <= IP_CSUM_BASE[17:0] + 18'(ip_ident);
-      // stage 2: fold the two overflow bits back in, then the final carry, invert
-      fold1        = 17'(ip_csum_raw[15:0]) + 17'(ip_csum_raw[17:16]);
-      ip_csum_pre <= ~(fold1[15:0] + 16'(fold1[16]));
+      // stage 2: fold the two overflow bits back in
+      ip_csum_fold1 <= 17'(ip_csum_raw[15:0]) + 17'(ip_csum_raw[17:16]);
+      // stage 3: fold the final carry, invert
+      ip_csum_pre <= ~(ip_csum_fold1[15:0] + 16'(ip_csum_fold1[16]));
     end
   end
 

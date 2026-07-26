@@ -420,13 +420,16 @@ module cut_through_parser
   // output AND did the 32-bit `shares` subtract + valid decode in the same cycle
   // -- 6.0 ns. A fabric pipeline register (ref_rdata_q, captured in R_WAIT2)
   // starts the arithmetic from a fast flop instead. Costs one resolve cycle
-  // (R_IDLE->R_WAIT->R_WAIT2->R_EMIT1[->R_EMIT2], still well inside the 21-cycle
+  // (R_IDLE->R_WAIT->R_WAIT2->R_WAIT3->R_WAIT4->R_EMIT1[->R_EMIT2], still well inside the 21-cycle
   // minimum message gap).
-  typedef enum logic [2:0] { R_IDLE, R_WAIT, R_WAIT2, R_EMIT1, R_EMIT2 } res_state_e;
+  typedef enum logic [2:0] { R_IDLE, R_WAIT, R_WAIT2, R_WAIT3, R_WAIT4, R_EMIT1, R_EMIT2 } res_state_e;
   res_state_e res_state;
 
   // Fabric copy of the BRAM read output (ref_rdata), one cycle later.
   ref_entry_t          ref_rdata_q;
+  logic [QTY_W-1:0]    rem_q_diff;
+  logic                rem_q_is_greater;
+  logic [QTY_W-1:0]    rem_q;
 
   // Snapshot of the completed message
   logic [7:0]          p_type;
@@ -453,6 +456,9 @@ module cut_through_parser
       ref_wdata     <= '0;
       ref_raddr     <= '0;
       ref_rdata_q   <= '0;
+      rem_q_diff    <= '0;
+      rem_q_is_greater <= 1'b0;
+      rem_q         <= '0;
       p_type        <= 8'd0;
       p_symbol      <= '0;
       p_price       <= '0;
@@ -484,17 +490,27 @@ module cut_through_parser
         // the next state.
         R_WAIT: res_state <= R_WAIT2;
 
-        // Capture the BRAM output into a fast fabric flop so R_EMIT1's arithmetic
+        // Capture the BRAM output into a fast fabric flop so R_WAIT3's arithmetic
         // does not start from the slow BRAM DOBDO pin (TIMING, see enum note).
         R_WAIT2: begin
           ref_rdata_q <= ref_rdata;
-          res_state   <= R_EMIT1;
+          res_state   <= R_WAIT3;
+        end
+
+        R_WAIT3: begin
+          rem_q_diff  <= ref_rdata_q.shares - p_shares;
+          rem_q_is_greater <= (ref_rdata_q.shares > p_shares);
+          res_state   <= R_WAIT4;
+        end
+
+        R_WAIT4: begin
+          rem_q     <= rem_q_is_greater ? rem_q_diff : '0;
+          res_state <= R_EMIT1;
         end
 
         //--------------------------------------------------------------------
         R_EMIT1: begin
-          automatic logic [QTY_W-1:0] rem =
-              (ref_rdata_q.shares > p_shares) ? (ref_rdata_q.shares - p_shares) : '0;
+          automatic logic [QTY_W-1:0] rem = rem_q;
 
           res_state <= R_IDLE;
 

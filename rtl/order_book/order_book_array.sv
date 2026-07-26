@@ -165,17 +165,17 @@ module order_book_array
   // 16x64 `sel` array (ROUND 4 report: tgt_type -> sel_reg/CE was route-bound),
   // so it is replicated too.
   //--------------------------------------------------------------------------
-  (* max_fanout = 512 *) logic [ASSET_IDX_W-1:0] tgt_asset;
-  (* max_fanout = 512 *) logic                   tgt_side;
+  (* max_fanout = 64 *) logic [ASSET_IDX_W-1:0] tgt_asset;
+  (* max_fanout = 8 *) logic                   tgt_side;
   // tgt_price feeds BOTH comparators of EVERY level in SEARCH_CMP
   // (lvl.price == tgt_price, and tgt_price >/< lvl.price), i.e. ~32 comparator
   // instances spread across the whole `sel` array. Round 13 showed
   // tgt_price_reg -> cmp_exact_reg[12]/D as the WNS at 63% route -- the same
   // high-fanout-control-over-a-spread-array profile that made hit_idx the
   // -1.48 ns path until it was replicated. Replicated here for the same reason.
-  (* max_fanout = 16 *) logic [PRICE_W-1:0]     tgt_price;
-  logic [QTY_W-1:0]       tgt_qty;
-  (* max_fanout = 32 *) msg_type_e              tgt_type;
+  (* max_fanout = 8 *) logic [PRICE_W-1:0]     tgt_price;
+  (* max_fanout = 16 *) logic [QTY_W-1:0]       tgt_qty;
+  (* max_fanout = 16 *) msg_type_e              tgt_type;
   logic [TIMESTAMP_W-1:0] tgt_ts;
 
   //--------------------------------------------------------------------------
@@ -190,8 +190,13 @@ module order_book_array
   // async set/reset, so it cannot recur. (ROUND 8 removed the old shift counter
   // `shift_idx` when the multi-cycle slide became the single-cycle parallel one.)
   //--------------------------------------------------------------------------
-  (* max_fanout = 16 *) logic [LEVEL_IDX_W-1:0] hit_idx;    // level the update targets
-  logic                   hit_exact;  // price matches an existing level
+  // hit_idx_central is driven by the priority encoder.
+  logic [LEVEL_IDX_W-1:0] hit_idx_central;
+  logic                   hit_exact_central;
+  logic                   hit_valid_central;
+
+  (* max_fanout = 8 *) logic [LEVEL_IDX_W-1:0] hit_idx;    // level the update targets
+  (* max_fanout = 16 *) logic                   hit_exact;  // price matches an existing level
   logic                   hit_valid;  // a level was found / insertion point valid
 
   //--------------------------------------------------------------------------
@@ -226,11 +231,13 @@ module order_book_array
   //--------------------------------------------------------------------------
   // FSM
   //--------------------------------------------------------------------------
-  typedef enum logic [2:0] {
+  typedef enum logic [3:0] {
     IDLE,
     LOAD,           // copy the active book slice into `sel`, mark book busy
+    SEARCH_PRE_CMP, // stage 0: precompute per-level occupancy and price compares
     SEARCH_CMP,     // stage 1: register the per-level comparator results
     SEARCH_ENC,     // stage 2: priority-encode the registered results
+    SEARCH_DIST,    // stage 3: distribute central hit_idx to replicated registers
     SHIFT,
     WRITE_COMMIT,   // write the level into `sel`, register the ToB candidate
     STORE_CMP,      // decide (and register) whether the top of book changed
@@ -266,14 +273,17 @@ module order_book_array
   logic [NUM_LEVELS-1:0] cmp_exact_next, cmp_insert_next;   // combinational
   logic [NUM_LEVELS-1:0] cmp_exact,      cmp_insert;        // registered
 
+  logic [NUM_LEVELS-1:0] sel_valid;
+  logic [NUM_LEVELS-1:0] sel_price_match;
+  logic [NUM_LEVELS-1:0] sel_price_greater;
+  logic [NUM_LEVELS-1:0] sel_price_less;
+
   always_comb begin
     for (int unsigned l = 0; l < NUM_LEVELS; l++) begin
-      automatic level_t lvl = sel[l];
-
-      cmp_exact_next[l]  = (lvl.quantity != '0) && (lvl.price == tgt_price);
-      cmp_insert_next[l] = (lvl.quantity == '0) ||
-                           (tgt_side == SIDE_BID ? tgt_price > lvl.price
-                                                 : tgt_price < lvl.price);
+      cmp_exact_next[l]  = sel_valid[l] && sel_price_match[l];
+      cmp_insert_next[l] = !sel_valid[l] ||
+                           (tgt_side == SIDE_BID ? sel_price_greater[l]
+                                                 : sel_price_less[l]);
     end
   end
 
@@ -353,11 +363,18 @@ module order_book_array
       // all -- the round-2 self-preset FDPE recovery arcs cannot recur.
       tgt_asset   <= '0;
       tgt_side    <= '0;
+      hit_idx_central <= '0;
+      hit_exact_central <= 1'b0;
+      hit_valid_central <= 1'b0;
       hit_idx     <= '0;
       hit_exact   <= 1'b0;
       hit_valid   <= 1'b0;
       orig_tob    <= '0;
       tob_changed <= 1'b0;
+      sel_valid         <= '0;
+      sel_price_match   <= '0;
+      sel_price_greater <= '0;
+      sel_price_less    <= '0;
 
       // NOTE: book / tob / tob_ts are deliberately NOT reset here -- they are
       // GSR-initialised at configuration (see the storage declaration). A runtime
@@ -403,7 +420,23 @@ module order_book_array
           // it costs nothing extra and stays a LOCAL flop thereafter (ROUND 4).
           orig_tob             <= book[tgt_asset][tgt_side][0];
           book_busy[tgt_asset] <= 1'b1;
-          state                <= SEARCH_CMP;
+          state                <= SEARCH_PRE_CMP;
+        end
+
+        //--------------------------------------------------------------------
+        // SEARCH_PRE_CMP: Evaluate 32-bit width operations (occupancy and
+        // price compares) into per-level fabric flops. Breaking these off here
+        // converts the routing-dominant SEARCH_CMP comparisons from 32-bit
+        // cross-slice wide checks into simple 1-bit boolean local gates.
+        //--------------------------------------------------------------------
+        SEARCH_PRE_CMP: begin
+          for (int unsigned l = 0; l < NUM_LEVELS; l++) begin
+            sel_valid[l]         <= (sel[l].quantity != 32'd0);
+            sel_price_match[l]   <= (sel[l].price == tgt_price);
+            sel_price_greater[l] <= (tgt_price > sel[l].price);
+            sel_price_less[l]    <= (tgt_price < sel[l].price);
+          end
+          state <= SEARCH_CMP;
         end
 
         //--------------------------------------------------------------------
@@ -429,9 +462,9 @@ module order_book_array
         // Priority-encode the registered results (search stage 2).
         //--------------------------------------------------------------------
         SEARCH_ENC: begin
-          hit_idx   <= srch_idx;
-          hit_exact <= srch_exact;
-          hit_valid <= srch_valid;
+          hit_idx_central   <= srch_idx;
+          hit_exact_central <= srch_exact;
+          hit_valid_central <= srch_valid;
 
           // A price worse than every tracked level, on a full book, falls
           // outside the maintained depth window and is simply dropped.
@@ -439,8 +472,20 @@ module order_book_array
             book_busy[tgt_asset] <= 1'b0;
             state                <= IDLE;
           end else begin
-            state <= SHIFT;
+            state <= SEARCH_DIST;
           end
+        end
+
+        //--------------------------------------------------------------------
+        // SEARCH_DIST: pipeline stage to distribute the central hit_idx
+        // to the replicated max_fanout registers. This removes the massive
+        // routing delay from the priority encoder to the scattered replicas.
+        //--------------------------------------------------------------------
+        SEARCH_DIST: begin
+          hit_idx   <= hit_idx_central;
+          hit_exact <= hit_exact_central;
+          hit_valid <= hit_valid_central;
+          state     <= SHIFT;
         end
 
         //--------------------------------------------------------------------
@@ -494,25 +539,23 @@ module order_book_array
         // critical paths).
         //--------------------------------------------------------------------
         WRITE_COMMIT: begin
-          automatic level_t new_lvl;
-
-          new_lvl.price    = tgt_price;
-          new_lvl.quantity = tgt_qty;
-
           unique case (tgt_type)
             MSG_ADD: begin
-              // No adder in this path (ROUND 13): the aggregate was computed for
-              // every level back in SEARCH_CMP, so this is a mux over registered
-              // sums. An exact-price ADD takes the precomputed aggregate; a new
-              // price takes tgt_qty outright. hit_exact selects between two
-              // REGISTERED values, so it is one LUT level, not a carry chain.
-              new_lvl.quantity = hit_exact ? agg_qty[hit_idx] : tgt_qty;
-              sel[hit_idx]     <= new_lvl;
+              for (int unsigned k = 0; k < NUM_LEVELS; k++) begin
+                if (k == hit_idx) begin
+                  sel[k].price <= tgt_price;
+                  sel[k].quantity <= hit_exact ? agg_qty[k] : tgt_qty;
+                end
+              end
             end
 
             MSG_MODIFY: begin
-              // Quantity-only change at an existing price.
-              sel[hit_idx] <= new_lvl;
+              for (int unsigned k = 0; k < NUM_LEVELS; k++) begin
+                if (k == hit_idx) begin
+                  sel[k].price <= tgt_price;
+                  sel[k].quantity <= tgt_qty;
+                end
+              end
             end
 
             MSG_DELETE: begin
@@ -527,7 +570,8 @@ module order_book_array
           // by now); for an add/modify at index 0 it is the level being written
           // this cycle.
           if (tgt_type != MSG_DELETE && hit_idx == '0) begin
-            commit_tob <= new_lvl;
+            commit_tob.price <= tgt_price;
+            commit_tob.quantity <= (tgt_type == MSG_ADD && hit_exact) ? agg_qty[0] : tgt_qty;
           end else begin
             commit_tob <= sel[0];
           end
