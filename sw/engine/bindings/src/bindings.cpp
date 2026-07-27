@@ -13,6 +13,7 @@
 #include <pybind11/stl.h>       // automatic std::vector <-> list conversion
 
 #include "offline_simulation.h"
+#include "online_simulation.h"
 
 namespace py = pybind11;
 
@@ -59,4 +60,27 @@ PYBIND11_MODULE(engine_sim, m) {
              // threads can run while the simulation executes.
              py::call_guard<py::gil_scoped_release>(),
              "Execute the event loop and return a SimulationResult.");
+
+    // ---- Online (real-time) simulation ----
+    py::class_<OnlineSimulation::Config>(m, "OnlineConfig")
+        .def(py::init<>())
+        .def_readwrite("itch_address", &OnlineSimulation::Config::itch_address)
+        .def_readwrite("itch_port",    &OnlineSimulation::Config::itch_port)
+        .def_readwrite("ouch_port",    &OnlineSimulation::Config::ouch_port)
+        .def_readwrite("time_scale",   &OnlineSimulation::Config::time_scale)
+        .def_readwrite("max_sleep_ns", &OnlineSimulation::Config::max_sleep_ns);
+
+    py::class_<OnlineSimulation>(m, "OnlineSimulation")
+        .def(py::init<const std::string&>(), py::arg("file_path"),
+             "Create a real-time simulation reading the packed binary MBO stream "
+             "at file_path (default networking config).")
+        .def(py::init<const std::string&, const OnlineSimulation::Config&>(),
+             py::arg("file_path"), py::arg("config"),
+             "Create a real-time simulation with an explicit networking/pacing config.")
+        .def("run", &OnlineSimulation::run,
+             // run() replays in wall-clock time and spawns an OUCH server
+             // thread; release the GIL so Python threads keep running.
+             py::call_guard<py::gil_scoped_release>(),
+             "Broadcast ITCH market data in real time while serving OUCH order "
+             "entry; returns a SimulationResult.");
 }
