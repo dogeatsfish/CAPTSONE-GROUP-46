@@ -3,6 +3,7 @@
 #include <string>
 #include <cstdint>
 #include <atomic>
+#include <functional>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -58,8 +59,15 @@ public:
     OnlineSimulation(const OnlineSimulation&) = delete;
     OnlineSimulation& operator=(const OnlineSimulation&) = delete;
 
+    // Telemetry callback: invoked once per simulated second with the PnL
+    // snapshot that was just recorded. Runs on the market-data thread, OUTSIDE
+    // the book lock, so it is safe for it to block briefly (e.g. push to a
+    // queue). Used to stream live telemetry while the simulation is running.
+    using SampleCallback = std::function<void(const PnLSnapshot&)>;
+
     // Replay the MBO stream in real time while serving OUCH order entry.
-    SimulationResult run();
+    // If on_sample is set, it fires for every per-second PnL sample.
+    SimulationResult run(SampleCallback on_sample = {});
 
 private:
     std::string mbo_file_path;
@@ -78,6 +86,7 @@ private:
 
     std::atomic<bool>     running{false};
     std::thread           ouch_thread;
+    SampleCallback        on_sample_cb; // optional live-telemetry hook
     // Most recent market timestamp seen on the ITCH side. Used to stamp trades
     // that originate from OUCH orders (OUCH frames carry no timestamp).
     std::atomic<uint64_t> last_market_ts_ns{0};

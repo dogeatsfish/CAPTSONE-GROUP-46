@@ -13,3 +13,15 @@ class SimulationResponse(BaseModel):
     compute_time_us: int
     trades: List[Trade]
     pnl_curve: List[PnLPoint]
+
+
+class StreamStartResponse(BaseModel):
+    """Returned by the POST that starts an online streaming run.
+
+    The client then opens an EventSource (SSE) against ``stream_url`` to
+    receive live PnL telemetry.
+    """
+
+    session_id: str
+    data_file: str
+    stream_url: str

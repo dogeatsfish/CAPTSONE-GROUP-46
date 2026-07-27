@@ -24,6 +24,12 @@ ONLINE_OUCH_PORT = 26001
 # 0.0 = no pacing (return as fast as possible); 1.0 = true real time.
 ONLINE_DEFAULT_TIME_SCALE = 0.0
 
+# Pacing for the streaming endpoint. The engine samples PnL once per SIMULATED
+# second, so a factor of 1.0 (true real time) makes telemetry arrive at roughly
+# one event per wall-clock second -- the cadence the live UI expects. Lower it
+# (e.g. 0.1) to fast-forward the replay while still streaming.
+ONLINE_STREAM_TIME_SCALE = 1.0
+
 # Make the schema modules and the compiled engine importable.
 for _path in (INCLUDE_DIR, ENGINE_DIR):
     if str(_path) not in sys.path:

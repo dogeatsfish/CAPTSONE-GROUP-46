@@ -77,10 +77,40 @@ PYBIND11_MODULE(engine_sim, m) {
         .def(py::init<const std::string&, const OnlineSimulation::Config&>(),
              py::arg("file_path"), py::arg("config"),
              "Create a real-time simulation with an explicit networking/pacing config.")
-        .def("run", &OnlineSimulation::run,
-             // run() replays in wall-clock time and spawns an OUCH server
-             // thread; release the GIL so Python threads keep running.
-             py::call_guard<py::gil_scoped_release>(),
+        .def("run",
+             [](OnlineSimulation& self, py::object callback) {
+                 // Wrap an optional Python callable as the C++ SampleCallback.
+                 // The engine invokes it (on its market-data thread, with the
+                 // GIL released) once per simulated second; we re-acquire the
+                 // GIL here before touching Python.
+                 // Capture the callable BY REFERENCE: it lives on this stack
+                 // frame for the whole (synchronous) run() call, and the hook
+                 // is only ever invoked during run(). This keeps the Python
+                 // reference count owned here (under the GIL) instead of inside
+                 // a C++ std::function that the engine may destroy while the
+                 // GIL is released.
+                 OnlineSimulation::SampleCallback hook;
+                 if (!callback.is_none()) {
+                     hook = [&callback](const PnLSnapshot& s) {
+                         py::gil_scoped_acquire gil;
+                         try {
+                             callback(s.timestamp_ns, s.realized_pnl,
+                                      s.unrealized_pnl, s.position_size);
+                         } catch (const py::error_already_set&) {
+                             // Never let a Python exception unwind into C++.
+                             PyErr_Clear();
+                         }
+                     };
+                 }
+
+                 // Release the GIL for the blocking run; the hook re-acquires
+                 // it as needed. This keeps the asyncio event loop responsive.
+                 py::gil_scoped_release release;
+                 return self.run(std::move(hook));
+             },
+             py::arg("callback") = py::none(),
              "Broadcast ITCH market data in real time while serving OUCH order "
-             "entry; returns a SimulationResult.");
+             "entry. If a callback is given, it is called once per simulated "
+             "second as callback(timestamp_ns, realized_pnl, unrealized_pnl, "
+             "position_size). Returns a SimulationResult.");
 }

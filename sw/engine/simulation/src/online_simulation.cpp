@@ -106,41 +106,55 @@ void OnlineSimulation::broadcast_itch(const std::vector<uint8_t>& packet) {
 void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_sample_ns) {
     const uint64_t ts = rec.timestamp_ns;
 
-    std::lock_guard<std::mutex> lock(book_mutex);
+    // Snapshot produced this call (if the per-second sampler fired). Captured
+    // under the lock but the telemetry callback is invoked afterwards, without
+    // the lock held, so a slow consumer can never stall the OUCH thread.
+    std::optional<PnLSnapshot> sampled;
 
-    // 1. Apply the market event to the book.
-    if (rec.message_type == protocol::ITCH_ADD) {
-        Order mkt_order{rec.order_id, rec.price, rec.size, rec.side, false};
-        matching_engine.process_add(mkt_order, ts);
-    } else if (rec.message_type == protocol::ITCH_CANCEL) {
-        matching_engine.process_cancel(rec.order_id, rec.side);
-    }
+    {
+        std::lock_guard<std::mutex> lock(book_mutex);
 
-    // 2. Read the updated L1 and give the co-located strategy a chance to act.
-    const L1State l1 = matching_engine.get_l1_state();
-    std::optional<Order> user_order = strategy.on_market_update(l1);
-
-    if (user_order.has_value()) {
-        Order& uo = user_order.value();
-        const FillReport fill = matching_engine.process_add(uo, ts);
-        if (fill.filled_size > 0.0) {
-            strategy.on_fill(uo.side, fill.avg_fill_price, fill.filled_size);
-            active_result->trades.push_back(
-                TradeRecord{ts, uo.side, fill.avg_fill_price, fill.filled_size});
+        // 1. Apply the market event to the book.
+        if (rec.message_type == protocol::ITCH_ADD) {
+            Order mkt_order{rec.order_id, rec.price, rec.size, rec.side, false};
+            matching_engine.process_add(mkt_order, ts);
+        } else if (rec.message_type == protocol::ITCH_CANCEL) {
+            matching_engine.process_cancel(rec.order_id, rec.side);
         }
-    }
 
-    // 3. Sample the PnL curve once per simulated second.
-    if (ts >= next_sample_ns) {
-        const double mark = (l1.best_bid > 0.0 && l1.best_ask > 0.0)
-                                ? 0.5 * (l1.best_bid + l1.best_ask)
-                                : 0.0;
-        active_result->pnl_curve.push_back(PnLSnapshot{
-            ts,
-            strategy.get_realized_pnl(),
-            strategy.get_unrealized_pnl(mark),
-            strategy.get_position()});
-        next_sample_ns = ts + SAMPLE_INTERVAL_NS;
+        // 2. Read the updated L1 and give the co-located strategy a chance to act.
+        const L1State l1 = matching_engine.get_l1_state();
+        std::optional<Order> user_order = strategy.on_market_update(l1);
+
+        if (user_order.has_value()) {
+            Order& uo = user_order.value();
+            const FillReport fill = matching_engine.process_add(uo, ts);
+            if (fill.filled_size > 0.0) {
+                strategy.on_fill(uo.side, fill.avg_fill_price, fill.filled_size);
+                active_result->trades.push_back(
+                    TradeRecord{ts, uo.side, fill.avg_fill_price, fill.filled_size});
+            }
+        }
+
+        // 3. Sample the PnL curve once per simulated second.
+        if (ts >= next_sample_ns) {
+            const double mark = (l1.best_bid > 0.0 && l1.best_ask > 0.0)
+                                    ? 0.5 * (l1.best_bid + l1.best_ask)
+                                    : 0.0;
+            const PnLSnapshot snap{
+                ts,
+                strategy.get_realized_pnl(),
+                strategy.get_unrealized_pnl(mark),
+                strategy.get_position()};
+            active_result->pnl_curve.push_back(snap);
+            sampled = snap;
+            next_sample_ns = ts + SAMPLE_INTERVAL_NS;
+        }
+    } // book_mutex released here
+
+    // 4. Stream the sample to any live-telemetry consumer (outside the lock).
+    if (sampled && on_sample_cb) {
+        on_sample_cb(*sampled);
     }
 }
 
@@ -261,8 +275,11 @@ void OnlineSimulation::ouch_server_loop() {
 // ---------------------------------------------------------
 // Main real-time replay loop
 // ---------------------------------------------------------
-SimulationResult OnlineSimulation::run() {
+SimulationResult OnlineSimulation::run(SampleCallback on_sample) {
     SimulationResult result;
+
+    // Install the live-telemetry hook for the duration of this run.
+    on_sample_cb = std::move(on_sample);
 
     FILE* fp = std::fopen(mbo_file_path.c_str(), "rb");
     if (fp == nullptr) {
@@ -338,5 +355,6 @@ SimulationResult OnlineSimulation::run() {
     result.total_trades = result.trades.size();
 
     active_result = nullptr;
+    on_sample_cb = nullptr; // drop the hook once the run is complete
     return result;
 }
