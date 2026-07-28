@@ -165,7 +165,7 @@ module order_book_array
   // 16x64 `sel` array (ROUND 4 report: tgt_type -> sel_reg/CE was route-bound),
   // so it is replicated too.
   //--------------------------------------------------------------------------
-  (* max_fanout = 64 *) logic [ASSET_IDX_W-1:0] tgt_asset;
+  (* max_fanout = 32 *) logic [ASSET_IDX_W-1:0] tgt_asset;
   (* max_fanout = 8 *) logic                   tgt_side;
   // tgt_price feeds BOTH comparators of EVERY level in SEARCH_CMP
   // (lvl.price == tgt_price, and tgt_price >/< lvl.price), i.e. ~32 comparator
@@ -175,7 +175,7 @@ module order_book_array
   // -1.48 ns path until it was replicated. Replicated here for the same reason.
   (* max_fanout = 8 *) logic [PRICE_W-1:0]     tgt_price;
   (* max_fanout = 16 *) logic [QTY_W-1:0]       tgt_qty;
-  (* max_fanout = 16 *) msg_type_e              tgt_type;
+  (* max_fanout = 8 *) msg_type_e              tgt_type;
   logic [TIMESTAMP_W-1:0] tgt_ts;
 
   //--------------------------------------------------------------------------
