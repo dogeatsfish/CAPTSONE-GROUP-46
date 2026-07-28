@@ -80,11 +80,12 @@ module commontrader_top_tb
     .rgmii_tx_clk     (rgmii_tx_clk),
     .rgmii_txd        (rgmii_txd),
     .rgmii_tx_ctl     (rgmii_tx_ctl),
-    .hw_kill_switch_n (hw_kill_switch_n),
-    .order_drop_count (order_drop_count),
-    .tx_fifo_overflow (tx_fifo_overflow),
-    .ts_wrapped       (ts_wrapped)
+    .hw_kill_switch_n (hw_kill_switch_n)
   );
+
+  assign order_drop_count = dut.order_drop_count;
+  assign tx_fifo_overflow = dut.tx_fifo_overflow;
+  assign ts_wrapped       = dut.ts_wrapped;
 
   //--------------------------------------------------------------------------
   // Scoreboard
