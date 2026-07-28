@@ -6,17 +6,6 @@
 #include "orderbook.h"
 #include "user_strategy.h" // Concrete class inclusion
 
-// ---------------------------------------------------------
-// Binary market-data record
-// ---------------------------------------------------------
-// Mirrors the Python pre-processing layout produced with struct format
-// "<QcQcdd" (little-endian, packed, no alignment padding).
-//   timestamp_ns : uint64
-//   message_type : char   ('A' add, 'C' cancel)
-//   order_id     : uint64
-//   side         : char   ('B' bid, 'S' ask)
-//   price        : double
-//   size         : double
 #pragma pack(push, 1)
 struct MBORecord {
     uint64_t timestamp_ns;

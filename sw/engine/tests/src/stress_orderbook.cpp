@@ -2,8 +2,8 @@
 //
 // Build (from the engine/ directory):
 //   g++ -std=c++17 -O2 -Ishared/include -Imatch/include \
-//       tests/stress_orderbook.cpp match/src/orderbook.cpp -o tests/stress_orderbook
-//   ./tests/stress_orderbook
+//       tests/src/stress_orderbook.cpp match/src/orderbook.cpp -o tests/src/stress_orderbook
+//   ./tests/src/stress_orderbook
 //
 // Two parts:
 //   1. Deterministic correctness checks (matching, priority, cancel, VWAP, L1).
