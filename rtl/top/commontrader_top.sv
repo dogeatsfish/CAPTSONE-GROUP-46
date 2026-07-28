@@ -56,9 +56,9 @@ module commontrader_top
 );
 
   // --- Telemetry / status (ILA or status register; not board pins) ----------
-  (* mark_debug = "true" *) logic [15:0] order_drop_count;   // orders lost to a busy TX Generator
-  (* mark_debug = "true" *) logic        tx_fifo_overflow;   // sticky: TX CDC FIFO overran
-  (* mark_debug = "true" *) logic        ts_wrapped;         // sticky: timestamp counter rolled over
+  logic [15:0] order_drop_count;   // orders lost to a busy TX Generator
+  logic        tx_fifo_overflow;   // sticky: TX CDC FIFO overran
+  logic        ts_wrapped;         // sticky: timestamp counter rolled over
 
 
   //--------------------------------------------------------------------------
