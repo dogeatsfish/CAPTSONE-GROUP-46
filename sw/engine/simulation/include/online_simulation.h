@@ -10,14 +10,14 @@
 
 #include "orderbook.h"
 #include "user_strategy.h"
-#include "offline_simulation.h" // MBORecord + telemetry structs (SimulationResult, ...)
+#include "offline_simulation.h" 
 #include "protocol.h"
 
 class OnlineSimulation {
 public:
     struct Config {
         // (UDP).
-        std::string itch_address = "127.0.0.1";
+        std::string itch_address = "";
         uint16_t    itch_port    = 26000;
         // (TCP).
         uint16_t    ouch_port    = 26001;
@@ -28,6 +28,14 @@ public:
         // Cap on any single sleep so a large timestamp gap can't stall the
         // replay indefinitely (nanoseconds). 0 disables the cap.
         uint64_t    max_sleep_ns = 5'000'000'000ULL; // 5 s
+
+        // Numeric security id ("stock locate") stamped on every ITCH message
+        // (2-byte field right after the message type). Defaults to ticker 1.
+        uint16_t    stock_locate = protocol::DEFAULT_STOCK_LOCATE;
+
+        // MoldUDP64 session id (ASCII, up to protocol::MOLD_SESSION_LEN bytes,
+        // zero-padded). Stamped on every market-data datagram.
+        std::string session = "";
     };
 
     explicit OnlineSimulation(const std::string& file_path);
@@ -62,6 +70,10 @@ private:
     // Most recent market timestamp seen on the ITCH side. Used to stamp trades
     // that originate from OUCH orders (OUCH frames carry no timestamp).
     std::atomic<uint64_t> last_market_ts_ns{0};
+
+    // MoldUDP64 sequence number of the next market-data message (starts at 1,
+    // the MoldUDP64 convention). Only touched on the market-data thread.
+    uint64_t itch_seq_num = 1;
 
     // --- Setup / teardown ---
     bool open_itch_socket();
