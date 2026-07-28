@@ -4,13 +4,18 @@
 #include <cstdlib>
 
 // Usage:
-//   online_run [mbo_file] [time_scale] [itch_port] [ouch_port]
+//   online_run [mbo_file] [time_scale] [itch_port] [ouch_port] [itch_address]
 //
-//   mbo_file    packed binary MBO stream (default: data/synthetic_mbo_stream.bin)
-//   time_scale  wall-clock pacing factor (default 1.0 = real time; e.g. 0.001
-//               replays 1000x faster; 0 disables pacing)
-//   itch_port   UDP port ITCH market data is broadcast to (default 26000)
-//   ouch_port   TCP port the OUCH order-entry server listens on (default 26001)
+//   mbo_file      packed binary MBO stream (default: data/synthetic_mbo_stream.bin)
+//   time_scale    wall-clock pacing factor (default 1.0 = real time; e.g. 0.001
+//                 replays 1000x faster; 0 disables pacing)
+//   itch_port     UDP port ITCH market data is broadcast to (default 26000)
+//   ouch_port     TCP port the OUCH order-entry server listens on (default 26001)
+//   itch_address  destination IP for the ITCH UDP feed (default 127.0.0.1).
+//                 For a hardware target, set this to the FPGA's IP (unicast)
+//                 or a multicast group the FPGA subscribes to (e.g. 239.1.1.1).
+//                 The OUCH server always listens on 0.0.0.0:ouch_port, so the
+//                 FPGA connects in to HOST_IP:ouch_port.
 int main(int argc, char* argv[]) {
     std::string data_file_path = "data/synthetic_mbo_stream.bin";
 
@@ -20,6 +25,7 @@ int main(int argc, char* argv[]) {
     if (argc > 2) cfg.time_scale = std::atof(argv[2]);
     if (argc > 3) cfg.itch_port  = static_cast<uint16_t>(std::atoi(argv[3]));
     if (argc > 4) cfg.ouch_port  = static_cast<uint16_t>(std::atoi(argv[4]));
+    if (argc > 5) cfg.itch_address = argv[5];
 
     std::cout << "========================================\n";
     std::cout << "Online (Real-Time) Trading Engine\n";

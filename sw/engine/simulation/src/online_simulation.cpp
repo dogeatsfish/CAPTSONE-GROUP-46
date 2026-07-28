@@ -90,8 +90,15 @@ void OnlineSimulation::close_sockets() {
 // ---------------------------------------------------------
 // Market-data (ITCH) side
 // ---------------------------------------------------------
-void OnlineSimulation::broadcast_itch(const std::vector<uint8_t>& packet) {
-    if (itch_fd < 0 || packet.empty()) return;
+void OnlineSimulation::broadcast_itch(const std::vector<uint8_t>& itch_msg) {
+    if (itch_fd < 0 || itch_msg.empty()) return;
+
+    // Wrap the ITCH message in a MoldUDP64 packet (one message per datagram),
+    // matching the encapsulation the FPGA parser strips. The sequence number
+    // advances per message sent.
+    const std::vector<uint8_t> packet =
+        protocol::to_moldudp64({itch_msg}, itch_seq_num, cfg.session);
+    itch_seq_num += 1;
 
     sockaddr_in dest{};
     dest.sin_family = AF_INET;
@@ -114,10 +121,12 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
     {
         std::lock_guard<std::mutex> lock(book_mutex);
 
-        if (rec.message_type == protocol::ITCH_ADD) {
+        // rec is a source MBORecord, so compare against the MBO record tags
+        // ('A'/'C'), not the ITCH wire tags (Cancel is 'X' on the wire).
+        if (rec.message_type == protocol::MBO_ADD) {
             Order mkt_order{rec.order_id, rec.price, rec.size, rec.side, false};
             matching_engine.process_add(mkt_order, ts);
-        } else if (rec.message_type == protocol::ITCH_CANCEL) {
+        } else if (rec.message_type == protocol::MBO_CANCEL) {
             matching_engine.process_cancel(rec.order_id, rec.side);
         }
 

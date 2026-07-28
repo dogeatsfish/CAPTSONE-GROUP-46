@@ -140,10 +140,15 @@ int main() {
 
     std::thread itch_listener([&]() {
         uint8_t buf[2048];
+        // The ITCH message sits after the MoldUDP64 header (20 B) and the
+        // per-message 2-byte length prefix.
+        constexpr size_t type_off =
+            protocol::MOLD_HEADER_LEN + protocol::MOLD_MSGLEN_LEN;
         while (udp_running.load(std::memory_order_relaxed)) {
             const ssize_t n = ::recv(itch_fd, buf, sizeof(buf), 0);
             if (n <= 0) continue;
-            itch_types.push_back(static_cast<char>(buf[0]));
+            if (static_cast<size_t>(n) <= type_off) continue; // malformed frame
+            itch_types.push_back(static_cast<char>(buf[type_off]));
         }
     });
 
