@@ -50,7 +50,7 @@ PY_SUFFIX   := $(shell python3-config --extension-suffix)
 PY_TARGET   := $(PY_MODULE)$(PY_SUFFIX)
 PY_SRCS     := bindings/src/bindings.cpp $(CORE_SRCS)
 
-.PHONY: all run online run-online pymodule stress-book stress-sim test-online clean
+.PHONY: all run online run-online pymodule stress-book test-online socket-test clean
 
 all: $(TARGET) $(ONLINE_TARGET)
 
@@ -81,27 +81,36 @@ $(PY_TARGET): $(PY_SRCS)
 # Stress / correctness tests
 # ---------------------------------------------------------
 # C++ OrderBook stress + correctness harness.
-STRESS_BOOK_BIN  := tests/stress_orderbook
-STRESS_BOOK_SRCS := tests/stress_orderbook.cpp match/src/orderbook.cpp
+STRESS_BOOK_BIN  := tests/src/stress_orderbook
+STRESS_BOOK_SRCS := tests/src/stress_orderbook.cpp match/src/orderbook.cpp
 
-# Python interpreter used to run the simulation stress test (must be able to
-# import the built engine_sim*.so). Override with PY=... if needed.
+# Python interpreter used by the online tests to generate market-data books.
+# Override with PY=... if needed.
 PY ?= ../service/.venv/bin/python
 
 stress-book: $(STRESS_BOOK_SRCS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(STRESS_BOOK_SRCS) -o $(STRESS_BOOK_BIN)
 	./$(STRESS_BOOK_BIN)
 
-stress-sim: pymodule
-	$(PY) tests/stress_simulation.py
-
 # Online simulation end-to-end test (ITCH replay + OUCH connect/send/receive).
-TEST_ONLINE_BIN  := tests/test_online
-TEST_ONLINE_SRCS := tests/test_online.cpp $(CORE_SRCS)
+# The market-data book is produced by the Python EventGenerator first.
+TEST_ONLINE_BIN  := tests/src/test_online
+TEST_ONLINE_SRCS := tests/src/test_online.cpp $(CORE_SRCS)
+GEN_LADDER       := tests/src/gen_market_ladder.py
 
-test-online: $(TEST_ONLINE_SRCS)
+test-online: $(TEST_ONLINE_SRCS) $(GEN_LADDER)
+	$(PY) $(GEN_LADDER)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(TEST_ONLINE_SRCS) -o $(TEST_ONLINE_BIN) -lpthread
 	./$(TEST_ONLINE_BIN)
 
+# OUCH socket client vs a generated rising bid ladder.
+SOCKET_TEST_BIN  := tests/src/socket_test
+SOCKET_TEST_SRCS := tests/src/socket_test.cpp $(CORE_SRCS)
+
+socket-test: $(SOCKET_TEST_SRCS) $(GEN_LADDER)
+	$(PY) $(GEN_LADDER)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SOCKET_TEST_SRCS) -o $(SOCKET_TEST_BIN) -lpthread
+	./$(SOCKET_TEST_BIN)
+
 clean:
-	rm -f $(TARGET) $(ONLINE_TARGET) $(PY_MODULE)*.so $(STRESS_BOOK_BIN) $(TEST_ONLINE_BIN)
+	rm -f $(TARGET) $(ONLINE_TARGET) $(PY_MODULE)*.so $(STRESS_BOOK_BIN) $(TEST_ONLINE_BIN) $(SOCKET_TEST_BIN)
