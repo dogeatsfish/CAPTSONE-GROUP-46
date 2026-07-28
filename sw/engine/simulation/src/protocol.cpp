@@ -10,6 +10,11 @@ namespace {
 // Implemented with explicit shifts so they behave identically on
 // little- and big-endian hosts without relying on platform headers.
 // ---------------------------------------------------------
+void put_u16(std::vector<uint8_t>& out, uint16_t v) {
+    out.push_back(static_cast<uint8_t>((v >> 8) & 0xFF));
+    out.push_back(static_cast<uint8_t>(v & 0xFF));
+}
+
 void put_u64(std::vector<uint8_t>& out, uint64_t v) {
     for (int shift = 56; shift >= 0; shift -= 8) {
         out.push_back(static_cast<uint8_t>((v >> shift) & 0xFF));
@@ -42,12 +47,13 @@ double get_double(const uint8_t* p) {
 // ---------------------------------------------------------
 // ITCH encoding
 // ---------------------------------------------------------
-std::vector<uint8_t> to_itch(const MBORecord& rec) {
+std::vector<uint8_t> to_itch(const MBORecord& rec, uint16_t stock_locate) {
     std::vector<uint8_t> packet;
 
     if (rec.message_type == ITCH_ADD) {
         packet.reserve(ITCH_ADD_LEN);
         packet.push_back(static_cast<uint8_t>(ITCH_ADD));
+        put_u16(packet, stock_locate); // security id, right after msg type (ITCH-style)
         put_u64(packet, rec.timestamp_ns);
         put_u64(packet, rec.order_id);
         packet.push_back(static_cast<uint8_t>(rec.side));
@@ -56,6 +62,7 @@ std::vector<uint8_t> to_itch(const MBORecord& rec) {
     } else if (rec.message_type == ITCH_CANCEL) {
         packet.reserve(ITCH_CANCEL_LEN);
         packet.push_back(static_cast<uint8_t>(ITCH_CANCEL));
+        put_u16(packet, stock_locate);
         put_u64(packet, rec.timestamp_ns);
         put_u64(packet, rec.order_id);
         packet.push_back(static_cast<uint8_t>(rec.side));

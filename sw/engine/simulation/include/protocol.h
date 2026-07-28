@@ -10,9 +10,12 @@
 // machines regardless of host endianness. Doubles are transported as
 // their raw IEEE-754 bit pattern packed big-endian.
 //
-//   ITCH (market data, broadcast by the simulation over UDP):
-//     'A' Add Order  : type(1) ts(8) order_id(8) side(1) price(8) size(8) = 34
-//     'C' Cancel     : type(1) ts(8) order_id(8) side(1)                  = 18
+//   ITCH (market data, broadcast by the simulation over UDP). Following the
+//   NASDAQ ITCH convention, the security is identified by a 2-byte numeric
+//   "stock locate" immediately after the message type (the human-readable
+//   ticker string lives only in the Stock Directory message, not here):
+//     'A' Add Order  : type(1) stock_locate(2) ts(8) order_id(8) side(1) price(8) size(8) = 36
+//     'C' Cancel     : type(1) stock_locate(2) ts(8) order_id(8) side(1)                  = 20
 //
 //   OUCH (order entry, received by the simulation over TCP):
 //     'O' Enter Order: type(1) order_id(8) side(1) price(8) size(8)       = 26
@@ -39,9 +42,13 @@ constexpr char OUCH_CANCEL = 'X'; // client -> server: cancel order
 constexpr char OUCH_ACCEPTED = 'A'; // order accepted and resting (no fill yet)
 constexpr char OUCH_EXECUTED = 'E'; // order (partially) executed
 
+// Default numeric security id ("stock locate") stamped on ITCH messages when
+// no explicit ticker is supplied. Mirrors ITCH's per-day security index.
+constexpr uint16_t DEFAULT_STOCK_LOCATE = 1;
+
 // ---- Fixed on-the-wire sizes (bytes) -------------------------------------
-constexpr size_t ITCH_ADD_LEN    = 34;
-constexpr size_t ITCH_CANCEL_LEN = 18;
+constexpr size_t ITCH_ADD_LEN    = 36; // +2 bytes stock_locate vs. base fields
+constexpr size_t ITCH_CANCEL_LEN = 20; // +2 bytes stock_locate
 constexpr size_t OUCH_ENTER_LEN  = 26;
 constexpr size_t OUCH_CANCEL_LEN = 10;
 
@@ -56,10 +63,13 @@ constexpr size_t OUCH_MAX_LEN = OUCH_ENTER_LEN;
 // ---------------------------------------------------------
 // ITCH encoding (outbound market data)
 // ---------------------------------------------------------
-// Encode a single MBO record into an ITCH packet. Add records ('A') carry
-// full price/size; cancel records ('C') carry only identity. Unknown message
-// types produce an empty buffer.
-std::vector<uint8_t> to_itch(const MBORecord& rec);
+// Encode a single MBO record into an ITCH packet. The 2-byte stock_locate
+// (security id, ITCH-style) is written right after the message type; it
+// defaults to DEFAULT_STOCK_LOCATE (1). Add records ('A') carry full
+// price/size; cancel records ('C') carry only identity. Unknown message types
+// produce an empty buffer.
+std::vector<uint8_t> to_itch(const MBORecord& rec,
+                             uint16_t stock_locate = DEFAULT_STOCK_LOCATE);
 
 // ---------------------------------------------------------
 // OUCH decoding (inbound order entry)

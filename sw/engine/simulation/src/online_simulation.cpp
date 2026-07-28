@@ -322,7 +322,7 @@ SimulationResult OnlineSimulation::run(SampleCallback on_sample) {
             last_market_ts_ns.store(rec.timestamp_ns, std::memory_order_relaxed);
 
             // --- Broadcast the ITCH packet, then apply to the book ---
-            broadcast_itch(protocol::to_itch(rec));
+            broadcast_itch(protocol::to_itch(rec, cfg.stock_locate));
             apply_market_event(rec, next_sample_ns);
         }
     }

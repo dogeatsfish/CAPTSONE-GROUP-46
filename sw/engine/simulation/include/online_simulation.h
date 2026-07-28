@@ -10,7 +10,7 @@
 
 #include "orderbook.h"
 #include "user_strategy.h"
-#include "offline_simulation.h" // MBORecord + telemetry structs (SimulationResult, ...)
+#include "offline_simulation.h" 
 #include "protocol.h"
 
 class OnlineSimulation {
@@ -28,6 +28,10 @@ public:
         // Cap on any single sleep so a large timestamp gap can't stall the
         // replay indefinitely (nanoseconds). 0 disables the cap.
         uint64_t    max_sleep_ns = 5'000'000'000ULL; // 5 s
+
+        // Numeric security id ("stock locate") stamped on every ITCH message
+        // (2-byte field right after the message type). Defaults to ticker 1.
+        uint16_t    stock_locate = protocol::DEFAULT_STOCK_LOCATE;
     };
 
     explicit OnlineSimulation(const std::string& file_path);

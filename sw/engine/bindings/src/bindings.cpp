@@ -68,7 +68,8 @@ PYBIND11_MODULE(engine_sim, m) {
         .def_readwrite("itch_port",    &OnlineSimulation::Config::itch_port)
         .def_readwrite("ouch_port",    &OnlineSimulation::Config::ouch_port)
         .def_readwrite("time_scale",   &OnlineSimulation::Config::time_scale)
-        .def_readwrite("max_sleep_ns", &OnlineSimulation::Config::max_sleep_ns);
+        .def_readwrite("max_sleep_ns", &OnlineSimulation::Config::max_sleep_ns)
+        .def_readwrite("stock_locate", &OnlineSimulation::Config::stock_locate);
 
     py::class_<OnlineSimulation>(m, "OnlineSimulation")
         .def(py::init<const std::string&>(), py::arg("file_path"),
