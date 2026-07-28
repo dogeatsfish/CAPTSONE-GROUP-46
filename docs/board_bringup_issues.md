@@ -19,9 +19,9 @@ RGMII, strapped for **RGMII-ID** (2 ns internal delay both directions).
 | 1 | **PHY reset (ETH_RESET / R14) had no RTL port** — PHY never leaves reset, no RX clock, board looks dead | 🔴 blocker | ✅ **Fixed in RTL** |
 | 2 | **`hw_kill_switch` polarity** — board key idles HIGH; the active-high RTL signal made the kill *permanently asserted* | 🟠 | ✅ **Fixed in RTL/TB** |
 | 3 | **1000M-only clocking** — the sole clock is the PHY's 125 MHz RX clock; a 100M/10M link breaks the MMCM | 🔴 must-know | ⚠️ **External (operational)** |
-| 4 | **Wrong Vivado part** — report/compiler use `xc7a200tifbg484-1L` (speed -1, **0.9 V**); silicon is `-2` / **1.0 V** | 🟠 | ⚠️ **External (project setting)** |
+| 4 | **Wrong Vivado part** — report/compiler use `xc7a200tifbg484-1L` (speed -1, **0.9 V**); silicon is `-2` / **1.0 V** | 🟠 | ✅ **Fixed in project** (`CAPSTONE.xpr` is `xc7a200tfbg484-2`); report still to correct |
 | 5 | **PHY part name** — report says *Realtek RTL8211*; board is *JL2121-N040I* | 🟠 | ⚠️ **External (report + verify)** |
-| 6 | **Verify V18 (ETH_RXCK) is clock-capable** — it feeds the MMCM | 🟠 | ⚠️ **External (verification)** |
+| 6 | **Verify V18 (ETH_RXCK) is clock-capable** — it feeds the MMCM | 🟠 | ✅ **Verified** — V18 = `IO_L14P_T2_SRCC_14`, `IS_CLK_CAPABLE = 1` |
 | 7 | **LED polarity split** — carrier LEDs active-LOW, core-board LED active-HIGH | 🟡 | ⚠️ **External (wiring)** |
 | 8 | **CRC residue in report** — report says `0xC704DD7B` (non-reflected); as-built is `0xDEBB20E3` | 🟡 | ⚠️ **External (report)** |
 | 9 | **Block classifications** — report marks TX MAC + both CDC FIFOs as (ND) vendor; they are custom (D) | 🟡 | ⚠️ **External (report)** |
@@ -110,9 +110,10 @@ would need a fixed board-crystal clock and multi-rate handling — out of scope.
 The report's Compiler section targets **`xc7a200tifbg484-1L`** — speed grade
 **-1** and low-voltage **0.9 V**. The actual silicon is **`XC7A200T-2FBG484I`** —
 speed **-2**, **1.0 V** VCCINT (manual power table). The `L`/0.9 V mismatch means
-Vivado applies the wrong voltage timing models. **Action:** set the Vivado part
-to **`xc7a200tfbg484-2`**. The DFX pblock/utilization figures were computed on
--1L and will shift.
+Vivado applies the wrong voltage timing models. **Done:** the Vivado project now
+targets **`xc7a200tfbg484-2`** (`CAPSTONE.xpr`, both `synth_1` and `impl_1`).
+**Still to do:** correct the part in the report — the DFX pblock/utilization
+figures there were computed on -1L and will shift.
 
 ### 5. PHY part name (🟠)
 
@@ -123,12 +124,19 @@ repo already use the *actual* JL2121 behavior. **Action:** correct the report,
 and re-verify any RTL8211-specific assumption against the JL2121 (only relevant
 if MDIO management is ever added).
 
-### 6. Verify V18 is clock-capable (🟠)
+### 6. V18 is clock-capable — RESOLVED (🟠 → ✅)
 
-`rgmii_rx_clk` (V18) feeds the MMCM, so V18 must be a clock-capable (MRCC/SRCC)
-pin. The manual doesn't give the full pin name; Alinx route RGMII RXC to a CC
-pin, so it should be fine. **Action:** confirm in the pin report if the MMCM
-refuses to place.
+`rgmii_rx_clk` (V18) feeds the MMCM, so V18 had to be a clock-capable (MRCC/SRCC)
+pin. Queried against the actual device (`xc7a200tfbg484-2`):
+
+```
+V18  bank=14  IS_CLK_CAPABLE=1  site=IOB_X0Y122  func=IO_L14P_T2_SRCC_14
+```
+
+It is an **SRCC** pin in bank 14, so it reaches a BUFG and can drive the MMCM.
+Every RGMII data pin is in the same bank and clock region (IOB_X0Y101..X0Y140),
+so a BUFIO/BUFR capture scheme also remains available if the BUFG path ever
+becomes a problem. No action.
 
 ### 7. LED polarity split (🟡)
 
