@@ -246,6 +246,12 @@ module alpha_engine_core
   assign px_sum_c = unsigned'(s0_mid_bid) + unsigned'(s0_mid_ask);
   assign mid_c    = signed'(px_sum_c >> 1);
 
+  // 3-input adder to compute EMA delta in a single carry chain (saves ~1 logic level delay)
+  logic signed [MW:0] delta_sum3;
+  assign delta_sum3 = signed'({s0_mid_bid[MW-1], s0_mid_bid}) + 
+                      signed'({s0_mid_ask[MW-1], s0_mid_ask}) - 
+                      signed'({s0_ema_avg, 1'b0});
+
   always_ff @(posedge core_clk or negedge core_rst_n) begin
     if (!core_rst_n) begin
       s1_valid    <= 1'b0;   s1_sel      <= '0;   s1_asset <= '0;
@@ -262,7 +268,7 @@ module alpha_engine_core
       s1_valid <= s0_valid;
       if (s0_valid) begin
         s1_mid_c         <= mid_c;
-        s1_ema_delta_raw <= mid_c - s0_ema_avg;           // 2nd chained adder
+        s1_ema_delta_raw <= signed'(delta_sum3 >>> 1);    // maps to single 3-input adder
         s1_pre_a         <= s0_mid_a - s0_spread_avg;     // parallel single adds
         s1_pre_b         <= s0_mid_b + s0_spread_avg;
         mid_reg[s0_sel]  <= mid_c;
