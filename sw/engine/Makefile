@@ -19,6 +19,8 @@ INCLUDES := -Ishared/include -Imatch/include -Isimulation/include
 
 # Core engine sources shared by both the CLI and the Python module
 CORE_SRCS := simulation/src/offline_simulation.cpp \
+             simulation/src/online_simulation.cpp \
+             simulation/src/protocol.cpp \
              simulation/src/user_strategy.cpp \
              match/src/orderbook.cpp
 
@@ -28,8 +30,16 @@ CORE_SRCS := simulation/src/offline_simulation.cpp \
 TARGET := simulation_run
 CLI_SRCS := simulation/src/main.cpp $(CORE_SRCS)
 
+# Online (real-time) CLI binary
+ONLINE_TARGET := online_run
+ONLINE_SRCS   := simulation/src/main_online.cpp $(CORE_SRCS)
+
 # Default data file used by `make run` (override with FILE=...)
 FILE ?= ../data_pipeline/data/synthetic_mbo_stream.bin
+
+# Pacing factor for `make run-online` (override with SCALE=...).
+# 1.0 = true real time; smaller replays faster; 0 disables pacing.
+SCALE ?= 0.001
 
 # ---------------------------------------------------------
 # Python extension module (pybind11)
@@ -38,11 +48,11 @@ PY_MODULE  := engine_sim
 PY_INCLUDES := $(shell python3 -m pybind11 --includes)
 PY_SUFFIX   := $(shell python3-config --extension-suffix)
 PY_TARGET   := $(PY_MODULE)$(PY_SUFFIX)
-PY_SRCS     := bindings/bindings.cpp $(CORE_SRCS)
+PY_SRCS     := bindings/src/bindings.cpp $(CORE_SRCS)
 
-.PHONY: all run pymodule clean
+.PHONY: all run online run-online pymodule stress-book stress-sim test-online clean
 
-all: $(TARGET)
+all: $(TARGET) $(ONLINE_TARGET)
 
 $(TARGET): $(CLI_SRCS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(CLI_SRCS) -o $(TARGET)
@@ -50,11 +60,48 @@ $(TARGET): $(CLI_SRCS)
 run: $(TARGET)
 	./$(TARGET) $(FILE)
 
+# ---------------------------------------------------------
+# Online (real-time) CLI binary
+# ---------------------------------------------------------
+online: $(ONLINE_TARGET)
+
+$(ONLINE_TARGET): $(ONLINE_SRCS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(ONLINE_SRCS) -o $(ONLINE_TARGET) -lpthread
+
+run-online: $(ONLINE_TARGET)
+	./$(ONLINE_TARGET) $(FILE) $(SCALE)
+
 pymodule: $(PY_TARGET)
 
 $(PY_TARGET): $(PY_SRCS)
 	$(CXX) $(CXXFLAGS) -shared -fPIC -undefined dynamic_lookup \
 		$(INCLUDES) $(PY_INCLUDES) $(PY_SRCS) -o $(PY_TARGET)
 
+# ---------------------------------------------------------
+# Stress / correctness tests
+# ---------------------------------------------------------
+# C++ OrderBook stress + correctness harness.
+STRESS_BOOK_BIN  := tests/stress_orderbook
+STRESS_BOOK_SRCS := tests/stress_orderbook.cpp match/src/orderbook.cpp
+
+# Python interpreter used to run the simulation stress test (must be able to
+# import the built engine_sim*.so). Override with PY=... if needed.
+PY ?= ../service/.venv/bin/python
+
+stress-book: $(STRESS_BOOK_SRCS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(STRESS_BOOK_SRCS) -o $(STRESS_BOOK_BIN)
+	./$(STRESS_BOOK_BIN)
+
+stress-sim: pymodule
+	$(PY) tests/stress_simulation.py
+
+# Online simulation end-to-end test (ITCH replay + OUCH connect/send/receive).
+TEST_ONLINE_BIN  := tests/test_online
+TEST_ONLINE_SRCS := tests/test_online.cpp $(CORE_SRCS)
+
+test-online: $(TEST_ONLINE_SRCS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(TEST_ONLINE_SRCS) -o $(TEST_ONLINE_BIN) -lpthread
+	./$(TEST_ONLINE_BIN)
+
 clean:
-	rm -f $(TARGET) $(PY_MODULE)*.so
+	rm -f $(TARGET) $(ONLINE_TARGET) $(PY_MODULE)*.so $(STRESS_BOOK_BIN) $(TEST_ONLINE_BIN)

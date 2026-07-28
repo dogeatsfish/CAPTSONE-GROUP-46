@@ -1,17 +1,23 @@
 #pragma once // Prevents the compiler from including this file more than once
 
+#include <cstdint>
+#include <deque>
+#include <map>
+#include <unordered_map>
 #include <vector>
 #include "common.h" // Gives access to Order, Trade, and L1State structs
 
 class OrderBook {
-private:
-    // Contiguous memory blocks to optimize cache locality
-    std::vector<Order> bids;
-    std::vector<Order> asks;
+public:
+    using BidBook = std::map<double, std::deque<Order>, std::greater<double>>;
+    using AskBook = std::map<double, std::deque<Order>>;
+    using IdIndex = std::unordered_map<uint64_t, double>;
 
-    // Private helper methods (internal logic only)
-    FillReport match(Order& aggressive_order, std::vector<Order>& passive_book, bool is_bid, uint64_t timestamp_ns);
-    void insert_order(const Order& order, std::vector<Order>& book, bool descending);
+private:
+    BidBook bids;
+    AskBook asks;
+    IdIndex bid_index;
+    IdIndex ask_index;
 
 public:
     std::vector<Trade> trade_log;

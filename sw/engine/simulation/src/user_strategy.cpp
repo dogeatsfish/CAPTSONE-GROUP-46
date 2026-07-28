@@ -5,7 +5,11 @@ Strategy::Strategy()
     : next_strategy_order_id(900000000), // High ID range to separate from CSV MBO orders
       position_size(0.0),
       avg_entry_price(0.0),
-      realized_pnl(0.0)
+      realized_pnl(0.0),
+      have_last_l1(false),
+      last_bid(0.0),
+      last_ask(0.0),
+      last_spread(0.0)
 {}
 
 // ---------------------------------------------------------
@@ -62,14 +66,18 @@ std::optional<Order> Strategy::on_market_update(const L1State& current_l1) {
         return std::nullopt;
     }
 
-    // Static variables persist across function calls to track market state
-    // (If you prefer, you can move these to user_strategy.h as class members)
-    static double last_bid = current_l1.best_bid;
-    static double last_ask = current_l1.best_ask;
-    static double last_spread = current_l1.best_ask - current_l1.best_bid;
-
     double current_spread = current_l1.best_ask - current_l1.best_bid;
     std::optional<Order> order_to_send = std::nullopt;
+
+    // On the very first two-sided quote we have no prior tick to compare
+    // against, so just seed the trackers and wait for the next update.
+    if (!have_last_l1) {
+        last_bid = current_l1.best_bid;
+        last_ask = current_l1.best_ask;
+        last_spread = current_spread;
+        have_last_l1 = true;
+        return std::nullopt;
+    }
 
     // 2. Spread-Reversion Logic:
     // If the spread widened compared to the last tick, we push back.
