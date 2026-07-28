@@ -51,13 +51,15 @@ module commontrader_top
   // The PHY holds its RGMII RX clock in reset until this is released, and that
   // RX clock is the ONLY clock in the design (the MMCM derives core_clk from
   // it). See the driver + rationale near clk_rst_gen.  [FIX: was missing]
-  output logic       eth_phy_rst_n,
+  output logic       eth_phy_rst_n
+
+);
 
   // --- Telemetry / status (ILA or status register; not board pins) ----------
-  output logic [15:0] order_drop_count,   // orders lost to a busy TX Generator
-  output logic        tx_fifo_overflow,   // sticky: TX CDC FIFO overran
-  output logic        ts_wrapped          // sticky: timestamp counter rolled over
-);
+  (* mark_debug = "true" *) logic [15:0] order_drop_count;   // orders lost to a busy TX Generator
+  (* mark_debug = "true" *) logic        tx_fifo_overflow;   // sticky: TX CDC FIFO overran
+  (* mark_debug = "true" *) logic        ts_wrapped;         // sticky: timestamp counter rolled over
+
 
   //--------------------------------------------------------------------------
   // Clocking and reset
