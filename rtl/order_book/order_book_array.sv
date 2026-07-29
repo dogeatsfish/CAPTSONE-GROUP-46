@@ -255,6 +255,44 @@ module order_book_array
   (* max_fanout = 64 *) book_state_e state;
 
   //--------------------------------------------------------------------------
+  // REGISTERED WRITE ENABLES (TIMING -- ROUND 19)
+  //
+  // Run 18 left 240 failing paths and 184 of them were ONE structural problem:
+  // the write-enable decode reaching the scattered arrays.
+  //
+  //   STORE  : `book[tgt_asset][tgt_side][l] <= sel[l]` inside the FSM case made
+  //            every one of the ~10 k book flops carry
+  //            CE = (state == STORE) && (a == tgt_asset) && (s == tgt_side).
+  //            Synthesis built that as LUT6 -> LUT4 -> a fanout-832 net:
+  //              tgt_side_rep/Q -> book[..]_i_2 (fo=38) -> book[..]_i_1 (fo=832)
+  //            2 logic levels, 84 % route, and it owned the whole top of the
+  //            failing list (state/tgt_side/tgt_asset -> book_reg/CE).
+  //
+  //   sel    : the same shape one array down -- state -> LUT3 -> LUT6 -> a
+  //            per-level enable over the 16x64 slice (3 levels, 81 % route),
+  //            which was the WNS at -0.173 ns.
+  //
+  // Both decodes are functions of registers that are known a FULL CYCLE before
+  // the write happens, so both are now precomputed into registers:
+  //
+  //   store_we[a][s] -- one-hot asset/side select, set in STORE_CMP, so a book
+  //                     flop's CE is a SINGLE REGISTER BIT (zero logic levels)
+  //                     and each bit's loads are one contiguous 1024-flop slice
+  //                     instead of a decode spanning the whole array.
+  //   sh_en / wc_en  -- per-level SHIFT / WRITE_COMMIT enables, computed in
+  //                     SEARCH_DIST. A `sel` clock-enable then folds into ONE
+  //                     LUT6: {state[3:0], sh_en[k], wc_en[k]} is exactly six
+  //                     inputs.
+  //
+  // This is the same lever that fixed hit_idx and tgt_price in earlier rounds --
+  // move the decode off the wide net -- but applied to the enables themselves
+  // rather than to their inputs.
+  //--------------------------------------------------------------------------
+  (* max_fanout = 128 *) logic [NUM_ASSETS-1:0][1:0] store_we;
+  (* max_fanout = 64 *)  logic [NUM_LEVELS-1:0]      sh_en;
+  (* max_fanout = 64 *)  logic [NUM_LEVELS-1:0]      wc_en;
+
+  //--------------------------------------------------------------------------
   // SEARCH stage 1 (SEARCH_CMP): parallel comparator bank.
   //
   // For every level of the target side, compute two bits:
@@ -316,14 +354,26 @@ module order_book_array
   //   - ADD at a new price      -> insert, shift down
   //   - DELETE (or qty -> 0)    -> remove, shift up
   //   - MODIFY at existing price-> write in place, no shift
+  //
+  // TIMING (ROUND 18): these were COMBINATIONAL from tgt_type/hit_exact and sat
+  // directly in front of the `sel` write-enable decode:
+  //     tgt_type_reg -> LUT2(is_removal, fo=977) -> LUT4(needs_shift)
+  //                  -> LUT6 -> LUT6 -> sel_reg[*][*]/CE
+  // -- a 4-LUT cone, 78 % route, and 8 of the 40 failing paths. Both are pure
+  // functions of registers that are STABLE from SEARCH_ENC onward, so they are
+  // computed once in SEARCH_DIST (a stage that does nothing but fan registers
+  // out, and has slack to spare) and consumed as REGISTERS in SHIFT. That takes
+  // two LUT levels and the fanout-977 net out of the enable cone entirely.
+  //
+  // hit_exact_central is used rather than the replicated hit_exact because it is
+  // the value hit_exact will HOLD during SHIFT -- SEARCH_DIST is exactly the
+  // cycle that copies one into the other, so the two are equal by construction.
+  //
+  // max_fanout mirrors `state`: these gate every `sel` flop, so the replicas
+  // must be able to reach the whole 16x64 array on short routes.
   //--------------------------------------------------------------------------
-  logic needs_shift;
-  logic is_removal;
-
-  always_comb begin
-    is_removal  = (tgt_type == MSG_DELETE);
-    needs_shift = (tgt_type == MSG_ADD && !hit_exact) || is_removal;
-  end
+  (* max_fanout = 64 *) logic needs_shift;
+  (* max_fanout = 64 *) logic is_removal;
 
   //--------------------------------------------------------------------------
   // Synchronous reset for the CONTROL path only (TIMING -- ROUND 4 / ROUND 6).
@@ -369,6 +419,11 @@ module order_book_array
       hit_idx     <= '0;
       hit_exact   <= 1'b0;
       hit_valid   <= 1'b0;
+      is_removal  <= 1'b0;
+      needs_shift <= 1'b0;
+      store_we    <= '0;
+      sh_en       <= '0;
+      wc_en       <= '0;
       orig_tob    <= '0;
       tob_changed <= 1'b0;
       sel_valid         <= '0;
@@ -384,6 +439,12 @@ module order_book_array
       // tob_updated is a single-cycle strobe.
       tob_updated <= '0;
 
+      // store_we is likewise a single-cycle strobe: STORE_CMP raises exactly one
+      // bit, it is high for the STORE cycle only, and it self-clears here. That
+      // is what lets the book write live outside this FSM with no state term in
+      // its clock-enable (TIMING -- ROUND 19).
+      store_we    <= '0;
+
       unique case (state)
 
         //--------------------------------------------------------------------
@@ -393,15 +454,30 @@ module order_book_array
         // takes symbol_id straight from the ITCH Stock Locate field, so a feed
         // carrying an unexpected locate must be discarded HERE, in the block
         // that owns the array -- not silently aliased onto a real asset.
+        //
+        // TIMING (ROUND 18): the range compare used to gate the tgt_* CAPTURE as
+        // well as the state move, which put it in front of every tgt_* flop:
+        //     upd_reg[symbol_id] -> LUT5 -> LUT5 -> (fo=72) -> LUT4
+        //                        -> tgt_price_reg[9]_rep/D
+        // -- the WNS path at -0.127 ns. `symbol_id < 5` is an 8-bit compare and
+        // cannot fold into one LUT6, so it is two levels no matter how it is
+        // written; the fix is to keep it OFF the wide capture enable instead.
+        //
+        // Capture is now gated on s_axis_tvalid alone (one level), and only the
+        // STATE MOVE carries the range check. Latching a rejected update into
+        // tgt_* is harmless: the FSM stays in IDLE, nothing reads tgt_* in IDLE,
+        // and the next accepted update overwrites every field. The discard still
+        // happens HERE, in the block that owns the array -- an out-of-range
+        // locate never reaches LOAD and so never indexes the book.
         IDLE: begin
-          if (s_axis_tvalid && upd.symbol_id < SYMBOL_W'(NUM_ASSETS)) begin
+          if (s_axis_tvalid) begin
             tgt_asset <= upd.symbol_id[ASSET_IDX_W-1:0];
             tgt_side  <= upd.side;
             tgt_price <= upd.price;
             tgt_qty   <= upd.quantity;
             tgt_type  <= upd.msg_type;
             tgt_ts    <= upd.timestamp;
-            state     <= LOAD;
+            if (upd.symbol_id < SYMBOL_W'(NUM_ASSETS)) state <= LOAD;
           end
         end
 
@@ -461,19 +537,22 @@ module order_book_array
         //--------------------------------------------------------------------
         // Priority-encode the registered results (search stage 2).
         //--------------------------------------------------------------------
+        // ROUND 19: the transition out of here is now UNCONDITIONAL. It used to
+        // branch on the combinational `srch_valid`, which put the 16-level
+        // priority cascade over cmp_exact/cmp_insert directly into the FSM's
+        // next-state cone (`cmp_exact_reg[4] -> state_reg[2]_rep/D`, 4 logic
+        // levels -- the deepest cone left in run 18 outside the enable clusters).
+        // srch_valid is already being registered into hit_valid_central on this
+        // same edge, so the drop decision simply moves to SEARCH_DIST where it
+        // reads a flop. Cost: a REJECTED update takes one extra cycle to return
+        // to IDLE (and holds book_busy one cycle longer). Accepted transactions
+        // are unchanged at 7 cycles, and the benches bound book_busy by
+        // NUM_LEVELS+5 = 21 against an observed maximum of 8.
         SEARCH_ENC: begin
           hit_idx_central   <= srch_idx;
           hit_exact_central <= srch_exact;
           hit_valid_central <= srch_valid;
-
-          // A price worse than every tracked level, on a full book, falls
-          // outside the maintained depth window and is simply dropped.
-          if (!srch_valid) begin
-            book_busy[tgt_asset] <= 1'b0;
-            state                <= IDLE;
-          end else begin
-            state <= SEARCH_DIST;
-          end
+          state             <= SEARCH_DIST;
         end
 
         //--------------------------------------------------------------------
@@ -485,7 +564,52 @@ module order_book_array
           hit_idx   <= hit_idx_central;
           hit_exact <= hit_exact_central;
           hit_valid <= hit_valid_central;
-          state     <= SHIFT;
+
+          // Shift-kind decode, registered here so SHIFT/WRITE_COMMIT see flops
+          // instead of a 2-LUT cone in front of every `sel` clock-enable
+          // (TIMING -- ROUND 18, see the declaration note).
+          begin
+            automatic logic rem_c, nsh_c, wc_c;
+
+            rem_c = (tgt_type == MSG_DELETE);
+            nsh_c = (tgt_type == MSG_ADD && !hit_exact_central) || rem_c;
+            // A level is written by WRITE_COMMIT only for ADD / MODIFY. DELETE
+            // writes nothing (the shift already removed the level) and MSG_RSVD
+            // is ignored -- this reproduces the `unique case (tgt_type)` with its
+            // empty DELETE arm and `default: ;` EXACTLY, including MSG_RSVD.
+            wc_c  = (tgt_type == MSG_ADD) || (tgt_type == MSG_MODIFY);
+
+            is_removal  <= rem_c;
+            needs_shift <= nsh_c;
+
+            // Per-level enables (TIMING -- ROUND 19). Constant k against a
+            // registered hit_idx_central, one cycle before the write, so SHIFT
+            // and WRITE_COMMIT read a flop per level instead of rebuilding the
+            // compare inside the enable cone.
+            //   removal : levels [hit_idx .. N-2] take their successor AND the
+            //             tail is always vacated -> level N-1 always written.
+            //   insert  : levels [hit_idx+1 .. N-1] take their predecessor.
+            for (int unsigned k = 0; k < NUM_LEVELS; k++) begin
+              sh_en[k] <= nsh_c &&
+                          (rem_c ? ((k >= hit_idx_central) || (k == NUM_LEVELS-1))
+                                 : ((k >= 1) && (k > hit_idx_central)));
+              wc_en[k] <= wc_c && (k == hit_idx_central);
+            end
+          end
+
+          // A price worse than every tracked level, on a full book, falls
+          // outside the maintained depth window and is simply dropped. Decided
+          // here (ROUND 19) rather than in SEARCH_ENC so the test reads the
+          // REGISTERED hit_valid_central instead of the priority cascade -- see
+          // the SEARCH_ENC note. The sh_en/wc_en written above are harmless on
+          // this path: nothing consumes them before the next transaction
+          // overwrites them in its own SEARCH_DIST.
+          if (!hit_valid_central) begin
+            book_busy[tgt_asset] <= 1'b0;
+            state                <= IDLE;
+          end else begin
+            state                <= SHIFT;
+          end
         end
 
         //--------------------------------------------------------------------
@@ -508,24 +632,27 @@ module order_book_array
         // update 22 -> ~7); the benches wait a fixed 30 cycles and bound
         // book_busy by <= NUM_LEVELS+5, both of which a shorter slide satisfies.
         //--------------------------------------------------------------------
+        // ROUND 19: the per-level "is this level written" test is no longer
+        // rebuilt here from hit_idx -- it is the registered `sh_en[k]`, decided
+        // in SEARCH_DIST. The DATA mux is unchanged (still a fixed neighbour);
+        // only the enable moved. Behaviour is identical arm for arm:
+        //   !needs_shift -> sh_en is all zero          -> nothing slides
+        //   removal      -> sh_en[k] for k >= hit_idx, plus the tail
+        //   insert       -> sh_en[k] for k >= 1 && k > hit_idx
         SHIFT: begin
-          // No aggregate pre-read here any more (ROUND 13): the per-level sums
-          // are precomputed in SEARCH_CMP, so a pass-through simply holds.
-          if (!needs_shift) begin
-            // Pass-through (modify, or add aggregating into an existing level):
-            // nothing to slide.
-          end else if (is_removal) begin
-            // Remove level hit_idx: levels [hit_idx .. N-2] take their successor,
-            // the tail is vacated.
-            for (int unsigned k = 0; k < NUM_LEVELS-1; k++)
-              if (k >= hit_idx) sel[k] <= sel[k+1];
-            sel[NUM_LEVELS-1] <= '0;
-          end else begin
-            // Insert at hit_idx: levels [hit_idx+1 .. N-1] take their predecessor
-            // (opening the hit_idx slot, which WRITE_COMMIT fills); the old tail
-            // level falls off the bottom.
-            for (int unsigned k = 1; k < NUM_LEVELS; k++)
-              if (k > hit_idx) sel[k] <= sel[k-1];
+          for (int unsigned k = 0; k < NUM_LEVELS; k++) begin
+            if (sh_en[k]) begin
+              if (is_removal) begin
+                // Levels [hit_idx .. N-2] take their successor; the tail vacates.
+                sel[k] <= (k == NUM_LEVELS-1) ? '0 : sel[k+1];
+              end else if (k >= 1) begin
+                // Insert: levels [hit_idx+1 .. N-1] take their predecessor. The
+                // k >= 1 guard is a constant per unrolled iteration (it costs
+                // nothing) and keeps sel[k-1] in range for k = 0, which sh_en
+                // never enables on an insert anyway.
+                sel[k] <= sel[k-1];
+              end
+            end
           end
           state <= WRITE_COMMIT;
         end
@@ -538,32 +665,22 @@ module order_book_array
         // cycles instead of one deep one (TIMING: was the -6.7 ns and -1.86 ns
         // critical paths).
         //--------------------------------------------------------------------
+        // ROUND 19: the `unique case (tgt_type)` + `k == hit_idx` decode that
+        // gated these writes is now the registered `wc_en[k]` from SEARCH_DIST.
+        // Equivalent arm for arm -- wc_en is set only for ADD and MODIFY, so
+        // DELETE (level already removed by the shift) and MSG_RSVD still write
+        // nothing -- and the quantity mux folds the two live arms exactly:
+        //   ADD  + hit_exact -> agg_qty[k]   (aggregate into the existing level)
+        //   ADD  + !hit_exact-> tgt_qty      (fresh level opened by the shift)
+        //   MODIFY           -> tgt_qty
         WRITE_COMMIT: begin
-          unique case (tgt_type)
-            MSG_ADD: begin
-              for (int unsigned k = 0; k < NUM_LEVELS; k++) begin
-                if (k == hit_idx) begin
-                  sel[k].price <= tgt_price;
-                  sel[k].quantity <= hit_exact ? agg_qty[k] : tgt_qty;
-                end
-              end
+          for (int unsigned k = 0; k < NUM_LEVELS; k++) begin
+            if (wc_en[k]) begin
+              sel[k].price    <= tgt_price;
+              sel[k].quantity <= (tgt_type == MSG_ADD && hit_exact) ? agg_qty[k]
+                                                                   : tgt_qty;
             end
-
-            MSG_MODIFY: begin
-              for (int unsigned k = 0; k < NUM_LEVELS; k++) begin
-                if (k == hit_idx) begin
-                  sel[k].price <= tgt_price;
-                  sel[k].quantity <= tgt_qty;
-                end
-              end
-            end
-
-            MSG_DELETE: begin
-              // The level was already removed by the shift; nothing to write.
-            end
-
-            default: ;
-          endcase
+          end
 
           // The new top of book is level 0 after this update. For a delete the
           // shift has already moved the successor into place (sel[0] is final
@@ -591,6 +708,18 @@ module order_book_array
         //--------------------------------------------------------------------
         STORE_CMP: begin
           tob_changed <= (commit_tob != orig_tob);
+
+          // Raise the one-hot book write-enable for the slice this transaction
+          // owns (TIMING -- ROUND 19). Written as an explicit compare loop, not
+          // `store_we[tgt_asset][tgt_side] <= 1'b1`, for two reasons: it is the
+          // asset/side decode itself, moved a cycle earlier into a register
+          // where there is slack, and it cannot index out of range if tgt_asset
+          // ever holds a locate >= NUM_ASSETS.
+          for (int unsigned a = 0; a < NUM_ASSETS; a++)
+            for (int unsigned s = 0; s < 2; s++)
+              if (a == unsigned'(tgt_asset) && s == unsigned'(tgt_side))
+                store_we[a][s] <= 1'b1;
+
           state       <= STORE;
         end
 
@@ -603,11 +732,14 @@ module order_book_array
         // STORE_CMP) -- a deep-level update must not wake the Alpha Engine and
         // burn its FS-7 budget for nothing.
         //--------------------------------------------------------------------
+        // ROUND 19: the book write-back has MOVED OUT of this case, into its own
+        // always_ff gated purely by `store_we` (see below the FSM). Keeping it
+        // here is what forced every book flop's clock-enable to carry a
+        // `state == STORE` term on top of the asset/side compare. The write
+        // still happens in exactly this cycle -- store_we is a one-cycle strobe
+        // raised in STORE_CMP -- and `sel` is stable throughout (nothing writes
+        // it after WRITE_COMMIT), so the data is identical.
         STORE: begin
-          for (int unsigned l = 0; l < NUM_LEVELS; l++) begin
-            book[tgt_asset][tgt_side][l] <= sel[l];
-          end
-
           if (tob_changed) begin
             tob[tgt_asset][tgt_side] <= commit_tob;
             tob_ts[tgt_asset]        <= tgt_ts;
@@ -620,6 +752,42 @@ module order_book_array
 
         default: state <= IDLE;
       endcase
+    end
+  end
+
+  //--------------------------------------------------------------------------
+  // BOOK WRITE-BACK (TIMING -- ROUND 19)
+  //
+  // Deliberately its OWN always_ff, outside the FSM, and deliberately with NO
+  // reset (the book is GSR-initialised -- see the storage note; adding a reset
+  // here would recreate the round-4/6 reset-net problem on ~10 k flops).
+  //
+  // Every book flop's clock-enable is now exactly one register bit,
+  // `store_we[a][s]`, with ZERO logic levels in front of it. Previously this
+  // write lived in the FSM's STORE arm, so each flop carried
+  // `(state == STORE) && (a == tgt_asset) && (s == tgt_side)` -- a two-LUT
+  // decode ending in a fanout-832 net, which was 184 of run 18's 240 failing
+  // paths. The decode still happens, but one cycle earlier in STORE_CMP where
+  // there is slack, and its result is a register.
+  //
+  // Each store_we bit now drives ONE contiguous asset/side slice
+  // (NUM_LEVELS x 64 = 1024 flops) rather than a decode net spanning the whole
+  // array, so `max_fanout` replicas are physically local to the slice they
+  // enable -- which is also what should pull the placement back together.
+  //
+  // Timing and data are unchanged: store_we is a one-cycle strobe raised in
+  // STORE_CMP, so this fires in exactly the cycle the old STORE arm did, and
+  // `sel` is stable from WRITE_COMMIT onward.
+  //--------------------------------------------------------------------------
+  always_ff @(posedge core_clk) begin
+    for (int unsigned a = 0; a < NUM_ASSETS; a++) begin
+      for (int unsigned s = 0; s < 2; s++) begin
+        if (store_we[a][s]) begin
+          for (int unsigned l = 0; l < NUM_LEVELS; l++) begin
+            book[a][s][l] <= sel[l];
+          end
+        end
+      end
     end
   end
 

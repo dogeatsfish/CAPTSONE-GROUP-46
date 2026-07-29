@@ -302,6 +302,21 @@ module alpha_engine_core
   logic [QTY_W-1:0]        s2_bid_qty,   s2_ask_qty;
   logic [TIMESTAMP_W-1:0]  s2_ts;
 
+  // Registered "this side has liquidity" flags (TIMING -- ROUND 18).
+  //
+  // S3 needs `qty != 0` to gate the trade register's CLOCK ENABLES. Computing it
+  // from qty chained the 32-bit avail mux and the LOT_SIZE min IN FRONT of the
+  // enables: s2_ask_qty -> avail -> min -> (qty != 0) -> trade_reg/CE was a
+  // 4-LUT cone feeding a fanout-71 net, and it was 30 of the 40 failing paths.
+  //
+  // The chain is unnecessary. qty = min(avail, LOT_SIZE) and LOT_SIZE is a
+  // NON-ZERO constant, so  qty != 0  <=>  avail != 0  -- the min can never turn
+  // a non-zero avail into zero, nor a zero avail into non-zero. So the zero test
+  // can be done one stage early, on the raw S1 quantities, and S3 is left with a
+  // single LUT over four registers. The qty ARITHMETIC stays in S3 where it only
+  // feeds trade.quantity's D input, which has slack.
+  logic                    s2_ask_nz, s2_bid_nz;
+
   logic signed [MW-1:0] sp_delta_c, sp_c_c;
 
   // Single subtracts from registered operands, then a 2:1 select.
@@ -333,6 +348,7 @@ module alpha_engine_core
       s2_is_leg <= 1'b0;      s2_spread_primed <= 1'b0;
       s2_bid_price <= '0;  s2_ask_price <= '0;
       s2_bid_qty   <= '0;  s2_ask_qty   <= '0;  s2_ts <= '0;
+      s2_ask_nz    <= 1'b0;  s2_bid_nz  <= 1'b0;
       for (int i = 0; i < NUM_ASSETS; i++) begin
         ema_avg[i]    <= '0;
         ema_primed[i] <= 1'b0;
@@ -364,6 +380,12 @@ module alpha_engine_core
         s2_bid_price <= s1_bid_price;  s2_ask_price <= s1_ask_price;
         s2_bid_qty   <= s1_bid_qty;    s2_ask_qty   <= s1_ask_qty;
         s2_ts        <= s1_ts;
+
+        //-- Liquidity flags for S3's issue decision (TIMING -- ROUND 18).
+        //   Registered here so the trade clock-enables see a register, not the
+        //   avail-mux -> min -> zero-test chain. Both operands are S1 registers.
+        s2_ask_nz    <= (s1_ask_qty != '0);
+        s2_bid_nz    <= (s1_bid_qty != '0);
       end
     end
   end
@@ -389,7 +411,7 @@ module alpha_engine_core
       m_axis_order_tvalid <= 1'b0;          // single-cycle strobe
 
       if (s2_valid) begin
-        automatic logic        do_buy, do_sell;
+        automatic logic        do_buy, do_sell, issue;
         automatic logic [QTY_W-1:0] avail, qty;
 
         //-- Strategy 1 accumulator write-back (single add, registered ops) ---
@@ -410,7 +432,17 @@ module alpha_engine_core
         avail = do_buy ? s2_ask_qty : s2_bid_qty;
         qty   = (avail < QTY_W'(LOT_SIZE)) ? avail : QTY_W'(LOT_SIZE);
 
-        if ((do_buy || do_sell) && qty != '0) begin
+        // Issue decision from FOUR S2 REGISTERS -- no arithmetic in this cone
+        // (TIMING -- ROUND 18; was 30 of the 40 failing paths). This mirrors the
+        // old `(do_buy || do_sell) && qty != '0` EXACTLY, including the do_buy
+        // priority of the avail mux, so it holds even if do_buy and do_sell were
+        // ever both asserted (they cannot be while THRESHOLD > 0):
+        //   do_buy            -> avail = s2_ask_qty -> qty != 0 <=> s2_ask_nz
+        //   !do_buy && do_sell-> avail = s2_bid_qty -> qty != 0 <=> s2_bid_nz
+        //   neither           -> no order
+        issue = do_buy ? s2_ask_nz : (do_sell && s2_bid_nz);
+
+        if (issue) begin
           trade.price     <= do_buy ? s2_ask_price : s2_bid_price;
           trade.quantity  <= qty;
           trade.ticker    <= ticker_of(s2_asset);

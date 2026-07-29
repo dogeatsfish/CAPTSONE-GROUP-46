@@ -960,3 +960,305 @@ The Vivado DRC tool reported DPIP / DPOP warnings because the `price * quantity`
 
 ## Verification
 - Expected to close WNS across all modules as all three major structural anomalies have been fully partitioned.
+
+---
+
+# Round 18 — three clock-enable cones own all 40 failing paths
+
+Run 18 (`vivado/report_failing40.txt`, 2026-07-28 16:21, `Design State: Physopt
+postRoute` — fully routed, real delays).
+
+**A note on the record.** Rounds 14–17 were written up without scorecards or run
+numbers, so there is no recorded WNS between run 13 (−0.118 ns) and this run
+(−0.127 ns). The two numbers are close, but they are **not** a measured trend —
+several RTL changes landed in between (parser `R_WAIT3`/`R_WAIT4`, `SEARCH_DIST`,
+`SEARCH_PRE_CMP`, risk DSP `MREG`, `tgt_side` replication) whose individual
+effect was never captured. Treat run 18 as a fresh measurement, not as
+"run 13 plus 9 ps".
+
+## Scorecard (run 18)
+
+| | value |
+|---|---|
+| WNS | **−0.127 ns** |
+| Failing paths in report | 40 (report capped at 40) |
+| Path group | **`core_clk_unbuf` — all 40** |
+| Endpoints | `/CE` on 39, `/D` on 1 |
+| Logic vs route | 17–22 % logic, **78–83 % route** |
+
+The report was checked for I/O involvement and there is none: **zero** paths
+touch an `OBUF` or any `rgmii_*` pin, and the `set_output_delay` constraints in
+`commontrader_pins.xdc` are still commented out, so no output paths are being
+analysed at all. Pin properties (`IOSTANDARD`/`SLEW`/`DRIVE`) do not enter this
+result. There is also no debug hub in the design (`BSCANE2: 0 used`), so JTAG /
+ILA insertion is not a factor either.
+
+## The 40 paths are three cones, not 40 problems
+
+| Cone | Slack | Count | Path |
+|---|---|---|---|
+| **alpha** `s2_ask_qty → trade_reg[*]/CE` | −0.123 … −0.098 | **30** | 4 LUT levels → fanout-71 enable net |
+| **order book** `tgt_type → sel_reg[*][*]/CE` | −0.102 … | **8** | LUT2 → LUT4 → LUT6 → LUT6, via a **fanout-977** net |
+| **order book** `upd[symbol_id] → tgt_price_reg[9]_rep/D` | **−0.127** (WNS) | 1 | LUT5 → LUT5 → fanout-72 → LUT4 |
+
+All three are the same shape: a small combinational decision computed *in front
+of* a wide clock-enable, so a cheap function pays a wide net's routing cost. In
+every case the inputs were already registers, one stage earlier.
+
+## Fix 1 — alpha engine: don't compute `qty != 0` through the min (30 paths)
+
+```
+s2_ask_qty_reg[11] → trade[quantity][6]_i_8 → _i_2
+                   → trade[timestamp][15]_i_4 → _i_1 → trade[0] (fo=71) → trade_reg/CE
+```
+
+S3 gated the trade register's clock enables on `(do_buy || do_sell) && qty != 0`,
+where `qty = min(avail, LOT_SIZE)` and `avail` is a 32-bit mux of the two ToB
+quantities. That dragged the avail mux *and* the LOT_SIZE min into the enable
+cone — four LUT levels to answer a yes/no question.
+
+The chain is unnecessary. **`LOT_SIZE` is a non-zero constant, so
+`min(avail, LOT_SIZE) != 0` ⟺ `avail != 0`** — the min cannot turn a non-zero
+value into zero, nor a zero into non-zero. The zero test therefore moves one
+stage earlier onto the raw S1 quantities (`s2_ask_nz`, `s2_bid_nz`), and S3
+becomes a single LUT over four S2 registers:
+
+```systemverilog
+issue = do_buy ? s2_ask_nz : (do_sell && s2_bid_nz);
+```
+
+Written as a **mux, not an OR**, so it reproduces the `avail` mux's `do_buy`
+priority exactly — identical for every input combination, including the
+impossible-while-`THRESHOLD > 0` case of both decisions asserting at once. The
+qty arithmetic stays in S3, where it now only feeds `trade.quantity`'s D input,
+which has slack. FS-7 latency, stage count and arithmetic are unchanged.
+
+## Fix 2 — order book: register the shift-kind decode (8 paths)
+
+```
+tgt_type_reg[1] → LUT2 (is_removal, fo=977) → LUT4 (needs_shift)
+                → LUT6 → LUT6 → sel_reg[*][*]/CE
+```
+
+`is_removal` and `needs_shift` were **combinational** off `tgt_type`/`hit_exact`
+and sat directly in front of every `sel` write-enable — and `is_removal` reached
+**977 loads**. Both are pure functions of registers that are stable from
+`SEARCH_ENC` onward, so they are now computed once in **`SEARCH_DIST`** — the
+stage round 14 added purely to fan registers out, which has slack to spare — and
+consumed as flops in `SHIFT`.
+
+`hit_exact_central` is used rather than the replicated `hit_exact` because
+`SEARCH_DIST` is precisely the cycle that copies one into the other, so the two
+are equal by construction during `SHIFT`. Both carry `(* max_fanout = 64 *)`,
+matching `state`, since they gate the same flops.
+
+## Fix 3 — order book: the symbol check off the `tgt_*` capture enable (WNS)
+
+```
+upd_reg[symbol_id][5] → LUT5 → LUT5 → state1 (fo=72) → LUT4 → tgt_price_reg[9]_rep/D
+```
+
+`IDLE` gated the `tgt_*` **capture** on `s_axis_tvalid && upd.symbol_id < NUM_ASSETS`.
+`symbol_id < 5` is an 8-bit compare that cannot fold into one LUT6, so it is two
+levels however it is written — and it was landing in front of every replica of
+`tgt_price`, `tgt_qty`, `tgt_asset`, `tgt_side`, `tgt_type` and `tgt_ts`.
+
+The fix is to keep it **off the wide enable** rather than to make it shallower.
+Capture is now gated on `s_axis_tvalid` alone (one level); only the **state move**
+carries the range check:
+
+```systemverilog
+if (s_axis_tvalid) begin
+  tgt_asset <= upd.symbol_id[ASSET_IDX_W-1:0];
+  ...
+  if (upd.symbol_id < SYMBOL_W'(NUM_ASSETS)) state <= LOAD;
+end
+```
+
+Latching a rejected update is harmless: the FSM stays in `IDLE`, nothing reads
+`tgt_*` in `IDLE`, and the next accepted update overwrites every field. The
+discard still happens **here**, in the block that owns the array — an
+out-of-range locate never reaches `LOAD` and so never indexes `book`.
+
+## Verification
+
+Full 12-bench xsim regression: **173 410 checks, 0 failures.**
+
+| bench | checks | | bench | checks |
+|---|---|---|---|---|
+| cdc_fifo | 19 | | order_book_crv | 173 019 |
+| rx_mac | 20 | | alpha_engine | 34 |
+| tx_mac | 36 | | risk_gateway | 26 |
+| parser | 57 | | tx_gen | 32 |
+| order_book | 45 | | integration / replay / crv | 58 / 55 / 9 |
+
+Net functional change is 14 lines across two files; no state was added, no
+latency changed, and no bench needed updating.
+
+## Expected in run 19
+
+- All three reported cones should clear — each is now register → 1–2 LUT → flop.
+- **What surfaces next is the open question.** The 40 paths were clustered in a
+  29 ps band (−0.127 … −0.098), which usually means a dense population sitting
+  just under zero that the `-slack_lesser_than 0 -max_paths 40` cap hides. The
+  design may land near zero rather than comfortably positive.
+- If a residue remains, re-report with a **higher `-max_paths`** (200+) before
+  changing anything — with WNS this small, knowing whether it is 5 paths or 500
+  decides between one more RTL fix and a placement/floorplan approach. Round 12's
+  finding still stands: placement variance was measured at ≈0.5 ns, which is
+  larger than the current gap.
+
+---
+
+# Round 19 — the write-enable decode, and the whole failure set for the first time
+
+Run 19 (`vivado/report_failing500.txt`, 2026-07-28 20:50, `Physopt postRoute`),
+reported with `-max_paths 500` — so for the first time **this is every failing
+path, not a truncated view.**
+
+## Scorecard (run 19)
+
+| | run 18 (capped at 40) | **run 19 (complete)** |
+|---|---|---|
+| WNS | −0.127 | **−0.173** |
+| Failing paths | ≥ 40, unknown | **240** |
+| TNS over reported paths | unknown | **−13.7 ns** |
+| Median failing slack | — | **−0.046 ns** |
+| Paths better than −50 ps | — | **121 of 240** |
+| Location | alpha + order book | **`u_order_book` — all 240** |
+
+Read this honestly in both directions. **WNS got 46 ps worse.** But run 18's
+report was capped at 40 paths, so its total was never measured — the two runs
+were taken with different instruments and their path counts cannot be compared.
+What *can* be checked is whether round 18's fixes landed, and they did: all three
+of its cones (`s2_ask_qty → trade_reg/CE`, `tgt_type → sel_reg/CE`,
+`upd[symbol_id] → tgt_price_reg/D`) are **absent** from the 240. The alpha
+engine, parser, risk gateway, tx_gen and both MACs contribute **zero** failing
+paths. What is left is one module and, underneath it, essentially one idea.
+
+## All 240 paths are the write-enable decode
+
+| Cluster | Slack | Count | Endpoint |
+|---|---|---|---|
+| `state` / `tgt_side` / `tgt_asset` → `book_reg[*]/CE` | −0.17 … −0.00 | **194** | the STORE demux |
+| `state` / `hit_idx` → `sel_reg[*]/CE` | −0.173 … | **35** | the `sel` write enables |
+| `state_rep` → `state_rep/D` | −0.128 … −0.007 | 5 | FSM replica-to-replica |
+| `cmp_exact` → `state_reg/D` | −0.102, −0.007 | 2 | priority cascade in next-state |
+| `book_reg` / `tgt_asset` → `sel_reg/D` | −0.061 … −0.010 | 3 | the LOAD mux |
+| `upd[symbol_id]` → `state_reg/D` | −0.021 | 1 | round-18's relocated compare |
+
+229 of 240 are **clock enables**, and the shape is identical in both clusters: a
+small decode computed *in front of* a net that has to reach a whole array.
+
+```
+tgt_side_rep__120/Q (fo=32)
+  → LUT6  book[1][1][1][quantity][31]_i_2  (fo=38)
+  → LUT4  book[3][1][1][quantity][31]_i_1  (fo=832)   ← 84 % route
+  → book_reg[3][1][2][price][11]/CE
+```
+
+This is also the answer to the placement question. `book[tgt_asset][tgt_side][l]
+<= sel[l]` sitting inside the FSM's `STORE` arm gives **every one of the ~10 k
+book flops** a clock enable of `(state == STORE) && (a == tgt_asset) && (s ==
+tgt_side)`. That decode net has no natural home — it must touch the entire array
+— so the placer smears the logic across clock regions trying to serve it. The
+uneven spread is a symptom of this cone, not an independent problem.
+
+## Fix 1 — registered one-hot book write-enable (194 paths)
+
+A new `store_we[a][s]` one-hot register is raised in **STORE_CMP**, and the book
+write-back **moves out of the FSM** into its own `always_ff` gated by nothing
+else:
+
+```systemverilog
+always_ff @(posedge core_clk) begin
+  for (a) for (s) if (store_we[a][s])
+    for (l) book[a][s][l] <= sel[l];
+end
+```
+
+Every book flop's clock enable is now **one register bit with zero logic levels**.
+The decode still happens — it just happens a cycle earlier, in STORE_CMP, which
+does nothing but a 64-bit compare and has slack to spare. Crucially each
+`store_we` bit drives **one contiguous asset/side slice** (16 × 64 = 1024 flops)
+instead of a net spanning the array, so `max_fanout` replicas are physically
+local to what they enable. That is what should also pull the placement back
+together.
+
+Timing and data are unchanged: `store_we` is a one-cycle strobe (self-clearing
+alongside `tob_updated`), so the write lands in exactly the cycle the old `STORE`
+arm did, and `sel` is stable from WRITE_COMMIT onward. The new block has **no
+reset** — the book is GSR-initialised, and adding one would recreate the
+round-4/6 reset-net failure on 10 k flops.
+
+## Fix 2 — per-level registered `sel` enables (35 paths)
+
+`sh_en[k]` and `wc_en[k]` are computed in **SEARCH_DIST** — the stage round 14
+added purely to fan registers out — from `hit_idx_central` and `tgt_type`, a full
+cycle before either write. SHIFT and WRITE_COMMIT then read a flop per level
+instead of rebuilding `k` vs `hit_idx` inside the enable cone.
+
+The payoff is exact: a `sel` clock enable is now
+`{state[3:0], sh_en[k], wc_en[k]}` — **six inputs, one LUT6, one logic level**,
+down from three.
+
+The data muxes are untouched (SHIFT still reads a fixed neighbour). Two
+equivalences worth recording:
+
+- **`sh_en` reproduces all three SHIFT arms**: `!needs_shift` → all zero;
+  removal → `k >= hit_idx` plus the always-vacated tail level `N-1`; insert →
+  `k >= 1 && k > hit_idx`.
+- **`wc_en` is set only for ADD and MODIFY.** This matters: `msg_type_e` has a
+  **fourth** value, `MSG_RSVD`, which the old `unique case (tgt_type)` dropped
+  through its `default: ;`. Testing `tgt_type != MSG_DELETE` would have silently
+  started writing on MSG_RSVD. The quantity mux folds the two live arms exactly:
+  `(ADD && hit_exact) ? agg_qty[k] : tgt_qty`.
+
+## Fix 3 — priority cascade out of the next-state cone (2 paths)
+
+`SEARCH_ENC` branched on the **combinational** `srch_valid`, putting the 16-level
+priority cascade over `cmp_exact`/`cmp_insert` directly into the FSM's next-state
+logic (4 logic levels — the deepest cone left outside the enable clusters).
+`srch_valid` is already being registered into `hit_valid_central` on that same
+edge, so the transition is now unconditional and the drop decision moves to
+SEARCH_DIST where it reads a flop.
+
+**Cost:** a *rejected* update (price outside the depth window on a full book)
+takes one extra cycle to return to IDLE and holds `book_busy` one cycle longer.
+Accepted transactions are unchanged at 7 cycles; the benches bound `book_busy` by
+`NUM_LEVELS + 5 = 21` against an observed maximum of 8.
+
+## Deliberately not touched (9 paths)
+
+| Paths | Why left alone |
+|---|---|
+| 5 × `state_rep → state_rep/D` | A **replication artifact.** `state` currently carries ~11 k loads (mostly book CEs) so `max_fanout = 64` builds ~17 replicas, and each replica's next-state cone reads another replica. Fix 1 removes the book CEs from `state` entirely, so the load count — and with it the replica count — should collapse on its own. Changing `max_fanout` in the same pass would confound the measurement. |
+| 3 × `book_reg`/`tgt_asset → sel_reg/D` | The LOAD mux, the one remaining die-spanning **read**. At −0.061 … −0.010 with the enable clusters gone, this is placement reach, not depth. |
+| 1 × `upd[symbol_id] → state_reg/D` | Round 18's relocated compare, at −0.021. An 8-bit compare cannot fold below two LUT levels; removing it entirely needs a pipeline stage in the accept path, which is not worth it for 21 ps. |
+
+## Verification
+
+**Not run** — at the engineer's request, all simulation and implementation is
+being handled outside this document. The full 12-bench regression
+(`./sim/run_all_tb.sh --sim xsim`, 173 410 checks) must pass before these results
+are trusted. Highest-value coverage for this round:
+
+- `order_book` **T6** (add at an existing top price → aggregate) exercises
+  `wc_en` + `agg_qty` directly.
+- `order_book` **T10** (fill 16 levels then insert a new top) exercises `sh_en`
+  across a full-book shift, including the tail-vacate case.
+- `order_book_crv` (173 019 checks) compares final book state against a
+  latency-insensitive reference model — it covers the Fix 3 reject-path timing
+  change, which no directed test targets.
+- The `book_busy` upper-bound check bounds Fix 3's extra reject cycle.
+
+## Expected in run 20
+
+- The two enable clusters (229 of 240 paths) should clear outright: zero logic
+  levels on the book CEs, one LUT6 on the `sel` CEs.
+- The 5 `state` replica paths should follow indirectly as `state`'s fanout
+  collapses.
+- **If WNS is still negative**, the remaining candidates are the LOAD mux and
+  placement. At that point the lever is no longer RTL — it is a Pblock around
+  `u_order_book`, which round 12 already identified and which the placement
+  spread argues for independently.
