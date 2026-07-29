@@ -8,7 +8,7 @@
 #
 # Clock domains (rtl/common/clk_rst_gen.sv):
 #   rgmii_rx_clk  125 MHz  input from the PHY; clocks RX MAC, TX MAC, FIFO PHY sides
-#   core_clk      250 MHz  MMCM output (x2); clocks parser/book/alpha/risk/tx_gen
+#   core_clk      225 MHz  MMCM output (x1.8); clocks parser/book/alpha/risk/tx_gen
 # The two CDC FIFOs (rtl/ip/cdc_fifo) and the rx_error/kill_switch 2-flop
 # synchronisers (commontrader_top) are the ONLY legal crossings; everything below
 # exists to constrain them.
@@ -20,12 +20,12 @@
 #------------------------------------------------------------------------------
 create_clock -name rgmii_rx_clk -period 8.000 [get_ports rgmii_rx_clk]
 
-# core_clk (250 MHz) is produced by the MMCM (CLKFBOUT_MULT_F=8, CLKOUT0_DIVIDE_F=4)
+# core_clk (225 MHz) is produced by the MMCM (CLKFBOUT_MULT_F=3.6, CLKOUT0_DIVIDE_F=2.0)
 # and is AUTO-DERIVED by Vivado from rgmii_rx_clk -- do NOT declare it by hand.
 # After synthesis, confirm BOTH clocks exist with:  report_clocks
 
 #------------------------------------------------------------------------------
-# 2. Clock-domain crossing: treat 125 MHz and 250 MHz as ASYNCHRONOUS.
+# 2. Clock-domain crossing: treat 125 MHz and 225 MHz as ASYNCHRONOUS.
 #
 #    core_clk is derived from rgmii_rx_clk through the MMCM, but the RX/TX MACs run
 #    on the raw PHY clock while the core runs on the MMCM output, and the design

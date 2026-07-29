@@ -10,10 +10,10 @@ module tb_pre_trade_risk_gateway;
   localparam int MAX_QTY       = 32'd10_000;
   localparam int MAX_ORDER_VAL = 32'd1_000_000;
   localparam int RATE_TOKENS   = 16;
-  localparam int RATE_PERIOD   = 250_000;
+  localparam int RATE_PERIOD   = 225_000;
 
   // Clock and Reset
-  logic clk_250mhz;
+  logic core_clk;
   logic rst_n;
 
   // AXI4-Stream Inputs
@@ -45,7 +45,7 @@ module tb_pre_trade_risk_gateway;
     .RATE_TOKENS(RATE_TOKENS),
     .RATE_PERIOD(RATE_PERIOD)
   ) dut (
-    .clk_250mhz(clk_250mhz),
+    .core_clk(core_clk),
     .rst_n(rst_n),
     .s_axis_order_tdata(s_axis_order_tdata),
     .s_axis_order_tuser(s_axis_order_tuser),
@@ -59,8 +59,8 @@ module tb_pre_trade_risk_gateway;
 
   // 250 MHz Clock Generation (4 ns period)
   initial begin
-    clk_250mhz = 0;
-    forever #2 clk_250mhz = ~clk_250mhz;
+    core_clk = 0;
+    forever #2 core_clk = ~core_clk;
   end
 
   //==============================================================================
@@ -74,7 +74,7 @@ module tb_pre_trade_risk_gateway;
 
   check_t check_pipe [0:5];
 
-  always @(negedge clk_250mhz) begin
+  always @(negedge core_clk) begin
       if (rst_n) begin
           // Shift the pipeline forward
           for (int i = 5; i > 0; i--) begin
@@ -120,7 +120,7 @@ module tb_pre_trade_risk_gateway;
     input logic        expect_pass
   );
     begin
-      @(negedge clk_250mhz);
+      @(negedge core_clk);
       current_test_name     = name;
       current_test_expected = expect_pass;
       
@@ -133,7 +133,7 @@ module tb_pre_trade_risk_gateway;
 
   task drive_idle();
     begin
-      @(negedge clk_250mhz);
+      @(negedge core_clk);
       current_test_name     = "IDLE";
       current_test_expected = 0;
       
@@ -163,23 +163,23 @@ module tb_pre_trade_risk_gateway;
     // TEST 1: Valid Trade (Qty = 500, Price = 1000)
     drive_trade("TEST 1: Valid Trade", 16'h1111, "AAPL    ", 32'd500, 32'd1000, 1'b1, 1'b1);
     drive_idle();
-    repeat(6) @(posedge clk_250mhz); 
+    repeat(6) @(posedge core_clk); 
 
     // TEST 2: Max Quantity Violation (Qty = 15,000 > 10,000)
     drive_trade("TEST 2: Max Qty Violation (15k shares)", 16'h2222, "MSFT    ", 32'd15000, 32'd10, 1'b1, 1'b0);
     drive_idle();
-    repeat(6) @(posedge clk_250mhz);
+    repeat(6) @(posedge core_clk);
 
     // TEST 3: Max Value Violation (Qty = 2k, Price = 1000 -> 2,000,000 > 1,000,000)
     drive_trade("TEST 3: Max Value Violation ($2M Order)", 16'h3333, "TSLA    ", 32'd2000, 32'd1000, 1'b0, 1'b0);
     drive_idle();
-    repeat(6) @(posedge clk_250mhz);
+    repeat(6) @(posedge core_clk);
 
     // TEST 4: Parallelization - Multiple simultaneous violations on one order
     // Qty = 15,000 (Fails) AND Value = 15,000,000 (Fails)
     drive_trade("TEST 4: Parallel Violations (Qty & Value)", 16'h4444, "META    ", 32'd15000, 32'd1000, 1'b1, 1'b0);
     drive_idle();
-    repeat(6) @(posedge clk_250mhz);
+    repeat(6) @(posedge core_clk);
 
     // TEST 5: Pipeline Parallelization - Burst back-to-back trades without gaps
     $display("--- Starting Back-to-Back Pipeline Test ---");
@@ -188,13 +188,13 @@ module tb_pre_trade_risk_gateway;
     drive_trade("TEST 5C: Pipe Burst (Val Fail)",  16'h500C, "MSFT    ", 32'd2000, 32'd1000, 1'b1, 1'b0);
     drive_trade("TEST 5D: Pipe Burst (Valid)",     16'h500D, "MSFT    ", 32'd100, 32'd100, 1'b1, 1'b1);
     drive_idle();
-    repeat(8) @(posedge clk_250mhz);
+    repeat(8) @(posedge core_clk);
 
     // Refill the token bucket by resetting the system before the burst
     rst_n = 0;
-    repeat(4) @(posedge clk_250mhz);
+    repeat(4) @(posedge core_clk);
     rst_n = 1;
-    repeat(4) @(posedge clk_250mhz);
+    repeat(4) @(posedge core_clk);
 
     // TEST 6: Rate Limiter Exhaustion (Tokens = 16)
     $display("--- Starting Rate Limiter Token Burst ---");
@@ -204,14 +204,14 @@ module tb_pre_trade_risk_gateway;
     // 17th consecutive order must drop
     drive_trade("TEST 6: Rate Limiter Exhausted (Fail)", 16'h60FF, "NVDA    ", 32'd10, 32'd10, 1'b1, 1'b0);
     drive_idle();
-    repeat(10) @(posedge clk_250mhz);
+    repeat(10) @(posedge core_clk);
 
     // TEST 7: Hardware Kill Switch 
-    @(negedge clk_250mhz);
+    @(negedge core_clk);
     hw_kill_switch = 1'b1;
     drive_trade("TEST 7: HW Kill Switch Latched (Fail)", 16'h7777, "AMD     ", 32'd100, 32'd100, 1'b1, 1'b0);
     drive_idle();
-    repeat(6) @(posedge clk_250mhz);
+    repeat(6) @(posedge core_clk);
 
     //==============================================================================
     // FINAL PASS/FAIL SUMMARY

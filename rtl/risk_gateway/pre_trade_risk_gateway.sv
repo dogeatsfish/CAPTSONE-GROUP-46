@@ -17,10 +17,10 @@ module pre_trade_risk_gateway
   parameter int MAX_QTY        = 32'd10_000,      // max shares per order
   parameter int MAX_ORDER_VAL  = 32'd1_000_000,   // max price*qty
   parameter int RATE_TOKENS    = 16,               // token bucket depth
-  parameter int RATE_PERIOD    = 250_000          // 1 ms @ 250 MHz
+  parameter int RATE_PERIOD    = 225_000          // 1 ms @ 225 MHz
 )
 (
-  input  logic                 clk_250mhz,
+  input  logic                 core_clk,
   input  logic                 rst_n,
 
   // --- AXI4-Stream slave from Alpha Engine ----------------------------------
@@ -68,7 +68,7 @@ module pre_trade_risk_gateway
 
   // Max Quantity Check
 
-  always_ff @(posedge clk_250mhz) begin: Max_Quantity
+  always_ff @(posedge core_clk) begin: Max_Quantity
     if (~rst_n) begin
       viol_max_qty <= '0; 
     end else begin
@@ -102,7 +102,7 @@ module pre_trade_risk_gateway
   assign tokens_to_add = refill_pulse + refund_pulse;
   assign tokens_to_sub = s_axis_order_tvalid; 
 
-  always_ff @(posedge clk_250mhz) begin: Rate_Limiter_Counter
+  always_ff @(posedge core_clk) begin: Rate_Limiter_Counter
     if (~rst_n) begin
       refill_pulse <= 0; 
       cycle_cnt <= '0; 
@@ -117,7 +117,7 @@ module pre_trade_risk_gateway
     end
   end
 
-    always_ff @(posedge clk_250mhz) begin: Token_Bucket
+    always_ff @(posedge core_clk) begin: Token_Bucket
       if (~rst_n) begin
           token_bucket <= RATE_TOKENS;
       end else begin
@@ -145,7 +145,7 @@ module pre_trade_risk_gateway
        end
     end
 
-    always_ff @(posedge clk_250mhz) begin: Rate_Limiter_Pipeline
+    always_ff @(posedge core_clk) begin: Rate_Limiter_Pipeline
       if (~rst_n) begin
         viol_rate_limit <= '0;
       end else begin
@@ -161,7 +161,7 @@ module pre_trade_risk_gateway
       end
     end
 
-//  always_ff @(posedge clk_250mhz or negedge rst_n) begin: Token_Bucket
+//  always_ff @(posedge core_clk or negedge rst_n) begin: Token_Bucket
 //    if (~rst_n) begin
 //      token_bucket <= RATE_TOKENS; 
 //    end else if (m_axis_tx_tvalid && refill_pulse) begin
@@ -187,7 +187,7 @@ module pre_trade_risk_gateway
   logic [63:0] product_m;
   logic [63:0] product [1:3];
 
-  always_ff @(posedge clk_250mhz) begin: Max_Value_Pipeline
+  always_ff @(posedge core_clk) begin: Max_Value_Pipeline
     price_s1    <= trade_in.price;
     quantity_s1 <= trade_in.quantity;
       
@@ -197,7 +197,7 @@ module pre_trade_risk_gateway
     product[3] <= product[2];
   end
 
-  always_ff @(posedge clk_250mhz) begin: Max_Value
+  always_ff @(posedge core_clk) begin: Max_Value
     if (~rst_n) begin
       viol_max_value <= 1'b0;
     end else begin
@@ -209,7 +209,7 @@ module pre_trade_risk_gateway
   // Hardware Kill Switch check
   // No pipeline since it is not related to any one packet
   // Stop entire pipeline if asserted
-  always_ff @(posedge clk_250mhz) begin: HW_Kill_Switch
+  always_ff @(posedge core_clk) begin: HW_Kill_Switch
     if (~rst_n) begin
       viol_kill_switch <= 0; 
     end else begin
@@ -221,7 +221,7 @@ module pre_trade_risk_gateway
   trade_t trade [0:3];
   logic   [3:0] tuser;
 
-  always_ff @(posedge clk_250mhz) begin: Data_Pipeline
+  always_ff @(posedge core_clk) begin: Data_Pipeline
     if (~rst_n) begin
       trade[0]  <= '0;
       trade[1]  <= '0;
@@ -249,7 +249,7 @@ logic violation;
 assign violations = {viol_max_qty[3], viol_max_value, viol_rate_limit[3], viol_kill_switch, 1'b0, 1'b0/*, viol_crc[3], viol_blacklist[2]*/};
 assign violation = |violations; 
 
-always_ff @(posedge clk_250mhz) begin
+always_ff @(posedge core_clk) begin
   if (~rst_n) begin
     m_axis_tx_tvalid <= 0;
     m_axis_tx_tdata  <= '0; 

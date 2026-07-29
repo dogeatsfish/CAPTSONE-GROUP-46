@@ -285,7 +285,7 @@ module commontrader_top
   logic               tx_tuser, tx_tvalid;
 
   pre_trade_risk_gateway u_risk (
-    .clk_250mhz          (core_clk),
+    .core_clk            (core_clk),
     .rst_n               (core_rst_n),
     .s_axis_order_tdata  (order_tdata),
     .s_axis_order_tuser  (order_tuser),
