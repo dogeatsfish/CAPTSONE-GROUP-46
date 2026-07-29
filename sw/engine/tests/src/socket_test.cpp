@@ -134,6 +134,11 @@ int main() {
     std::cout << "Market data: " << MARKET_BOOK << " (100 bid adds, 100.00 step +0.05, 50ms)\n";
 
     OnlineSimulation::Config cfg;
+    // This is a software-only loopback test, not a hardware target -- pin the
+    // pre-PR-#17 loopback/TCP contract explicitly rather than inherit
+    // Config's now-FPGA-oriented defaults (192.168.0.1, UDP).
+    cfg.itch_address   = "127.0.0.1";
+    cfg.ouch_transport = OnlineSimulation::OuchTransport::TCP;
     cfg.itch_port  = ITCH_PORT;
     cfg.ouch_port  = OUCH_PORT;
     cfg.time_scale = 1.0; // real time: ladder streams over ~5s
