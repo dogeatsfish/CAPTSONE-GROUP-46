@@ -44,7 +44,7 @@
 //==============================================================================
 
 module tx_mac_core #(
-  parameter logic [47:0] DST_MAC   = 48'hAA_BB_CC_DD_EE_FF,
+  parameter logic [47:0] DST_MAC   = 48'h8C_51_09_20_8A_75,
   parameter logic [47:0] SRC_MAC   = 48'h00_0A_35_01_02_03,  // Xilinx OUI
   parameter logic [15:0] ETHERTYPE = 16'h0800                // IPv4
 )(
@@ -297,7 +297,7 @@ module tx_mac_core #(
   //
   // TIMING: RGMII wants the clock CENTRE-aligned to the data. This forwards an
   // edge-aligned clock, so the ~2 ns shift must come from the PHY's internal TX
-  // delay (RTL8211 strap / MDIO) or an ODELAY. Getting this wrong is the classic
+  // delay (JL2121 strap-only RGMII-ID) or an ODELAY. Getting this wrong is the classic
   // "link comes up but every frame is dropped" failure -- confirm on bring-up.
   //--------------------------------------------------------------------------
 `ifdef SYNTHESIS
