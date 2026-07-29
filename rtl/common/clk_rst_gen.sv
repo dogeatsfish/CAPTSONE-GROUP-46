@@ -60,8 +60,8 @@ module clk_rst_gen #(
   MMCME2_BASE #(
     .CLKIN1_PERIOD    (8.0),    // 125 MHz
     .DIVCLK_DIVIDE    (1),
-    .CLKFBOUT_MULT_F  (3.6),    // VCO = 450 MHz (inside the Artix-7 range)
-    .CLKOUT0_DIVIDE_F (2.0),    // 450 / 2 = 225 MHz
+    .CLKFBOUT_MULT_F  (9.0),    // VCO = 1125 MHz (inside the Artix-7 range, exact multiple of 0.125)
+    .CLKOUT0_DIVIDE_F (5.0),    // 1125 / 5 = 225 MHz
     .STARTUP_WAIT     ("FALSE")
   ) u_mmcm (
     .CLKIN1   (rgmii_rx_clk),
