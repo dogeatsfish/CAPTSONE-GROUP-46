@@ -52,9 +52,14 @@ bool OnlineSimulation::open_itch_socket() {
 }
 
 bool OnlineSimulation::open_ouch_listener() {
-    ouch_listen_fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    const bool is_udp   = (cfg.ouch_transport == OuchTransport::UDP);
+    const char* proto   = is_udp ? "UDP" : "TCP";
+    const int  sock_type = is_udp ? SOCK_DGRAM : SOCK_STREAM;
+
+    ouch_listen_fd = ::socket(AF_INET, sock_type, 0);
     if (ouch_listen_fd < 0) {
-        std::cerr << "WARN: OUCH TCP socket() failed; order entry disabled.\n";
+        std::cerr << "WARN: OUCH " << proto
+                  << " socket() failed; order entry disabled.\n";
         return false;
     }
 
@@ -73,7 +78,10 @@ bool OnlineSimulation::open_ouch_listener() {
         ouch_listen_fd = -1;
         return false;
     }
-    if (::listen(ouch_listen_fd, 1) < 0) {
+
+    // Only a connection-oriented (TCP) socket needs to be put into the listen
+    // state; UDP is connectionless and reads straight from the bound socket.
+    if (!is_udp && ::listen(ouch_listen_fd, 1) < 0) {
         std::cerr << "WARN: OUCH listen() failed; order entry disabled.\n";
         ::close(ouch_listen_fd);
         ouch_listen_fd = -1;
@@ -251,6 +259,14 @@ void OnlineSimulation::handle_ouch_client(int client_fd) {
 }
 
 void OnlineSimulation::ouch_server_loop() {
+    if (cfg.ouch_transport == OuchTransport::UDP) {
+        ouch_udp_loop();
+    } else {
+        ouch_tcp_loop();
+    }
+}
+
+void OnlineSimulation::ouch_tcp_loop() {
     while (running.load(std::memory_order_relaxed)) {
         fd_set rfds;
         FD_ZERO(&rfds);
@@ -265,6 +281,60 @@ void OnlineSimulation::ouch_server_loop() {
         if (client_fd < 0) continue;
 
         handle_ouch_client(client_fd);
+    }
+}
+
+void OnlineSimulation::ouch_udp_loop() {
+    // One OUCH frame per datagram. The buffer is oversized so trailing bytes the
+    // FPGA appends after the OUCH message (e.g. the 2-byte latency telemetry from
+    // outbound_tx_generator.sv) are received and simply ignored.
+    uint8_t buf[256];
+
+    while (running.load(std::memory_order_relaxed)) {
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(ouch_listen_fd, &rfds);
+        timeval tv{0, 200'000}; // 200 ms poll so we stay responsive to shutdown
+
+        const int ready = ::select(ouch_listen_fd + 1, &rfds, nullptr, nullptr, &tv);
+        if (ready < 0) break;
+        if (ready == 0) continue; // timeout: re-check running flag
+
+        sockaddr_in src{};
+        socklen_t   src_len = sizeof(src);
+        const ssize_t n = ::recvfrom(ouch_listen_fd, buf, sizeof(buf), 0,
+                                     reinterpret_cast<sockaddr*>(&src), &src_len);
+        if (n <= 0) continue;
+
+        // The first byte is the OUCH message type, which fixes the frame length.
+        const size_t frame_len = protocol::ouch_frame_len(buf[0]);
+        if (frame_len == 0 || static_cast<size_t>(n) < frame_len) {
+            continue; // unknown type or a datagram too short to hold the frame
+        }
+
+        protocol::OuchMessage msg;
+        if (!protocol::from_ouch(buf, frame_len, msg)) {
+            continue; // malformed frame
+        }
+
+        const FillReport fill = apply_ouch_order(msg);
+
+        // Reply to the sender for ENTER orders: an execution report if any
+        // volume filled, otherwise an accept. Best-effort: UDP replies may be
+        // lost, and the FPGA does not process inbound acks in the current scope.
+        if (msg.msg_type == protocol::OUCH_ENTER) {
+            std::vector<uint8_t> resp;
+            if (fill.filled_size > 0.0) {
+                resp = protocol::to_ouch_response(
+                    protocol::OUCH_EXECUTED, msg.order_id,
+                    fill.filled_size, fill.avg_fill_price);
+            } else {
+                resp = protocol::to_ouch_response(
+                    protocol::OUCH_ACCEPTED, msg.order_id, msg.size, msg.price);
+            }
+            ::sendto(ouch_listen_fd, resp.data(), resp.size(), 0,
+                     reinterpret_cast<sockaddr*>(&src), src_len);
+        }
     }
 }
 

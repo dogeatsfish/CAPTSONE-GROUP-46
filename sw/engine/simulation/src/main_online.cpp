@@ -4,18 +4,21 @@
 #include <cstdlib>
 
 // Usage:
-//   online_run [mbo_file] [time_scale] [itch_port] [ouch_port] [itch_address]
+//   online_run [mbo_file] [time_scale] [itch_port] [ouch_port] [itch_address] [ouch_transport]
 //
-//   mbo_file      packed binary MBO stream (default: data/synthetic_mbo_stream.bin)
-//   time_scale    wall-clock pacing factor (default 1.0 = real time; e.g. 0.001
-//                 replays 1000x faster; 0 disables pacing)
-//   itch_port     UDP port ITCH market data is broadcast to (default 26000)
-//   ouch_port     TCP port the OUCH order-entry server listens on (default 26001)
-//   itch_address  destination IP for the ITCH UDP feed (default 127.0.0.1).
-//                 For a hardware target, set this to the FPGA's IP (unicast)
-//                 or a multicast group the FPGA subscribes to (e.g. 239.1.1.1).
-//                 The OUCH server always listens on 0.0.0.0:ouch_port, so the
-//                 FPGA connects in to HOST_IP:ouch_port.
+//   mbo_file        packed binary MBO stream (default: data/synthetic_mbo_stream.bin)
+//   time_scale      wall-clock pacing factor (default 1.0 = real time; e.g. 0.001
+//                   replays 1000x faster; 0 disables pacing)
+//   itch_port       UDP port ITCH market data is broadcast to (default 50001)
+//   ouch_port       port the OUCH order-entry server listens on (default 50001;
+//                   must match the FPGA's OUCH DST_PORT in outbound_tx_generator.sv)
+//   itch_address    destination IP for the ITCH UDP feed (default 192.168.0.1, the
+//                   FPGA's SRC_IP). For a hardware target, keep this as the FPGA's
+//                   IP (unicast) or set a multicast group the FPGA subscribes to.
+//                   The OUCH server always listens on 0.0.0.0:ouch_port, so the
+//                   FPGA connects in to HOST_IP:ouch_port.
+//   ouch_transport  order-entry transport: "udp" (default, matches the FPGA) or
+//                   "tcp" (for a streaming software client)
 int main(int argc, char* argv[]) {
     std::string data_file_path = "data/synthetic_mbo_stream.bin";
 
@@ -26,12 +29,21 @@ int main(int argc, char* argv[]) {
     if (argc > 3) cfg.itch_port  = static_cast<uint16_t>(std::atoi(argv[3]));
     if (argc > 4) cfg.ouch_port  = static_cast<uint16_t>(std::atoi(argv[4]));
     if (argc > 5) cfg.itch_address = argv[5];
+    if (argc > 6) {
+        const std::string t = argv[6];
+        cfg.ouch_transport = (t == "tcp" || t == "TCP")
+                                 ? OnlineSimulation::OuchTransport::TCP
+                                 : OnlineSimulation::OuchTransport::UDP;
+    }
+
+    const char* ouch_proto =
+        (cfg.ouch_transport == OnlineSimulation::OuchTransport::UDP) ? "udp" : "tcp";
 
     std::cout << "========================================\n";
     std::cout << "Online (Real-Time) Trading Engine\n";
     std::cout << "Market data (MBO): " << data_file_path << "\n";
     std::cout << "ITCH broadcast:    udp " << cfg.itch_address << ":" << cfg.itch_port << "\n";
-    std::cout << "OUCH order entry:  tcp 0.0.0.0:" << cfg.ouch_port << "\n";
+    std::cout << "OUCH order entry:  " << ouch_proto << " 0.0.0.0:" << cfg.ouch_port << "\n";
     std::cout << "Time scale:        " << cfg.time_scale << "x\n";
     std::cout << "========================================\n";
 
