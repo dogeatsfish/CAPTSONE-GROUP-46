@@ -37,7 +37,7 @@ public:
 
         // Wall-clock pacing.
         // 1.0 = true real time, 0.001 = 1000x faster, 0.0 = no pacing.
-        double      time_scale   = 1.0;
+        double      time_scale   = 0.001;
 
         // Cap on any single sleep so a large timestamp gap can't stall the
         // replay indefinitely (nanoseconds). 0 disables the cap.
