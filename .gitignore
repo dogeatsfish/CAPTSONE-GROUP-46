@@ -8,7 +8,6 @@ dfx_runtime.txt
 //*.bit
 *.ltx
 .Xil/
-dfx_runtime.txt
 vivado/*.xpr
 vivado/*.runs/
 vivado/*.cache/
@@ -28,7 +27,6 @@ sim/logs/
 sim/xsim_*
 sim/replay_*.hex
 sim/replay_*.txt
-*.jou
 xsim.dir/
 sim/*.vcd
 sim/*.fst
@@ -66,3 +64,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Personal working notes -- not for the shared repo, see TODO.md for that
+NOTES.md

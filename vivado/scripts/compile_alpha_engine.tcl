@@ -25,10 +25,8 @@
 #==============================================================================
 
 # --- Target part --------------------------------------------------------
-# Placeholder pinned to the design doc's block-diagram value. Nothing in the
-# repo confirms the exact Alinx AX7A200B SKU (speed grade / package) -- if
-# this turns out wrong, this is the only line that needs to change.
-set PART_NUM "xc7a200t-2fbg484"
+# Confirmed Alinx AX7A200B SKU: Artix-7 200T, FBG484 package, speed grade -2.
+set PART_NUM "xc7a200tfbg484-2"
 
 # --- Argument parsing -----------------------------------------------------
 if { $argc != 2 } {
