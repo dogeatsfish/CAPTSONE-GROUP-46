@@ -17,7 +17,7 @@ class OnlineSimulation {
 public:
     struct Config {
         // (UDP).
-        std::string itch_address = "";
+        std::string itch_address = "127.0.0.1";
         uint16_t    itch_port    = 26000;
         // (TCP).
         uint16_t    ouch_port    = 26001;

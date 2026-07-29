@@ -13,7 +13,12 @@
 #include <pybind11/stl.h>       // automatic std::vector <-> list conversion
 
 #include "offline_simulation.h"
+// OnlineSimulation uses POSIX sockets and isn't buildable on native Windows
+// yet (see the Windows branch of the pymodule target in engine/Makefile,
+// which defines CT_NO_ONLINE_SIM). macOS/Linux builds are unaffected.
+#ifndef CT_NO_ONLINE_SIM
 #include "online_simulation.h"
+#endif
 
 namespace py = pybind11;
 
@@ -62,6 +67,9 @@ PYBIND11_MODULE(engine_sim, m) {
              "Execute the event loop and return a SimulationResult.");
 
     // ---- Online (real-time) simulation ----
+    // Not registered in Windows builds (CT_NO_ONLINE_SIM) -- see the #include
+    // guard above.
+#ifndef CT_NO_ONLINE_SIM
     py::class_<OnlineSimulation::Config>(m, "OnlineConfig")
         .def(py::init<>())
         .def_readwrite("itch_address", &OnlineSimulation::Config::itch_address)
@@ -114,4 +122,5 @@ PYBIND11_MODULE(engine_sim, m) {
              "entry. If a callback is given, it is called once per simulated "
              "second as callback(timestamp_ns, realized_pnl, unrealized_pnl, "
              "position_size). Returns a SimulationResult.");
+#endif  // CT_NO_ONLINE_SIM
 }

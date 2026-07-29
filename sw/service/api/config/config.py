@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -10,6 +11,21 @@ REPO_ROOT = SERVICE_ROOT.parent  # sw
 ENGINE_DIR = REPO_ROOT / "engine"
 DATA_DIR = REPO_ROOT / "data_pipeline" / "data"
 DEFAULT_DATA_FILE = DATA_DIR / "synthetic_mbo_stream.bin"
+REPO_TOP = REPO_ROOT.parent  # repo root (sibling of sw/, vivado/, rtl/)
+
+# --- Alpha Engine compile pipeline (FS-16 first slice: OOC synth + report) ---
+# Vivado executable; override via env var if it isn't on PATH.
+VIVADO_BIN = os.environ.get("VIVADO_BIN", "vivado")
+COMPILE_TCL_SCRIPT = REPO_TOP / "vivado" / "scripts" / "compile_alpha_engine.tcl"
+# Per-job workspaces (submitted source + Vivado logs/reports). Not committed --
+# see .gitignore.
+COMPILE_JOBS_DIR = SERVICE_ROOT / "compiler_jobs"
+COMPILE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
+
+# --- Persistent run logging (FS-15 -- see db.py for current scope) ---
+# Override via env var so a containerized deployment can point this at a
+# mounted volume outside the code tree (see sw/Dockerfile, docker-compose.yml).
+DB_PATH = Path(os.environ.get("CT_DB_PATH", str(SERVICE_ROOT / "commontrader.db")))
 
 # --- Online (real-time) simulation transport (server-side ONLY) ---
 # The online simulation broadcasts market data over a UDP (ITCH) socket and

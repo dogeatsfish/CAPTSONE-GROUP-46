@@ -34,6 +34,26 @@ Lint the RTL locally before pushing:
 verilator --lint-only -Wall -Irtl/common rtl/**/*.sv
 ```
 
+### Running the engine + FastAPI service (containerized)
+
+`sw/Dockerfile` containerizes the C++ matching engine and the FastAPI
+service only -- not `rtl/`/`vivado/`, since Vivado needs a license, a GUI,
+and direct USB/JTAG access to the board. This is also the easiest way to
+sidestep the cross-platform build issues tracked in `TODO.md` (the container
+is always Linux, so the engine's POSIX socket code just works regardless of
+your host OS):
+
+```bash
+cd sw
+docker compose up --build
+```
+
+The API is then at `http://127.0.0.1:8000`, which is exactly what
+`sw/ui/vite.config.js`'s dev-server proxy targets -- run the UI natively
+(`npm run dev` in `sw/ui/`) alongside it. Note: `/compile` (the Vivado
+synthesis endpoint) won't work inside the container -- run the service
+natively via `uvicorn` if you need that endpoint.
+
 ## Subsystem Owners
 
 | Subsystem | Owner |

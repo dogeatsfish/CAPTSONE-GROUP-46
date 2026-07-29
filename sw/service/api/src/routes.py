@@ -1,3 +1,5 @@
+import logging
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -13,7 +15,10 @@ from config import (
     ONLINE_DEFAULT_TIME_SCALE,
     engine_sim,
 )
+import db
 from common import PnLPoint, Trade
+from compile import CompileRequest, CompileStartResponse
+from compile_manager import compile_manager
 from request import SimulationRequest
 from response import SimulationResponse, StreamStartResponse
 from stream_manager import stream_manager, build_online_config
@@ -36,6 +41,27 @@ def _resolve_data_file(data_file: str | None) -> Path:
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"Data file not found: {path}")
     return path
+
+
+def _log_run(data_file: Path, mode: str, started_at_ns: int, result) -> None:
+    """Persist a completed run to the database (FS-15, partial scope -- see db.py).
+
+    Best-effort: a logging failure shouldn't take down a successful simulation
+    response, so it's caught and reported via the FastAPI logger rather than
+    raised.
+    """
+    try:
+        db.log_run(
+            data_file=str(data_file),
+            mode=mode,
+            started_at_ns=started_at_ns,
+            compute_time_us=result.compute_time_us,
+            total_trades=result.total_trades,
+            trades=result.trades,
+            pnl_curve=result.pnl_curve,
+        )
+    except Exception:  # noqa: BLE001 - logging must never break the response
+        logging.getLogger(__name__).exception("Failed to persist run to database")
 
 
 def _to_response(data_file: Path, result, req) -> SimulationResponse:
@@ -71,6 +97,7 @@ def _to_response(data_file: Path, result, req) -> SimulationResponse:
 def run_simulation(req: SimulationRequest):
     """Run the C++ offline simulation over an MBO stream and return telemetry."""
     data_file = _resolve_data_file(req.data_file)
+    started_at_ns = time.time_ns()
 
     try:
         result = engine_sim.OfflineSimulation(str(data_file)).run()
@@ -79,6 +106,7 @@ def run_simulation(req: SimulationRequest):
             status_code=500, detail=f"Simulation failed: {exc}"
         ) from exc
 
+    _log_run(data_file, "offline", started_at_ns, result)
     return _to_response(data_file, result, req)
 
 
@@ -93,6 +121,7 @@ def run_online_simulation(req: SimulationRequest):
     the resulting trade / PnL telemetry.
     """
     data_file = _resolve_data_file(req.data_file)
+    started_at_ns = time.time_ns()
 
     # Build the engine networking/pacing config on the server side only. None
     # of these socket details are part of the request or response schema.
@@ -109,6 +138,7 @@ def run_online_simulation(req: SimulationRequest):
             status_code=500, detail=f"Online simulation failed: {exc}"
         ) from exc
 
+    _log_run(data_file, "online", started_at_ns, result)
     return _to_response(data_file, result, req)
 
 
@@ -163,3 +193,44 @@ def list_datasets():
         sorted(p.name for p in DATA_DIR.glob("*.bin")) if DATA_DIR.is_dir() else []
     )
     return {"data_dir": str(DATA_DIR), "datasets": datasets}
+
+
+@router.post("/compile", response_model=CompileStartResponse, tags=["compile"])
+def start_compile(req: CompileRequest):
+    """Create an Alpha Engine Core compile job and return its stream URL.
+
+    Runs an out-of-context synthesis check (FS-16 first slice) against the
+    fixed FS-8 sandbox port list -- not a full bitstream/board-flash flow, see
+    vivado/scripts/compile_alpha_engine.tcl for scope notes. The job starts
+    when a client attaches to the returned ``stream_url`` via Server-Sent
+    Events, mirroring the online-simulation stream handshake above.
+    """
+    job = compile_manager.create(req.source, req.module_name)
+    return CompileStartResponse(
+        job_id=job.job_id,
+        stream_url=f"/compile/{job.job_id}/stream",
+    )
+
+
+@router.get("/compile/{job_id}/stream", tags=["compile"])
+async def compile_stream(job_id: str, request: Request):
+    """Attach a Server-Sent Events stream to a previously created compile job.
+
+    Emits one JSON object per `data:` frame:
+      {"type": "log", "line": "<one line of Vivado stdout>"}
+      {"type": "complete", "job_id", "synth_time_s", "lut_count", "ff_count",
+       "dsp_count", "bram_count", "timing_summary"}
+      {"type": "error", "detail"}
+    """
+    job = compile_manager.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown or expired compile job")
+    if job.started:
+        raise HTTPException(
+            status_code=409, detail="Compile job is already being consumed"
+        )
+    return StreamingResponse(
+        compile_manager.event_stream(job, request),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
