@@ -23,7 +23,7 @@
 module tx_mac_core_tb;
 
   // Must mirror the DUT parameter defaults.
-  localparam logic [47:0] DST_MAC   = 48'hAA_BB_CC_DD_EE_FF;
+  localparam logic [47:0] DST_MAC   = 48'h8C_51_09_20_8A_75;
   localparam logic [47:0] SRC_MAC   = 48'h00_0A_35_01_02_03;
   localparam logic [15:0] ETHERTYPE = 16'h0800;
 
