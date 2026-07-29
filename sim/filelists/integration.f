@@ -1,0 +1,15 @@
+rtl/common/ct_pkg.sv
+rtl/common/timestamp_counter.sv
+rtl/common/clk_rst_gen.sv
+rtl/rx_mac/crc.sv
+rtl/rx_mac/rx_mac_core.sv
+rtl/ip/cdc_fifo/cdc_fifo.sv
+rtl/ip/cdc_fifo/axis_cdc_fifo.sv
+rtl/parser/cut_through_parser.sv
+rtl/order_book/order_book_array.sv
+rtl/alpha_engine/alpha_engine_core.sv
+rtl/risk_gateway/pre_trade_risk_gateway.sv
+rtl/tx_gen/outbound_tx_generator.sv
+rtl/ip/tx_mac/tx_mac_core.sv
+rtl/top/commontrader_top.sv
+tb/top/commontrader_top_tb.sv

@@ -218,7 +218,8 @@ module alpha_engine_core_tb
     check_int("B4 spread DUT ignores non-pair asset", s_n, 0);
 
     //--------------------------------------------------------------- A7 latency
-    // FS-7: the order must be issued within 4 cycles; this design takes 2.
+    // FS-7: the order must be issued within 4 cycles; the pipelined design
+    // uses exactly 4 (S0 select, S1 mid/delta, S2 write-back, S3 pack).
     $display("\n[A7] FS-7 latency check");
     @(negedge core_clk);
     tob_bid_price[2] = 32'd90;  tob_bid_qty[2] = 32'd500;
@@ -230,7 +231,11 @@ module alpha_engine_core_tb
     tob_updated = '0;
     check_int("A7 no order at T+1", int'(e_tvalid), 0);
     @(negedge core_clk);                 // cycle T+2
-    check_int("A7 order valid at T+2", int'(e_tvalid), 1);
+    check_int("A7 no order at T+2", int'(e_tvalid), 0);
+    @(negedge core_clk);                 // cycle T+3
+    check_int("A7 no order at T+3", int'(e_tvalid), 0);
+    @(negedge core_clk);                 // cycle T+4
+    check_int("A7 order valid at T+4 (FS-7 boundary)", int'(e_tvalid), 1);
     repeat (5) @(negedge core_clk);
 
     //================================================================ PHASE B

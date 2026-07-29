@@ -39,15 +39,72 @@ module tb_rx_mac_core();
     );
 
     // =========================================================================
-    // AXI4-Stream Payload Monitor
+    // Scoreboard
     // =========================================================================
+    int unsigned checks = 0;
+    int unsigned errors = 0;
+
+    task automatic check_int(input string name, input int got, input int exp);
+        checks++;
+        if (got !== exp) begin
+            errors++;
+            $display("  [FAIL] %-44s got %0d, expected %0d", name, got, exp);
+        end else begin
+            $display("  [ ok ] %-44s %0d", name, got);
+        end
+    endtask
+
+    // =========================================================================
+    // AXI4-Stream Payload Monitor
+    //
+    // Checks the streamed bytes against what was sent instead of just printing
+    // them: the RX MAC has to strip the preamble, the 14-byte L2 header AND the
+    // trailing 4-byte FCS, and an off-by-one in the sliding window would be
+    // invisible to a $display-only monitor.
+    // =========================================================================
+    logic [7:0] rx_buf [0:255];   // bytes the DUT streamed up
+    int         rx_idx;           // how many, for the current frame
+
+    // Counters, not single-bit flags. rx_error is only meaningful on the one
+    // cycle the packet ends, so it has to be accumulated across the frame
+    // rather than sampled at a fixed offset afterwards -- and counting how
+    // many times it fired is strictly more informative than a sticky bit.
+    int         rx_tlast_n;
+    int         rx_error_n;
+
     initial begin
-        forever begin
-            @(posedge rgmii_rx_clk);
-            if (m_axis_tvalid) begin
-                $display("[%0t ns] Payload Output -> Data: 0x%h | tlast: %b", 
-                         $time, m_axis_tdata, m_axis_tlast);
-            end
+        rx_idx     = 0;
+        rx_tlast_n = 0;
+        rx_error_n = 0;
+    end
+
+    // PURE RECORDER. Two deliberate structural choices, both about portability:
+    //
+    //   1. A clocked `always` block, not `initial ... forever`. Under --timing
+    //      an initial/forever monitor becomes a coroutine whose scoreboard
+    //      writes were not reliably observed by the test process unless
+    //      waveform tracing happened to keep the signals alive -- a bench whose
+    //      result depends on --trace is a race, and it would resolve
+    //      differently again under xsim. An `always` block is a first-class
+    //      scheduled process in every simulator.
+    //
+    //   2. It only ever WRITES scoreboard state, never reads anything the test
+    //      process owns. Data flow stays one-way: record here, compare in
+    //      send_frame.
+    //
+    // Sampling is on the NEGEDGE, mid-cycle. m_axis_tvalid / tlast / rx_error
+    // are all combinational off flopped state, and reading them exactly ON the
+    // rising edge is a race -- you get the pre-edge or post-edge value
+    // depending on how the simulator orders the combinational settle. That is
+    // what made tlast and rx_error (both single-cycle pulses) read as 0 here.
+    // Half a cycle later everything is settled, in any simulator, and it needs
+    // no #delay so there is no timescale dependence either.
+    always @(negedge rgmii_rx_clk) begin
+        if (rx_error) rx_error_n++;
+        if (m_axis_tvalid) begin
+            if (rx_idx < 256) rx_buf[rx_idx] = m_axis_tdata;
+            rx_idx++;
+            if (m_axis_tlast) rx_tlast_n++;
         end
     end
 
@@ -55,27 +112,39 @@ module tb_rx_mac_core();
     // RGMII Driver Tasks
     // =========================================================================
     
-    // Drive a single byte over the RGMII DDR interface
+    // Drive a single byte over the RGMII DDR interface.
+    //
+    // Each nibble is placed in the MIDDLE of its half period with a blocking
+    // assignment. Driving with a non-blocking assignment ON the clock edge
+    // races the DUT's capture flops -- whether they see the old or the new
+    // value depends on the simulator's NBA ordering, and the --timing
+    // scheduler resolves it the opposite way to xsim. The nibbles then land
+    // half a byte out of phase and every frame decodes to garbage.
     task automatic send_byte(input logic [7:0] data, input logic err = 0);
-        // Drive Setup Time prior to the rising edge (Lower Nibble)
+        // Lower nibble, sampled by the DUT on the rising edge
         @(negedge rgmii_rx_clk);
-        rgmii_rxd    <= data[3:0];
-        rgmii_rx_ctl <= 1'b1;
+        #2;
+        rgmii_rxd    = data[3:0];
+        rgmii_rx_ctl = 1'b1;
 
-        // Drive Setup Time prior to the falling edge (Upper Nibble)
+        // Upper nibble, sampled on the falling edge
         @(posedge rgmii_rx_clk);
-        rgmii_rxd    <= data[7:4];
-        rgmii_rx_ctl <= 1'b1 ^ err; // XOR with RX_ER
+        #2;
+        rgmii_rxd    = data[7:4];
+        rgmii_rx_ctl = 1'b1 ^ err; // XOR with RX_ER
     endtask
 
     // Assemble and drive a full Ethernet MAC frame
+    int frame_num = 0;
+
     task automatic send_frame(
-        input byte payload[], 
+        input byte payload[],
         input bit corrupt_crc = 0,
         input int preamble_length = 7
     );
         byte frame_data[];
         int frame_len;
+        int mismatches;
         logic [31:0] crc_val;
         
         // 14-byte Ethernet Header + Payload
@@ -92,14 +161,27 @@ module tb_rx_mac_core();
         for(int i = 0; i < payload.size(); i++) begin
             frame_data[14 + i] = payload[i];
         end
+
+        // Arm the recorder. The DUT must hand up exactly this payload, with the
+        // L2 header and the FCS already stripped.
+        frame_num++;
+        rx_idx     = 0;
+        rx_tlast_n = 0;
+        rx_error_n = 0;
         
-        // Compute Standard IEEE 802.3 CRC-32 (Right-Shifting)
+        // Compute Standard IEEE 802.3 CRC-32 (Right-Shifting).
+        //
+        // frame_data is `byte`, which is SIGNED. XORing it straight into a
+        // 32-bit accumulator leaves the width extension of any byte >= 0x80
+        // (every MAC address byte here, and half of payload_1) dependent on how
+        // the simulator resolves mixed-signedness operands. Mask to 8 bits
+        // explicitly so the value is unambiguous everywhere.
         crc_val = 32'hFFFFFFFF;
         for (int i = 0; i < frame_len; i++) begin
-            crc_val = crc_val ^ frame_data[i];
+            crc_val = crc_val ^ {24'h0, (frame_data[i] & 8'hFF)};
             for (int j = 0; j < 8; j++) begin
-                if (crc_val & 1) crc_val = (crc_val >> 1) ^ 32'hEDB88320;
-                else             crc_val = (crc_val >> 1);
+                if (crc_val[0]) crc_val = (crc_val >> 1) ^ 32'hEDB88320;
+                else            crc_val = (crc_val >> 1);
             end
         end
         crc_val = ~crc_val; // Invert to get final FCS
@@ -129,25 +211,25 @@ module tb_rx_mac_core();
         
         // 5. End of Packet (Return to Idle)
         @(negedge rgmii_rx_clk);
-        rgmii_rx_ctl <= 0;
-        rgmii_rxd    <= 0;
-        
-        // Wait for the IDDR SAME_EDGE_PIPELINED delay to flush
-        @(posedge rgmii_rx_clk); 
-        @(posedge rgmii_rx_clk); // sdr_data_valid drops on this edge
-        #1; // Delta delay for combinational rx_error to resolve
-        
-        if (rx_error === corrupt_crc) begin
-            $display("[%0t ns] [PASS] CRC Evaluation Successful. Expected rx_error: %b, Got: %b", 
-                     $time, corrupt_crc, rx_error);
-        end else begin
-            // We use hierarchical referencing (dut.crc_reg) to peek inside the module!
-            $error("[%0t ns] [FAIL] CRC Evaluation Mismatch! Expected rx_error: %b, Got: %b. RAW CRC REG: 0x%h", 
-                   $time, corrupt_crc, rx_error, dut.crc_reg);
-        end
-        
-        // Pad with Inter-Frame Gap (IFG) idle cycles
-        repeat(12) @(posedge rgmii_rx_clk);
+        #2;
+        rgmii_rx_ctl = 0;
+        rgmii_rxd    = 0;
+
+        // Let the DDR pipeline and the sliding window flush.
+        repeat(12) @(posedge rgmii_rx_clk);   // inter-frame gap
+
+        mismatches = 0;
+        for (int i = 0; i < payload.size() && i < rx_idx; i++)
+            if (rx_buf[i] !== payload[i]) mismatches++;
+
+        check_int($sformatf("F%0d payload byte count", frame_num),
+                  rx_idx, payload.size());
+        check_int($sformatf("F%0d payload contents", frame_num),
+                  mismatches, 0);
+        check_int($sformatf("F%0d tlast asserted exactly once", frame_num),
+                  rx_tlast_n, 1);
+        check_int($sformatf("F%0d rx_error (CRC)", frame_num),
+                  (rx_error_n > 0) ? 1 : 0, int'(corrupt_crc));
     endtask
 
     // =========================================================================
@@ -190,7 +272,9 @@ module tb_rx_mac_core();
         send_frame(payload_2, 0, 7); // Sending payload 2 with GOOD CRC this time
 
         $display("\n=================================================");
-        $display("Simulation Complete.");
+        $display("  tb_rx_mac_core : %0d checks, %0d failures", checks, errors);
+        if (errors == 0) $display("  RESULT: ALL TESTS PASSED");
+        else             $display("  RESULT: %0d FAILURE(S)", errors);
         $display("=================================================");
         $finish;
     end

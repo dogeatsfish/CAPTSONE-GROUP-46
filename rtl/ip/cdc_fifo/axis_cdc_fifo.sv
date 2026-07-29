@@ -18,8 +18,9 @@
 //==============================================================================
 
 module axis_cdc_fifo #(
-  parameter int DATA_W = 8,     // tdata width
-  parameter int ADDR_W = 5      // depth = 2**ADDR_W entries
+  parameter int DATA_W = 8,             // tdata width
+  parameter int ADDR_W = 5,             // depth = 2**ADDR_W entries
+  parameter int ALMOST_FULL_THRESH = 0  // s_axis_almost_full when < THRESH free
 )(
   // --- write side (slave) ---------------------------------------------------
   input  logic              s_axis_aclk,
@@ -28,6 +29,8 @@ module axis_cdc_fifo #(
   input  logic              s_axis_tvalid,
   input  logic              s_axis_tlast,
   output logic              s_axis_tready,
+  output logic              s_axis_almost_full,   // write-domain: cannot fit a
+                                                  // further THRESH beats (0=off)
 
   // --- read side (master) ---------------------------------------------------
   input  logic              m_axis_aclk,
@@ -49,13 +52,15 @@ module axis_cdc_fifo #(
 
   cdc_fifo #(
     .DATA_W (DATA_W + 1),        // +1 carries tlast
-    .ADDR_W (ADDR_W)
+    .ADDR_W (ADDR_W),
+    .ALMOST_FULL_THRESH (ALMOST_FULL_THRESH)
   ) u_fifo (
-    .wr_clk   (s_axis_aclk),
-    .wr_rst_n (s_axis_aresetn),
-    .wr_en    (s_axis_tvalid & ~full),
-    .wr_data  (wr_word),
-    .wr_full  (full),
+    .wr_clk         (s_axis_aclk),
+    .wr_rst_n       (s_axis_aresetn),
+    .wr_en          (s_axis_tvalid & ~full),
+    .wr_data        (wr_word),
+    .wr_full        (full),
+    .wr_almost_full (s_axis_almost_full),
 
     .rd_clk   (m_axis_aclk),
     .rd_rst_n (m_axis_aresetn),

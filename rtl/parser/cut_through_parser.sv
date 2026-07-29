@@ -148,6 +148,12 @@ module cut_through_parser
   logic [15:0] pkt_idx;      // byte offset within the packet (checksum + strip)
   logic [15:0] msg_count;    // ITCH messages remaining in this UDP packet
   logic [15:0] wire_msg_len; // MoldUDP64 length of the current message
+  // wire_msg_len - 1, precomputed when the length lands (TIMING -- ROUND 12).
+  // FIELD_EXTRACT's end-of-message test used to evaluate `wire_msg_len - 16'd1`
+  // inline, putting a 16-bit subtract (5x CARRY4) in front of a clock-enable --
+  // the -0.624 ns WNS. The subtract now happens once, in the shallow MSG_LEN
+  // state, and the hot path is a plain equality compare.
+  logic [15:0] wire_msg_len_m1;
   logic        mlen_phase;   // 0 = high length byte, 1 = low length byte
   logic [7:0]  msg_off;      // byte offset within the current ITCH message
   logic [7:0]  msg_type;
@@ -214,13 +220,21 @@ module cut_through_parser
 
   //--------------------------------------------------------------------------
   // Ingest FSM -- consumes exactly one byte per cycle, never stalls.
+  //
+  // SYNCHRONOUS reset (DRC REQP-1839/1840): registers in this module drive the
+  // ref_table BRAM address pins (ADDRARDADDR/ADDRBWRADDR). Vivado flags an
+  // ASYNC reset on any register feeding a BRAM address pin -- on reset assertion
+  // it can corrupt RAM contents and it is not covered by default STA. A
+  // synchronous reset removes the warning class and the corruption risk. Reset
+  // is held for many cycles at startup, so async->sync is behaviourally moot.
   //--------------------------------------------------------------------------
-  always_ff @(posedge core_clk or negedge core_rst_n) begin
+  always_ff @(posedge core_clk) begin
     if (!core_rst_n) begin
       state          <= IDLE;
       pkt_idx        <= 16'd0;
       msg_count      <= 16'd0;
-      wire_msg_len   <= 16'd0;
+      wire_msg_len    <= 16'd0;
+      wire_msg_len_m1 <= 16'd0;
       mlen_phase     <= 1'b0;
       msg_off        <= 8'd0;
       msg_type       <= 8'd0;
@@ -298,7 +312,8 @@ module cut_through_parser
           // MoldUDP64 per-message length (2 bytes, big-endian).
           //------------------------------------------------------------------
           MSG_LEN: begin
-            wire_msg_len <= {wire_msg_len[7:0], s_axis_tdata};
+            wire_msg_len    <= {wire_msg_len[7:0], s_axis_tdata};
+            wire_msg_len_m1 <= {wire_msg_len[7:0], s_axis_tdata} - 16'd1;
             mlen_phase   <= ~mlen_phase;
             if (mlen_phase) state <= MSG_TYPE;   // low byte just consumed
           end
@@ -370,7 +385,7 @@ module cut_through_parser
             endcase
 
             // Final byte of this ITCH message?
-            if ({8'h0, msg_off} == (wire_msg_len - 16'd1)) begin
+            if ({8'h0, msg_off} == wire_msg_len_m1) begin
               msg_done     <= 1'b1;
               msg_count    <= msg_count - 16'd1;
               wire_msg_len <= 16'd0;
@@ -400,8 +415,21 @@ module cut_through_parser
   //--------------------------------------------------------------------------
   // Resolve / Emit pipeline (runs concurrently with ingest)
   //--------------------------------------------------------------------------
-  typedef enum logic [1:0] { R_IDLE, R_WAIT, R_EMIT1, R_EMIT2 } res_state_e;
+  // TIMING (run 6, -2.128 ns): the ref_table is block RAM, and a REGISTERED BRAM
+  // read has ~2.1 ns of clock-to-out (CLKBWRCLK -> DOBDO). R_EMIT1 read that
+  // output AND did the 32-bit `shares` subtract + valid decode in the same cycle
+  // -- 6.0 ns. A fabric pipeline register (ref_rdata_q, captured in R_WAIT2)
+  // starts the arithmetic from a fast flop instead. Costs one resolve cycle
+  // (R_IDLE->R_WAIT->R_WAIT2->R_WAIT3->R_WAIT4->R_EMIT1[->R_EMIT2], still well inside the 21-cycle
+  // minimum message gap).
+  typedef enum logic [2:0] { R_IDLE, R_WAIT, R_WAIT2, R_WAIT3, R_WAIT4, R_EMIT1, R_EMIT2 } res_state_e;
   res_state_e res_state;
+
+  // Fabric copy of the BRAM read output (ref_rdata), one cycle later.
+  ref_entry_t          ref_rdata_q;
+  logic [QTY_W-1:0]    rem_q_diff;
+  logic                rem_q_is_greater;
+  logic [QTY_W-1:0]    rem_q;
 
   // Snapshot of the completed message
   logic [7:0]          p_type;
@@ -416,7 +444,9 @@ module cut_through_parser
   logic [63:0]         p_ref, p_new_ref;
   /* verilator lint_on UNUSEDSIGNAL */
 
-  always_ff @(posedge core_clk or negedge core_rst_n) begin
+  // SYNCHRONOUS reset (DRC REQP-1839/1840): ref_waddr / ref_raddr / p_ref here
+  // drive the ref_table BRAM address pins, so they must not be async-reset.
+  always_ff @(posedge core_clk) begin
     if (!core_rst_n) begin
       res_state     <= R_IDLE;
       m_axis_tvalid <= 1'b0;
@@ -425,6 +455,10 @@ module cut_through_parser
       ref_waddr     <= '0;
       ref_wdata     <= '0;
       ref_raddr     <= '0;
+      ref_rdata_q   <= '0;
+      rem_q_diff    <= '0;
+      rem_q_is_greater <= 1'b0;
+      rem_q         <= '0;
       p_type        <= 8'd0;
       p_symbol      <= '0;
       p_price       <= '0;
@@ -452,13 +486,31 @@ module cut_through_parser
           end
         end
 
-        // BRAM read in flight; ref_rdata is valid in the next state.
-        R_WAIT: res_state <= R_EMIT1;
+        // BRAM read in flight; ref_rdata (the BRAM output register) is valid in
+        // the next state.
+        R_WAIT: res_state <= R_WAIT2;
+
+        // Capture the BRAM output into a fast fabric flop so R_WAIT3's arithmetic
+        // does not start from the slow BRAM DOBDO pin (TIMING, see enum note).
+        R_WAIT2: begin
+          ref_rdata_q <= ref_rdata;
+          res_state   <= R_WAIT3;
+        end
+
+        R_WAIT3: begin
+          rem_q_diff  <= ref_rdata_q.shares - p_shares;
+          rem_q_is_greater <= (ref_rdata_q.shares > p_shares);
+          res_state   <= R_WAIT4;
+        end
+
+        R_WAIT4: begin
+          rem_q     <= rem_q_is_greater ? rem_q_diff : '0;
+          res_state <= R_EMIT1;
+        end
 
         //--------------------------------------------------------------------
         R_EMIT1: begin
-          automatic logic [QTY_W-1:0] rem =
-              (ref_rdata.shares > p_shares) ? (ref_rdata.shares - p_shares) : '0;
+          automatic logic [QTY_W-1:0] rem = rem_q;
 
           res_state <= R_IDLE;
 
@@ -482,10 +534,10 @@ module cut_through_parser
 
             //---- Executed / Cancel: reduce the order's remaining shares -----
             ITCH_EXECUTED, ITCH_CANCEL: begin
-              if (ref_rdata.valid) begin
-                upd.symbol_id <= ref_rdata.symbol_id;
-                upd.price     <= ref_rdata.price;
-                upd.side      <= ref_rdata.side;
+              if (ref_rdata_q.valid) begin
+                upd.symbol_id <= ref_rdata_q.symbol_id;
+                upd.price     <= ref_rdata_q.price;
+                upd.side      <= ref_rdata_q.side;
                 upd.quantity  <= rem;
                 upd.msg_type  <= (rem == '0) ? MSG_DELETE : MSG_MODIFY;
                 upd.timestamp <= timestamp_now;
@@ -493,27 +545,27 @@ module cut_through_parser
 
                 ref_we    <= 1'b1;
                 ref_waddr <= p_ref[REF_ADDR_W-1:0];
-                ref_wdata <= '{valid: (rem != '0), symbol_id: ref_rdata.symbol_id,
-                               side: ref_rdata.side, price: ref_rdata.price,
+                ref_wdata <= '{valid: (rem != '0), symbol_id: ref_rdata_q.symbol_id,
+                               side: ref_rdata_q.side, price: ref_rdata_q.price,
                                shares: rem};
               end
             end
 
             //---- Delete: remove the whole order ----------------------------
             ITCH_DELETE: begin
-              if (ref_rdata.valid) begin
-                upd.symbol_id <= ref_rdata.symbol_id;
-                upd.price     <= ref_rdata.price;
-                upd.side      <= ref_rdata.side;
-                upd.quantity  <= ref_rdata.shares;
+              if (ref_rdata_q.valid) begin
+                upd.symbol_id <= ref_rdata_q.symbol_id;
+                upd.price     <= ref_rdata_q.price;
+                upd.side      <= ref_rdata_q.side;
+                upd.quantity  <= ref_rdata_q.shares;
                 upd.msg_type  <= MSG_DELETE;
                 upd.timestamp <= timestamp_now;
                 m_axis_tvalid <= 1'b1;
 
                 ref_we    <= 1'b1;
                 ref_waddr <= p_ref[REF_ADDR_W-1:0];
-                ref_wdata <= '{valid: 1'b0, symbol_id: ref_rdata.symbol_id,
-                               side: ref_rdata.side, price: ref_rdata.price,
+                ref_wdata <= '{valid: 1'b0, symbol_id: ref_rdata_q.symbol_id,
+                               side: ref_rdata_q.side, price: ref_rdata_q.price,
                                shares: '0};
               end
             end
@@ -522,11 +574,11 @@ module cut_through_parser
             // Side and symbol are INHERITED from the original entry; ITCH does
             // not repeat them on a replace.
             ITCH_REPLACE: begin
-              if (ref_rdata.valid) begin
-                upd.symbol_id <= ref_rdata.symbol_id;
-                upd.price     <= ref_rdata.price;
-                upd.side      <= ref_rdata.side;
-                upd.quantity  <= ref_rdata.shares;
+              if (ref_rdata_q.valid) begin
+                upd.symbol_id <= ref_rdata_q.symbol_id;
+                upd.price     <= ref_rdata_q.price;
+                upd.side      <= ref_rdata_q.side;
+                upd.quantity  <= ref_rdata_q.shares;
                 upd.msg_type  <= MSG_DELETE;
                 upd.timestamp <= timestamp_now;
                 m_axis_tvalid <= 1'b1;
@@ -534,13 +586,13 @@ module cut_through_parser
                 // retire the original reference
                 ref_we    <= 1'b1;
                 ref_waddr <= p_ref[REF_ADDR_W-1:0];
-                ref_wdata <= '{valid: 1'b0, symbol_id: ref_rdata.symbol_id,
-                               side: ref_rdata.side, price: ref_rdata.price,
+                ref_wdata <= '{valid: 1'b0, symbol_id: ref_rdata_q.symbol_id,
+                               side: ref_rdata_q.side, price: ref_rdata_q.price,
                                shares: '0};
 
                 // inherit identity for beat 2
-                p_symbol  <= ref_rdata.symbol_id;
-                p_side    <= ref_rdata.side;
+                p_symbol  <= ref_rdata_q.symbol_id;
+                p_side    <= ref_rdata_q.side;
                 res_state <= R_EMIT2;
               end
             end
