@@ -37,7 +37,16 @@ module outbound_tx_generator
   input  logic [TRADE_W-1:0]     s_axis_trade_tdata,   // trade_t, 144 bits
   input  logic                   s_axis_trade_tuser,   // 1 = Buy, 0 = Sell
   input  logic                   s_axis_trade_tvalid,
-  output logic                   s_axis_trade_tready,  // low while serialising
+  output logic                   s_axis_trade_tready,  // low while serialising OR
+                                                       // while the TX FIFO is too
+                                                       // full to hold a frame
+
+  // --- TX CDC FIFO write-room (from axis_cdc_fifo s_axis_almost_full) --------
+  // High when the FIFO can absorb a whole outbound frame. The serialiser has no
+  // per-byte back-pressure (it streams 77 bytes unconditionally once started),
+  // so a frame is only STARTED when the whole frame is guaranteed to fit. This
+  // is what keeps the crossing lossless -- see the drop note in commontrader_top.
+  input  logic                   fifo_has_room,
 
   // --- Shared free-running timestamp counter (top level) --------------------
   input  logic [TIMESTAMP_W-1:0] timestamp_now,
@@ -135,27 +144,47 @@ module outbound_tx_generator
 
   //--------------------------------------------------------------------------
   // IPv4 header checksum: one's-complement sum of the ten 16-bit header words
-  // with the checksum field taken as zero. Most words are constant, so this
-  // folds to (constant + total_length + identification) after synthesis.
+  // with the checksum field zero. Nine words are constant; only Identification
+  // (ip_ident) varies, so the whole checksum is a function of ip_ident alone.
+  //
+  // TIMING (ROUND 5/6, -1.4 ns): the checksum is ~fold(fold(BASE + ip_ident)).
+  // The base add plus the two DEPENDENT carry folds are ~13 CARRY4 -- too deep
+  // for one 250 MHz cycle. Constant-folding the header words did NOT help,
+  // because the depth is the fold CHAIN, not the constant adds. Since ip_ident
+  // changes only once per packet (>=168 cycles apart), the checksum is PRECOMPUTED
+  // continuously in a 2-stage pipeline (ip_csum_raw -> ip_csum_pre) and simply
+  // latched at accept. r_ip_csum is bit-identical -- read from a register instead
+  // of a deep combinational cone. Total Length is the constant PKT_LEN, so it is
+  // baked into BASE too; only Identification is added live.
   //--------------------------------------------------------------------------
-  function automatic logic [15:0] ip_checksum(input logic [15:0] tot_len,
-                                              input logic [15:0] id16);
-    logic [31:0] s;
-    s = 32'h0;
-    s = s + 32'h0000_4500;                 // Version/IHL, DSCP/ECN
-    s = s + {16'h0, tot_len};              // Total Length
-    s = s + {16'h0, id16};                 // Identification
-    s = s + 32'h0000_4000;                 // Flags/Fragment (Don't Fragment)
-    s = s + {16'h0, IP_TTL, IP_PROTO};     // TTL, Protocol   (0x4011)
-    // checksum field == 0 (skipped)
-    s = s + {16'h0, SRC_IP[31:16]};
-    s = s + {16'h0, SRC_IP[15:0]};
-    s = s + {16'h0, DST_IP[31:16]};
-    s = s + {16'h0, DST_IP[15:0]};
-    s = (s & 32'h0000_FFFF) + (s >> 16);   // fold carries
-    s = (s & 32'h0000_FFFF) + (s >> 16);
-    return ~s[15:0];
-  endfunction
+  localparam logic [31:0] IP_CSUM_CONST =
+        32'h0000_4500                     // Version/IHL, DSCP/ECN
+      + 32'h0000_4000                     // Flags/Fragment (Don't Fragment)
+      + {16'h0, IP_TTL, IP_PROTO}         // TTL, Protocol (0x4011)
+      + {16'h0, SRC_IP[31:16]}
+      + {16'h0, SRC_IP[15:0]}
+      + {16'h0, DST_IP[31:16]}
+      + {16'h0, DST_IP[15:0]};            // checksum field == 0 (skipped)
+  localparam logic [31:0] IP_CSUM_BASE = IP_CSUM_CONST + 32'(PKT_LEN); // + Total Length
+
+  logic [17:0] ip_csum_raw;   // stage 1: IP_CSUM_BASE + ip_ident (pre-fold)
+  logic [16:0] ip_csum_fold1; // stage 2: folded overflow bits
+  logic [15:0] ip_csum_pre;   // stage 3: final fold and inverted checksum for ip_ident
+
+  always_ff @(posedge core_clk or negedge core_rst_n) begin
+    if (!core_rst_n) begin
+      ip_csum_raw   <= 18'd0;
+      ip_csum_fold1 <= 17'd0;
+      ip_csum_pre   <= 16'd0;
+    end else begin
+      // stage 1: base + identification (single 18-bit add, no carry-out)
+      ip_csum_raw <= IP_CSUM_BASE[17:0] + 18'(ip_ident);
+      // stage 2: fold the two overflow bits back in
+      ip_csum_fold1 <= 17'(ip_csum_raw[15:0]) + 17'(ip_csum_raw[17:16]);
+      // stage 3: fold the final carry, invert
+      ip_csum_pre <= ~(ip_csum_fold1[15:0] + 16'(ip_csum_fold1[16]));
+    end
+  end
 
   //--------------------------------------------------------------------------
   // Serialiser FSM
@@ -194,7 +223,12 @@ module outbound_tx_generator
         // is measured at the moment the order reaches the generator.
         //--------------------------------------------------------------------
         IDLE: begin
-          if (s_axis_trade_tvalid) begin
+          // Only accept (and start streaming) when the FIFO can hold the whole
+          // frame. Otherwise the trade is not taken this cycle; if it is still
+          // asserted it will be accepted once room appears, and any trade that
+          // the (tready-less) Risk Gateway presents meanwhile is dropped and
+          // counted at the top level -- a clean drop, not a mid-frame overrun.
+          if (s_axis_trade_tvalid && fifo_has_room) begin
             r_side    <= s_axis_trade_tuser ? SIDE_BUY : SIDE_SELL;
             r_qty     <= trade.quantity;
             r_symbol  <= trade.ticker;
@@ -204,7 +238,7 @@ module outbound_tx_generator
             r_ident   <= ip_ident;
             r_ip_len  <= 16'(PKT_LEN);
             r_udp_len <= 16'(PKT_LEN - IP_HDR_LEN);
-            r_ip_csum <= ip_checksum(16'(PKT_LEN), ip_ident);
+            r_ip_csum <= ip_csum_pre;   // precomputed for the current ip_ident
 
             user_ref_num <= user_ref_num + 32'd1;
             ip_ident     <= ip_ident + 16'd1;
@@ -243,94 +277,112 @@ module outbound_tx_generator
   end
 
   //--------------------------------------------------------------------------
-  // Byte-select multiplexer: maps the current byte index onto the right field.
-  // Bytes not listed default to 0x00 (padding, DSCP/ECN, zeroed UDP checksum,
-  // price zero-extend, appendage length). ClOrdID (59..72) is space-padded.
+  // Byte-select multiplexer (Combinational)
   //--------------------------------------------------------------------------
+  logic [7:0] next_tdata;
   always_comb begin
-    m_axis_tdata = 8'h00;
+    next_tdata = 8'h00;
 
     case (byte_idx)
       // ---- IPv4 header ----
-      8'd0:  m_axis_tdata = 8'h45;              // Version 4, IHL 5
-      8'd2:  m_axis_tdata = r_ip_len[15:8];     // Total Length (hi)
-      8'd3:  m_axis_tdata = r_ip_len[7:0];      // Total Length (lo)
-      8'd4:  m_axis_tdata = r_ident[15:8];      // Identification (hi)
-      8'd5:  m_axis_tdata = r_ident[7:0];       // Identification (lo)
-      8'd6:  m_axis_tdata = 8'h40;              // Flags: Don't Fragment
-      8'd8:  m_axis_tdata = IP_TTL;
-      8'd9:  m_axis_tdata = IP_PROTO;
-      8'd10: m_axis_tdata = r_ip_csum[15:8];    // Header Checksum (hi)
-      8'd11: m_axis_tdata = r_ip_csum[7:0];     // Header Checksum (lo)
-      8'd12: m_axis_tdata = SRC_IP[31:24];
-      8'd13: m_axis_tdata = SRC_IP[23:16];
-      8'd14: m_axis_tdata = SRC_IP[15:8];
-      8'd15: m_axis_tdata = SRC_IP[7:0];
-      8'd16: m_axis_tdata = DST_IP[31:24];
-      8'd17: m_axis_tdata = DST_IP[23:16];
-      8'd18: m_axis_tdata = DST_IP[15:8];
-      8'd19: m_axis_tdata = DST_IP[7:0];
+      8'd0:  next_tdata = 8'h45;              // Version 4, IHL 5
+      8'd2:  next_tdata = r_ip_len[15:8];     // Total Length (hi)
+      8'd3:  next_tdata = r_ip_len[7:0];      // Total Length (lo)
+      8'd4:  next_tdata = r_ident[15:8];      // Identification (hi)
+      8'd5:  next_tdata = r_ident[7:0];       // Identification (lo)
+      8'd6:  next_tdata = 8'h40;              // Flags: Don't Fragment
+      8'd8:  next_tdata = IP_TTL;
+      8'd9:  next_tdata = IP_PROTO;
+      8'd10: next_tdata = r_ip_csum[15:8];    // Header Checksum (hi)
+      8'd11: next_tdata = r_ip_csum[7:0];     // Header Checksum (lo)
+      8'd12: next_tdata = SRC_IP[31:24];
+      8'd13: next_tdata = SRC_IP[23:16];
+      8'd14: next_tdata = SRC_IP[15:8];
+      8'd15: next_tdata = SRC_IP[7:0];
+      8'd16: next_tdata = DST_IP[31:24];
+      8'd17: next_tdata = DST_IP[23:16];
+      8'd18: next_tdata = DST_IP[15:8];
+      8'd19: next_tdata = DST_IP[7:0];
 
       // ---- UDP header ----
-      8'd20: m_axis_tdata = SRC_PORT[15:8];
-      8'd21: m_axis_tdata = SRC_PORT[7:0];
-      8'd22: m_axis_tdata = DST_PORT[15:8];
-      8'd23: m_axis_tdata = DST_PORT[7:0];
-      8'd24: m_axis_tdata = r_udp_len[15:8];    // UDP Length (hi)
-      8'd25: m_axis_tdata = r_udp_len[7:0];     // UDP Length (lo)
-      // 26,27: UDP checksum = 0 (default) -- legal in IPv4, required for
-      //        cut-through since the full packet is not buffered up front.
+      8'd20: next_tdata = SRC_PORT[15:8];
+      8'd21: next_tdata = SRC_PORT[7:0];
+      8'd22: next_tdata = DST_PORT[15:8];
+      8'd23: next_tdata = DST_PORT[7:0];
+      8'd24: next_tdata = r_udp_len[15:8];    // UDP Length (hi)
+      8'd25: next_tdata = r_udp_len[7:0];     // UDP Length (lo)
+      // 26,27: UDP checksum = 0 (default)
 
       // ---- OUCH 5.0 Enter Order ('O') ----
-      8'd28: m_axis_tdata = OUCH_TYPE_O;
-      8'd29: m_axis_tdata = r_userref[31:24];
-      8'd30: m_axis_tdata = r_userref[23:16];
-      8'd31: m_axis_tdata = r_userref[15:8];
-      8'd32: m_axis_tdata = r_userref[7:0];
-      8'd33: m_axis_tdata = r_side;
-      8'd34: m_axis_tdata = r_qty[31:24];
-      8'd35: m_axis_tdata = r_qty[23:16];
-      8'd36: m_axis_tdata = r_qty[15:8];
-      8'd37: m_axis_tdata = r_qty[7:0];
-      8'd38: m_axis_tdata = r_symbol[63:56];    // Symbol, MSB char first
-      8'd39: m_axis_tdata = r_symbol[55:48];
-      8'd40: m_axis_tdata = r_symbol[47:40];
-      8'd41: m_axis_tdata = r_symbol[39:32];
-      8'd42: m_axis_tdata = r_symbol[31:24];
-      8'd43: m_axis_tdata = r_symbol[23:16];
-      8'd44: m_axis_tdata = r_symbol[15:8];
-      8'd45: m_axis_tdata = r_symbol[7:0];
+      8'd28: next_tdata = OUCH_TYPE_O;
+      8'd29: next_tdata = r_userref[31:24];
+      8'd30: next_tdata = r_userref[23:16];
+      8'd31: next_tdata = r_userref[15:8];
+      8'd32: next_tdata = r_userref[7:0];
+      8'd33: next_tdata = r_side;
+      8'd34: next_tdata = r_qty[31:24];
+      8'd35: next_tdata = r_qty[23:16];
+      8'd36: next_tdata = r_qty[15:8];
+      8'd37: next_tdata = r_qty[7:0];
+      8'd38: next_tdata = r_symbol[63:56];    // Symbol, MSB char first
+      8'd39: next_tdata = r_symbol[55:48];
+      8'd40: next_tdata = r_symbol[47:40];
+      8'd41: next_tdata = r_symbol[39:32];
+      8'd42: next_tdata = r_symbol[31:24];
+      8'd43: next_tdata = r_symbol[23:16];
+      8'd44: next_tdata = r_symbol[15:8];
+      8'd45: next_tdata = r_symbol[7:0];
       // 46..49: Price upper 4 bytes = 0 (zero-extend, default)
-      8'd50: m_axis_tdata = r_price[31:24];
-      8'd51: m_axis_tdata = r_price[23:16];
-      8'd52: m_axis_tdata = r_price[15:8];
-      8'd53: m_axis_tdata = r_price[7:0];
-      8'd54: m_axis_tdata = DEF_TIF;
-      8'd55: m_axis_tdata = DEF_DISPLAY;
-      8'd56: m_axis_tdata = DEF_CAPACITY;
-      8'd57: m_axis_tdata = DEF_ISE;
-      8'd58: m_axis_tdata = DEF_CROSSTYPE;
+      8'd50: next_tdata = r_price[31:24];
+      8'd51: next_tdata = r_price[23:16];
+      8'd52: next_tdata = r_price[15:8];
+      8'd53: next_tdata = r_price[7:0];
+      8'd54: next_tdata = DEF_TIF;
+      8'd55: next_tdata = DEF_DISPLAY;
+      8'd56: next_tdata = DEF_CAPACITY;
+      8'd57: next_tdata = DEF_ISE;
+      8'd58: next_tdata = DEF_CROSSTYPE;
       // 59..72: ClOrdID = 14 spaces (handled by override below)
       // 73,74: Appendage Length = 0 (default)
 
       // ---- Latency telemetry ----
-      8'd75: m_axis_tdata = r_latency[15:8];
-      8'd76: m_axis_tdata = r_latency[7:0];
+      8'd75: next_tdata = r_latency[15:8];
+      8'd76: next_tdata = r_latency[7:0];
 
-      default: m_axis_tdata = 8'h00;
+      default: next_tdata = 8'h00;
     endcase
 
     // ClOrdID space padding (left-justified alpha field).
-    if (byte_idx >= 8'd59 && byte_idx <= 8'd72) m_axis_tdata = OUCH_SPACE;
+    if (byte_idx >= 8'd59 && byte_idx <= 8'd72) next_tdata = OUCH_SPACE;
   end
 
   //--------------------------------------------------------------------------
   // Stream handshake / framing
   //--------------------------------------------------------------------------
-  assign s_axis_trade_tready = (state == IDLE);
-  assign m_axis_tvalid       = (state == BUILD_HEADER)
-                            || (state == STREAM_PAYLOAD)
-                            || (state == FINALIZE);
-  assign m_axis_tlast        = (state == FINALIZE);
+  assign s_axis_trade_tready = (state == IDLE) && fifo_has_room;
+  
+  logic next_tvalid;
+  logic next_tlast;
+  
+  assign next_tvalid = (state == BUILD_HEADER)
+                    || (state == STREAM_PAYLOAD)
+                    || (state == FINALIZE);
+  assign next_tlast  = (state == FINALIZE);
+
+  //--------------------------------------------------------------------------
+  // Output Pipeline Register
+  // Breaks the logic path from the huge byte-select MUX into the TX FIFO.
+  //--------------------------------------------------------------------------
+  always_ff @(posedge core_clk or negedge core_rst_n) begin
+    if (!core_rst_n) begin
+      m_axis_tdata  <= 8'h00;
+      m_axis_tvalid <= 1'b0;
+      m_axis_tlast  <= 1'b0;
+    end else begin
+      m_axis_tdata  <= next_tdata;
+      m_axis_tvalid <= next_tvalid;
+      m_axis_tlast  <= next_tlast;
+    end
+  end
 
 endmodule

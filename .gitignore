@@ -1,9 +1,11 @@
 # Vivado
 *.jou
 *.log
+*.pb
+dfx_runtime.txt
 *.str
 *.dcp
-*.bit
+//*.bit
 *.ltx
 .Xil/
 dfx_runtime.txt
@@ -14,6 +16,7 @@ vivado/*.gen/
 vivado/*.hw/
 vivado/*.ip_user_files/
 vivado/*.sim/
+vivado/report_*
 
 # Alpha Engine compile job workspaces (submitted source + Vivado
 # logs/reports/result.json for each /compile run) -- see compile_manager.py
@@ -21,6 +24,12 @@ sw/service/compiler_jobs/
 
 # Simulation
 sim/obj*
+sim/logs/
+sim/xsim_*
+sim/replay_*.hex
+sim/replay_*.txt
+*.jou
+xsim.dir/
 sim/*.vcd
 sim/*.fst
 sim/*.wdb
