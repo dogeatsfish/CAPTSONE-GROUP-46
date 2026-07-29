@@ -117,6 +117,11 @@ class CompileJob:
         except queue.Full:
             pass  # slow/absent client: drop rather than block Vivado's stdout pipe
 
+    def _fail(self, detail: str) -> None:
+        """Emit a terminal error event and signal the stream to close."""
+        self._emit({"type": "error", "detail": detail})
+        self.events.put(_DONE)
+
     def _run(self) -> None:
         try:
             proc = subprocess.Popen(
@@ -136,8 +141,7 @@ class CompileJob:
                 bufsize=1,
             )
         except OSError as exc:
-            self._emit({"type": "error", "detail": f"Failed to launch Vivado: {exc}"})
-            self.events.put(_DONE)
+            self._fail(f"Failed to launch Vivado: {exc}")
             return
 
         assert proc.stdout is not None
@@ -147,33 +151,20 @@ class CompileJob:
 
         result_path = self.workspace / "result.json"
         if not result_path.is_file():
-            self._emit(
-                {
-                    "type": "error",
-                    "detail": (
-                        f"Vivado exited (code {proc.returncode}) without writing "
-                        "result.json; see the log lines above for details."
-                    ),
-                }
+            self._fail(
+                f"Vivado exited (code {proc.returncode}) without writing "
+                "result.json; see the log lines above for details."
             )
-            self.events.put(_DONE)
             return
 
         try:
             result = json.loads(result_path.read_text())
         except (OSError, json.JSONDecodeError) as exc:
-            self._emit({"type": "error", "detail": f"Could not read result.json: {exc}"})
-            self.events.put(_DONE)
+            self._fail(f"Could not read result.json: {exc}")
             return
 
         if result.get("status") != "passed":
-            self._emit(
-                {
-                    "type": "error",
-                    "detail": result.get("error") or "Compile failed (no error detail).",
-                }
-            )
-            self.events.put(_DONE)
+            self._fail(result.get("error") or "Compile failed (no error detail).")
             return
 
         util_path = self.workspace / "util.rpt"
