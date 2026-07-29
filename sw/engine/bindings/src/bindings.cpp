@@ -70,14 +70,19 @@ PYBIND11_MODULE(engine_sim, m) {
     // Not registered in Windows builds (CT_NO_ONLINE_SIM) -- see the #include
     // guard above.
 #ifndef CT_NO_ONLINE_SIM
+    py::enum_<OnlineSimulation::OuchTransport>(m, "OuchTransport")
+        .value("UDP", OnlineSimulation::OuchTransport::UDP)
+        .value("TCP", OnlineSimulation::OuchTransport::TCP);
+
     py::class_<OnlineSimulation::Config>(m, "OnlineConfig")
         .def(py::init<>())
-        .def_readwrite("itch_address", &OnlineSimulation::Config::itch_address)
-        .def_readwrite("itch_port",    &OnlineSimulation::Config::itch_port)
-        .def_readwrite("ouch_port",    &OnlineSimulation::Config::ouch_port)
-        .def_readwrite("time_scale",   &OnlineSimulation::Config::time_scale)
-        .def_readwrite("max_sleep_ns", &OnlineSimulation::Config::max_sleep_ns)
-        .def_readwrite("stock_locate", &OnlineSimulation::Config::stock_locate);
+        .def_readwrite("itch_address",   &OnlineSimulation::Config::itch_address)
+        .def_readwrite("itch_port",      &OnlineSimulation::Config::itch_port)
+        .def_readwrite("ouch_port",      &OnlineSimulation::Config::ouch_port)
+        .def_readwrite("ouch_transport", &OnlineSimulation::Config::ouch_transport)
+        .def_readwrite("time_scale",     &OnlineSimulation::Config::time_scale)
+        .def_readwrite("max_sleep_ns",   &OnlineSimulation::Config::max_sleep_ns)
+        .def_readwrite("stock_locate",   &OnlineSimulation::Config::stock_locate);
 
     py::class_<OnlineSimulation>(m, "OnlineSimulation")
         .def(py::init<const std::string&>(), py::arg("file_path"),

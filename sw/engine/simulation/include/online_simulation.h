@@ -15,15 +15,29 @@
 
 class OnlineSimulation {
 public:
+    // OUCH order-entry transport selector.
+    //   UDP : connectionless datagrams, one OUCH frame per packet. Matches the
+    //         FPGA, which emits IP/UDP order packets (outbound_tx_generator.sv).
+    //   TCP : byte stream with a listen/accept handshake. For software clients
+    //         and the loopback tests.
+    enum class OuchTransport { UDP, TCP };
+
     struct Config {
-        // (UDP).
-        std::string itch_address = "127.0.0.1";
-        uint16_t    itch_port    = 26000;
-        // (TCP).
-        uint16_t    ouch_port    = 26001;
+        // (UDP). Market data is sent TO the FPGA, whose IP is the RTL's
+        // SRC_IP (192.168.0.1). The FPGA parser does not validate the UDP
+        // destination port, so it is kept equal to the OUCH port for symmetry.
+        std::string itch_address = "192.168.0.1";
+        uint16_t    itch_port    = 50001;
+        // (TCP/UDP). Must match the FPGA's OUCH DST_PORT (outbound_tx_generator.sv).
+        uint16_t    ouch_port    = 50001;
+
+        // OUCH order-entry transport. Defaults to UDP so order intake matches
+        // the hardware; flip to TCP for a streaming software client.
+        OuchTransport ouch_transport = OuchTransport::UDP;
+
         // Wall-clock pacing.
         // 1.0 = true real time, 0.001 = 1000x faster, 0.0 = no pacing.
-        double      time_scale   = 1.0;
+        double      time_scale   = 0.001;
 
         // Cap on any single sleep so a large timestamp gap can't stall the
         // replay indefinitely (nanoseconds). 0 disables the cap.
@@ -85,7 +99,9 @@ private:
     void apply_market_event(const MBORecord& rec, uint64_t& next_sample_ns);
 
     // --- Order-entry side (runs on ouch_thread) ---
-    void ouch_server_loop();
+    void ouch_server_loop();      // dispatches to the TCP or UDP loop
+    void ouch_tcp_loop();         // accept() + per-connection stream reader
+    void ouch_udp_loop();         // recvfrom() datagram reader
     void handle_ouch_client(int client_fd);
     FillReport apply_ouch_order(const protocol::OuchMessage& msg);
 
