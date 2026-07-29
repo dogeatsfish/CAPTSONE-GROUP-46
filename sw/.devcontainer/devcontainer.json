@@ -1,0 +1,47 @@
+{
+  // CommonTrader C++ dev container.
+  // Opens the whole `sw/` workspace inside a Linux (Ubuntu 24.04) container so
+  // Linux-only code (e.g. <sys/socket.h>) compiles and debugs natively on
+  // Windows/macOS via Docker — without touching any C++ source.
+  "name": "CommonTrader C++ (Ubuntu 24.04)",
+
+  // Build the local Dockerfile (gives us pinned GCC 13 + valgrind, etc.).
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+
+  // gdb needs ptrace; disabling the default seccomp profile keeps debugging
+  // and tools like valgrind working smoothly inside the container.
+  "runArgs": [
+    "--cap-add=SYS_PTRACE",
+    "--security-opt",
+    "seccomp=unconfined"
+  ],
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-vscode.cpptools-extension-pack",
+        "ms-vscode.cmake-tools",
+        "ms-python.python"
+      ],
+      "settings": {
+        // Point IntelliSense and CMake Tools at the container's GCC 13.
+        "C_Cpp.default.compilerPath": "/usr/bin/g++-13",
+        "C_Cpp.default.cppStandard": "c++17",
+        "cmake.cmakePath": "/usr/bin/cmake",
+        "cmake.generator": "Ninja",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+
+  // The engine's Makefile references python for the socket tests; make it the
+  // container's interpreter and confirm the toolchain came up correctly.
+  "postCreateCommand": "g++ --version && cmake --version",
+
+  // Run as the image's non-root user (has passwordless sudo for apt if needed).
+  "remoteUser": "vscode"
+}
