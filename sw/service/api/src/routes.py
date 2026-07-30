@@ -1,8 +1,9 @@
 import logging
 import time
 from pathlib import Path
+from typing import List
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from config import (
@@ -20,7 +21,7 @@ from common import PnLPoint, Trade
 from compile import CompileRequest, CompileStartResponse
 from compile_manager import compile_manager
 from request import SimulationRequest
-from response import SimulationResponse, StreamStartResponse
+from response import RunDetail, RunSummary, SimulationResponse, StreamStartResponse
 from stream_manager import stream_manager, build_online_config
 
 router = APIRouter()
@@ -193,6 +194,25 @@ def list_datasets():
         sorted(p.name for p in DATA_DIR.glob("*.bin")) if DATA_DIR.is_dir() else []
     )
     return {"data_dir": str(DATA_DIR), "datasets": datasets}
+
+
+@router.get("/runs", response_model=List[RunSummary], tags=["runs"])
+def list_runs(limit: int = Query(20, ge=1, le=200)):
+    """List the most recently persisted simulation runs, newest first.
+
+    Backed by db.py's `runs` table (FS-15, partial scope -- see db.py's module
+    docstring). Only runs from /simulate and /simulate/online are logged today.
+    """
+    return db.get_recent_runs(limit=limit)
+
+
+@router.get("/runs/{run_id}", response_model=RunDetail, tags=["runs"])
+def get_run(run_id: int):
+    """Fetch one persisted run's summary plus its logged fills and PnL curve."""
+    run = db.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Unknown run_id: {run_id}")
+    return run
 
 
 @router.post("/compile", response_model=CompileStartResponse, tags=["compile"])

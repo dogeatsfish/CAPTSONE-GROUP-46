@@ -112,3 +112,53 @@ def log_run(
             return run_id
         finally:
             conn.close()
+
+
+def get_recent_runs(limit: int = 20) -> list[dict]:
+    """Return the most recently persisted runs (newest first), one summary
+    dict per run. No lock needed: WAL mode allows concurrent readers, and
+    reads don't need the multi-statement atomicity `log_run` does."""
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            "SELECT run_id, data_file, mode, started_at_ns, compute_time_us, total_trades "
+            "FROM runs ORDER BY run_id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_run(run_id: int) -> dict | None:
+    """Return one run's summary plus its fills and PnL samples, or None if
+    run_id doesn't exist."""
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        run_row = conn.execute(
+            "SELECT run_id, data_file, mode, started_at_ns, compute_time_us, total_trades "
+            "FROM runs WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if run_row is None:
+            return None
+
+        fills = conn.execute(
+            "SELECT timestamp_ns, side, price, size FROM fills "
+            "WHERE run_id = ? ORDER BY timestamp_ns",
+            (run_id,),
+        ).fetchall()
+        metrics = conn.execute(
+            "SELECT timestamp_ns, realized_pnl, unrealized_pnl, position_size "
+            "FROM metrics WHERE run_id = ? ORDER BY timestamp_ns",
+            (run_id,),
+        ).fetchall()
+
+        run = dict(run_row)
+        run["fills"] = [dict(row) for row in fills]
+        run["pnl_curve"] = [dict(row) for row in metrics]
+        return run
+    finally:
+        conn.close()
