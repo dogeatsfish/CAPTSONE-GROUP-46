@@ -41,7 +41,18 @@ service only -- not `rtl/`/`vivado/`, since Vivado needs a license, a GUI,
 and direct USB/JTAG access to the board. This is also the easiest way to
 sidestep the cross-platform build issues tracked in `TODO.md` (the container
 is always Linux, so the engine's POSIX socket code just works regardless of
-your host OS):
+your host OS).
+
+**Install Docker first if you don't already have it:**
+
+- **Windows / macOS:** install [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+  and launch it once (it runs as a background app/tray icon -- the daemon
+  must be running before `docker compose` works).
+- **Linux:** install [Docker Engine](https://docs.docker.com/engine/install/)
+  for your distro, which includes the `docker compose` plugin.
+
+Verify it's ready with `docker info` (fails fast if the daemon isn't running).
+Then:
 
 ```bash
 cd sw
