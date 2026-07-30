@@ -198,17 +198,13 @@ def list_datasets():
 
 @router.get("/runs", response_model=List[RunSummary], tags=["runs"])
 def list_runs(limit: int = Query(20, ge=1, le=200)):
-    """List the most recently persisted simulation runs, newest first.
-
-    Backed by db.py's `runs` table (FS-15, partial scope -- see db.py's module
-    docstring). Only runs from /simulate and /simulate/online are logged today.
-    """
+    """List the most recently persisted simulation runs, newest first."""
     return db.get_recent_runs(limit=limit)
 
 
 @router.get("/runs/{run_id}", response_model=RunDetail, tags=["runs"])
 def get_run(run_id: int):
-    """Fetch one persisted run's summary plus its logged fills and PnL curve."""
+    """One persisted run's summary plus its fills and PnL curve."""
     run = db.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"Unknown run_id: {run_id}")

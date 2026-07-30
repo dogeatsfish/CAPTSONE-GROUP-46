@@ -115,9 +115,8 @@ def log_run(
 
 
 def get_recent_runs(limit: int = 20) -> list[dict]:
-    """Return the most recently persisted runs (newest first), one summary
-    dict per run. No lock needed: WAL mode allows concurrent readers, and
-    reads don't need the multi-statement atomicity `log_run` does."""
+    """Return the most recently persisted runs, newest first. No lock needed
+    here -- WAL mode handles concurrent reads fine, unlike log_run's write."""
     conn = _connect()
     conn.row_factory = sqlite3.Row
     try:

@@ -134,9 +134,8 @@ int main() {
     std::cout << "Market data: " << MARKET_BOOK << " (100 bid adds, 100.00 step +0.05, 50ms)\n";
 
     OnlineSimulation::Config cfg;
-    // This is a software-only loopback test, not a hardware target -- pin the
-    // pre-PR-#17 loopback/TCP contract explicitly rather than inherit
-    // Config's now-FPGA-oriented defaults (192.168.0.1, UDP).
+    // Config now defaults to the FPGA's address/UDP -- this test is loopback
+    // only, so pin those explicitly instead of relying on the defaults.
     cfg.itch_address   = "127.0.0.1";
     cfg.ouch_transport = OnlineSimulation::OuchTransport::TCP;
     cfg.itch_port  = ITCH_PORT;

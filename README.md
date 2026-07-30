@@ -43,16 +43,10 @@ sidestep the cross-platform build issues tracked in `TODO.md` (the container
 is always Linux, so the engine's POSIX socket code just works regardless of
 your host OS).
 
-**Install Docker first if you don't already have it:**
-
-- **Windows / macOS:** install [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-  and launch it once (it runs as a background app/tray icon -- the daemon
-  must be running before `docker compose` works).
-- **Linux:** install [Docker Engine](https://docs.docker.com/engine/install/)
-  for your distro, which includes the `docker compose` plugin.
-
-Verify it's ready with `docker info` (fails fast if the daemon isn't running).
-Then:
+Don't have Docker yet? Windows/macOS: grab [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+and open it once so the daemon's actually running. Linux: install
+[Docker Engine](https://docs.docker.com/engine/install/), which brings the
+`docker compose` plugin with it. `docker info` will tell you if it's up.
 
 ```bash
 cd sw
