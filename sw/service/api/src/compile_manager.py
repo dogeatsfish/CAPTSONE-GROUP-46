@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import queue
+import shutil
 import subprocess
 import threading
 import time
@@ -218,11 +219,28 @@ class CompileManager:
             return self._jobs.get(job_id)
 
     def remove(self, job_id: str) -> None:
+        """Drop a job from the registry and delete its on-disk workspace
+        (submitted source + Vivado logs/reports) -- otherwise every compile
+        run leaks a directory under COMPILE_JOBS_DIR forever.
+
+        Deletion happens after a *real* join (no timeout), off the caller's
+        thread: event_stream only waits up to 1s before calling this, and an
+        early client disconnect can leave the compile thread (and Vivado)
+        still running well past that -- rmtree'ing the workspace out from
+        under an in-flight Vivado process would corrupt that job's run.
+        """
         with self._lock:
-            self._jobs.pop(job_id, None)
+            job = self._jobs.pop(job_id, None)
+        if job is None:
+            return
+        threading.Thread(
+            target=lambda: (job.join(), shutil.rmtree(job.workspace, ignore_errors=True)),
+            daemon=True,
+        ).start()
 
     def _reap_stale(self) -> None:
-        """Drop jobs that were created but never attached to a stream."""
+        """Drop (and delete the workspace of) jobs created but never attached
+        to a stream."""
         now = time.monotonic()
         with self._lock:
             stale = [
@@ -232,6 +250,8 @@ class CompileManager:
             ]
             for jid in stale:
                 self._jobs.pop(jid, None)
+        for jid in stale:
+            shutil.rmtree(COMPILE_JOBS_DIR / jid, ignore_errors=True)
 
     async def event_stream(
         self, job: CompileJob, request: Any
