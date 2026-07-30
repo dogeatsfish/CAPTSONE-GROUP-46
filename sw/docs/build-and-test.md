@@ -29,6 +29,8 @@ The Python module and the online tests additionally need Python 3 with
 | `stress-book`  | Builds + runs the OrderBook stress/correctness harness.             |
 | `test-online`  | Generates a market book, then builds + runs the end-to-end online test. |
 | `socket-test`  | Generates a market book, then builds + runs the OUCH socket test.   |
+| `flood-test`   | Generates a dense market book, then stress-tests the engine with a burst of ITCH messages. |
+| `hw-smoke-test`| Builds `online_run` and streams a short book at the real FPGA (`docs/connection-test.md`). |
 | `clean`        | Removes all build artifacts.                                        |
 
 ## Overridable variables
@@ -73,23 +75,40 @@ Or call the binary directly for full control over networking args (see
 make stress-book       # pure C++ OrderBook stress + correctness, no Python/network
 make test-online       # end-to-end: ITCH replay + OUCH connect/send/receive
 make socket-test       # OUCH socket client vs a rising bid ladder
+make flood-test        # same, but against a dense 5000-order book (stress)
 ```
 
-`test-online` and `socket-test` first run `tests/src/gen_market_ladder.py`
-(via `$(PY)`) to produce `tests/data/market_ladder.bin`, then compile and run.
-If your Python isn't at the default venv path, override it:
+`test-online`, `socket-test`, and `flood-test` first generate their market
+book (via `$(PY)`), then compile and run. If your Python isn't at the
+default venv path, override it:
 
 ```bash
 make test-online PY=python3
 make socket-test PY=/path/to/venv/bin/python
 ```
 
-> **Transport note:** these two tests open an OUCH **TCP** client
-> (`connect_ouch` in `tests/src/`), while the engine's default OUCH transport is
-> now **UDP**. If a test hangs or fails to connect, set the transport to TCP in
-> the test's `Config` (`cfg.ouch_transport = OnlineSimulation::OuchTransport::TCP;`)
-> or point the test client at UDP. See
+Each of these reads its socket addresses/ports/transport and dataset path
+from a `tests/config/*.ini` file (same name as the test) instead of hardcoded
+values in the `.cpp` — override with e.g. `TEST_ONLINE_CONFIG=path/to/other.ini`
+or `SOCKET_TEST_CONFIG=...`. See `tests/config/test_online.ini` for the format.
+
+> **Transport note:** `test-online`'s and `socket-test`'s OUCH client
+> (`connect_ouch` in `tests/src/`) only speaks **TCP**, while the engine's
+> default OUCH transport is now **UDP** — that's why their `.ini` files pin
+> `ouch_transport = tcp`. Pointing one of these configs at `udp` fails fast
+> with a clear error instead of hanging. See
 > `sw/engine/simulation/include/online_simulation.h`.
+
+### Hardware smoke test
+
+```bash
+make hw-smoke-test
+```
+
+Builds `online_run` and streams a short 10-order book at the real FPGA
+(`tests/config/hardware_smoke.ini`: UDP, `192.168.0.1:50001`). This assumes
+the host↔FPGA link is already set up — see `docs/connection-test.md`, which
+this is the quick/checked-in version of step 4's manual command.
 
 ## Building the Python module — macOS vs Linux
 

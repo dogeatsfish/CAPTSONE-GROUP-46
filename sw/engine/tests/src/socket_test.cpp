@@ -19,6 +19,7 @@
 #include "online_simulation.h"
 #include "offline_simulation.h" // MBORecord
 #include "protocol.h"
+#include "ini_config.h"
 
 #include <chrono>
 #include <cstdio>
@@ -36,18 +37,16 @@
 
 namespace {
 
-const char*        MARKET_BOOK = "tests/data/market_ladder.bin";
-constexpr uint16_t ITCH_PORT   = 27200;
-constexpr uint16_t OUCH_PORT   = 27201;
+const char* DEFAULT_CONFIG_PATH = "tests/config/socket_test.ini";
 
 // Fallback: regenerate the ladder book if it is missing, so the test is
 // self-contained. Must match tests/src/gen_market_ladder.py.
-bool ensure_market_book(const char* path) {
+bool ensure_market_book(const std::string& path) {
     struct stat st;
-    if (::stat(path, &st) == 0 && st.st_size > 0) return true; // already present
+    if (::stat(path.c_str(), &st) == 0 && st.st_size > 0) return true; // already present
 
     ::mkdir("tests/data", 0755);
-    FILE* fp = std::fopen(path, "wb");
+    FILE* fp = std::fopen(path.c_str(), "wb");
     if (fp == nullptr) return false;
 
     const uint64_t base_ns = 1'000'000'000'000'000'000ULL;
@@ -124,25 +123,42 @@ bool send_order(int fd, uint64_t id, char side, double price, double size) {
 
 } // namespace
 
-int main() {
+int main(int argc, char* argv[]) {
     std::cout << "=== socket_test: OUCH client vs rising bid ladder ===\n";
 
-    if (!ensure_market_book(MARKET_BOOK)) {
-        std::cerr << "FAIL: could not find or create " << MARKET_BOOK << "\n";
+    const std::string config_path = argc > 1 ? argv[1] : DEFAULT_CONFIG_PATH;
+    IniConfig ini;
+    if (!ini.load(config_path)) return 1;
+
+    const std::string itch_address = ini.get_string("itch_address", "127.0.0.1");
+    const uint16_t     ITCH_PORT   = ini.get_port("itch_port", 27200);
+    const uint16_t     OUCH_PORT   = ini.get_port("ouch_port", 27201);
+    const std::string ouch_transport = ini.get_string("ouch_transport", "tcp");
+    const std::string market_book  = ini.get_string("market_book", "tests/data/market_ladder.bin");
+
+    // The OUCH client below only speaks TCP; catch a udp-configured .ini here
+    // instead of silently hanging on connect_ouch().
+    if (ouch_transport != "tcp") {
+        std::cerr << "FAIL: " << config_path << " sets ouch_transport=" << ouch_transport
+                  << ", but this test's OUCH client only supports TCP\n";
         return 1;
     }
-    std::cout << "Market data: " << MARKET_BOOK << " (100 bid adds, 100.00 step +0.05, 50ms)\n";
+
+    if (!ensure_market_book(market_book)) {
+        std::cerr << "FAIL: could not find or create " << market_book << "\n";
+        return 1;
+    }
+    std::cout << "Config: " << config_path << "\n";
+    std::cout << "Market data: " << market_book << " (100 bid adds, 100.00 step +0.05, 50ms)\n";
 
     OnlineSimulation::Config cfg;
-    // Config now defaults to the FPGA's address/UDP -- this test is loopback
-    // only, so pin those explicitly instead of relying on the defaults.
-    cfg.itch_address   = "127.0.0.1";
+    cfg.itch_address   = itch_address;
     cfg.ouch_transport = OnlineSimulation::OuchTransport::TCP;
     cfg.itch_port  = ITCH_PORT;
     cfg.ouch_port  = OUCH_PORT;
-    cfg.time_scale = 1.0; // real time: ladder streams over ~5s
+    cfg.time_scale = ini.get_double("time_scale", 1.0);
 
-    OnlineSimulation sim(MARKET_BOOK, cfg);
+    OnlineSimulation sim(market_book, cfg);
 
     SimulationResult result;
     std::thread sim_thread([&]() { result = sim.run(); });

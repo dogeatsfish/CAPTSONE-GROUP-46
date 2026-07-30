@@ -82,7 +82,7 @@ PY_LINK_LIBS :=
 endif
 endif
 
-.PHONY: all run online run-online pymodule stress-book test-online socket-test clean
+.PHONY: all run online run-online pymodule stress-book test-online socket-test flood-test hw-smoke-test clean
 
 all: $(TARGET) $(ONLINE_TARGET)
 
@@ -126,23 +126,49 @@ stress-book: $(STRESS_BOOK_SRCS)
 
 # Online simulation end-to-end test (ITCH replay + OUCH connect/send/receive).
 # The market-data book is produced by the Python EventGenerator first.
-TEST_ONLINE_BIN  := tests/src/test_online
-TEST_ONLINE_SRCS := tests/src/test_online.cpp $(CORE_SRCS)
-GEN_LADDER       := tests/src/gen_market_ladder.py
+# Socket addresses/ports/transport and the dataset file live in
+# tests/config/test_online.ini, not hardcoded here -- override with
+# TEST_ONLINE_CONFIG=... to run against a different .ini.
+TEST_ONLINE_BIN    := tests/src/test_online
+TEST_ONLINE_SRCS   := tests/src/test_online.cpp $(CORE_SRCS)
+TEST_ONLINE_CONFIG ?= tests/config/test_online.ini
+GEN_LADDER         := tests/src/gen_market_ladder.py
 
 test-online: $(TEST_ONLINE_SRCS) $(GEN_LADDER)
 	$(PY) $(GEN_LADDER)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(TEST_ONLINE_SRCS) -o $(TEST_ONLINE_BIN) -lpthread
-	./$(TEST_ONLINE_BIN)
+	./$(TEST_ONLINE_BIN) $(TEST_ONLINE_CONFIG)
 
-# OUCH socket client vs a generated rising bid ladder.
-SOCKET_TEST_BIN  := tests/src/socket_test
-SOCKET_TEST_SRCS := tests/src/socket_test.cpp $(CORE_SRCS)
+# OUCH socket client vs a generated rising bid ladder. Config (see above):
+# tests/config/socket_test.ini, override with SOCKET_TEST_CONFIG=...
+SOCKET_TEST_BIN    := tests/src/socket_test
+SOCKET_TEST_SRCS   := tests/src/socket_test.cpp $(CORE_SRCS)
+SOCKET_TEST_CONFIG ?= tests/config/socket_test.ini
 
 socket-test: $(SOCKET_TEST_SRCS) $(GEN_LADDER)
 	$(PY) $(GEN_LADDER)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SOCKET_TEST_SRCS) -o $(SOCKET_TEST_BIN) -lpthread
-	./$(SOCKET_TEST_BIN)
+	./$(SOCKET_TEST_BIN) $(SOCKET_TEST_CONFIG)
+
+# tests/src/gen_test_datasets.py produces smoke_book.bin (hw-smoke-test) and
+# flood_book.bin (flood-test) -- same price band/shape as market_ladder.bin,
+# just shorter or denser, so the existing test assertions still hold.
+GEN_TEST_DATASETS := tests/src/gen_test_datasets.py
+
+# Flood/stress the online engine with a dense burst of ITCH messages, reusing
+# socket_test's OUCH client against tests/config/flood_test.ini (loopback).
+flood-test: $(SOCKET_TEST_SRCS) $(GEN_TEST_DATASETS)
+	$(PY) $(GEN_TEST_DATASETS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SOCKET_TEST_SRCS) -o $(SOCKET_TEST_BIN) -lpthread
+	./$(SOCKET_TEST_BIN) tests/config/flood_test.ini
+
+# Quick "is the board alive" check for demo day -- streams a short ladder at
+# the real FPGA over UDP/192.168.0.1 and relies on tcpdump/the activity LED
+# to confirm OUCH responses (see docs/connection-test.md step 4). Needs the
+# host <-> FPGA link already configured; this only builds/runs online_run.
+hw-smoke-test: $(ONLINE_TARGET) $(GEN_TEST_DATASETS)
+	$(PY) $(GEN_TEST_DATASETS)
+	./$(ONLINE_TARGET) tests/config/hardware_smoke.ini
 
 clean:
 	rm -f $(TARGET) $(ONLINE_TARGET) $(PY_MODULE)*.so $(STRESS_BOOK_BIN) $(TEST_ONLINE_BIN) $(SOCKET_TEST_BIN)
