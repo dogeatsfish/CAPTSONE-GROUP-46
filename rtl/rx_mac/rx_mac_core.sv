@@ -14,7 +14,8 @@ module rx_mac_core
   import ct_pkg::*;
 (
   // --- RGMII from PHY (125 MHz domain) --------------------------------------
-  input  logic       rgmii_rx_clk,   // 125 MHz receive clock from PHY
+  input  logic       rgmii_rx_clk_io, // For IDDRs (fast I/O buffer)
+  input  logic       rgmii_rx_clk,   // 125 MHz receive clock from PHY (global buffer)
   input  logic       rgmii_rst_n,
   input  logic [3:0] rgmii_rxd,      // DDR data bus
   input  logic       rgmii_rx_ctl,   // DDR control: RXDV on rising, RXDV^RXER on falling
@@ -55,7 +56,7 @@ module rx_mac_core
         .Q1(sdr_data[i]),
         .Q2(sdr_data[i+4]),
         // Input
-        .C(rgmii_rx_clk),
+        .C(rgmii_rx_clk_io),
         .CE(1),
         .D(rgmii_rxd[i]),
         .R(~rgmii_rst_n),
@@ -71,7 +72,7 @@ module rx_mac_core
       .Q1(sdr_data_valid),
       .Q2(sdr_error),
       // Input
-      .C(rgmii_rx_clk),
+      .C(rgmii_rx_clk_io),
       .CE(1),
       .D(rgmii_rx_ctl),
       .R(~rgmii_rst_n),

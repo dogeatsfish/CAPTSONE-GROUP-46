@@ -31,8 +31,8 @@
 
 module clk_rst_gen #(
   // Simulation-only: half period of the behavioural core clock, in ps.
-  // 2000 ps -> 4 ns period -> 250 MHz, matching ct_pkg::CORE_PERIOD_NS.
-  parameter int CORE_HALF_PERIOD_PS = 2000
+  // 2222 ps -> 4.444 ns period -> 225 MHz, matching ct_pkg::CORE_PERIOD_NS.
+  parameter int CORE_HALF_PERIOD_PS = 2222
 )(
   input  logic sys_rst_n,       // board reset, active low, asynchronous
   input  logic rgmii_rx_clk,    // 125 MHz from PHY
@@ -60,8 +60,8 @@ module clk_rst_gen #(
   MMCME2_BASE #(
     .CLKIN1_PERIOD    (8.0),    // 125 MHz
     .DIVCLK_DIVIDE    (1),
-    .CLKFBOUT_MULT_F  (8.0),    // VCO = 1000 MHz (inside the Artix-7 range)
-    .CLKOUT0_DIVIDE_F (4.0),    // 1000 / 4 = 250 MHz
+    .CLKFBOUT_MULT_F  (9.0),    // VCO = 1125 MHz (inside the Artix-7 range, exact multiple of 0.125)
+    .CLKOUT0_DIVIDE_F (5.0),    // 1125 / 5 = 225 MHz
     .STARTUP_WAIT     ("FALSE")
   ) u_mmcm (
     .CLKIN1   (rgmii_rx_clk),

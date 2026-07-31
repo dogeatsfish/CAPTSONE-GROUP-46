@@ -19,9 +19,9 @@
 package ct_pkg;
 
   // --- Clocking -------------------------------------------------------------
-  parameter int CORE_CLK_HZ      = 250_000_000;  // 250 MHz core domain (MMCM)
+  parameter int CORE_CLK_HZ      = 225_000_000;  // 225 MHz core domain (MMCM)
   parameter int PHY_CLK_HZ       = 125_000_000;  // 125 MHz RGMII domain
-  parameter int CORE_PERIOD_NS   = 4;            // 1 / 250 MHz
+  parameter real CORE_PERIOD_NS  = 4.444;        // 1 / 225 MHz
 
   // --- Market structure -----------------------------------------------------
   parameter int NUM_ASSETS       = 5;            // FS-6: minimum 5 assets

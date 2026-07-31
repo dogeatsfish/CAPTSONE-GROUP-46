@@ -64,13 +64,26 @@ module commontrader_top
   //--------------------------------------------------------------------------
   // Clocking and reset
   //--------------------------------------------------------------------------
+  logic rgmii_rx_clk_io;
+  logic rgmii_rx_clk_bufg;
+
+`ifdef SYNTHESIS
+  logic rgmii_rx_clk_ibuf;
+  IBUF u_ibuf_rx_clk (.I(rgmii_rx_clk), .O(rgmii_rx_clk_ibuf));
+  BUFIO u_bufio_rx_clk (.I(rgmii_rx_clk_ibuf), .O(rgmii_rx_clk_io));
+  BUFG u_bufg_rx_clk (.I(rgmii_rx_clk_ibuf), .O(rgmii_rx_clk_bufg));
+`else
+  assign rgmii_rx_clk_io   = rgmii_rx_clk;
+  assign rgmii_rx_clk_bufg = rgmii_rx_clk;
+`endif
+
   logic core_clk;
   logic core_rst_n;
   logic phy_rst_n;
 
   clk_rst_gen u_clk_rst (
     .sys_rst_n    (sys_rst_n),
-    .rgmii_rx_clk (rgmii_rx_clk),
+    .rgmii_rx_clk (rgmii_rx_clk_bufg),
     .core_clk     (core_clk),
     .core_rst_n   (core_rst_n),
     .phy_rst_n    (phy_rst_n)
@@ -143,7 +156,8 @@ module commontrader_top
   logic       mac_tvalid, mac_tlast;
 
   rx_mac_core u_rx_mac (
-    .rgmii_rx_clk  (rgmii_rx_clk),
+    .rgmii_rx_clk_io(rgmii_rx_clk_io),
+    .rgmii_rx_clk  (rgmii_rx_clk_bufg),
     .rgmii_rst_n   (phy_rst_n),
     .rgmii_rxd     (rgmii_rxd),
     .rgmii_rx_ctl  (rgmii_rx_ctl),
@@ -172,7 +186,7 @@ module commontrader_top
     .DATA_W (8),
     .ADDR_W (5)               // 32 entries
   ) u_rx_fifo (
-    .s_axis_aclk    (rgmii_rx_clk),
+    .s_axis_aclk    (rgmii_rx_clk_bufg),
     .s_axis_aresetn (phy_rst_n),
     .s_axis_tdata   (mac_tdata),
     .s_axis_tvalid  (mac_tvalid),
@@ -285,7 +299,7 @@ module commontrader_top
   logic               tx_tuser, tx_tvalid;
 
   pre_trade_risk_gateway u_risk (
-    .clk_250mhz          (core_clk),
+    .core_clk            (core_clk),
     .rst_n               (core_rst_n),
     .s_axis_order_tdata  (order_tdata),
     .s_axis_order_tuser  (order_tuser),
@@ -373,7 +387,7 @@ module commontrader_top
     .s_axis_tready      (tx_fifo_wr_ready),
     .s_axis_almost_full (tx_fifo_almost_full),
 
-    .m_axis_aclk        (rgmii_rx_clk),
+    .m_axis_aclk        (rgmii_rx_clk_bufg),
     .m_axis_aresetn     (phy_rst_n),
     .m_axis_tdata       (tx_mac_tdata),
     .m_axis_tvalid      (tx_mac_tvalid),
@@ -396,7 +410,7 @@ module commontrader_top
   // directions on this board. See the note in clk_rst_gen if that ever changes.
   //--------------------------------------------------------------------------
   tx_mac_core u_tx_mac (
-    .gmii_tx_clk   (rgmii_rx_clk),
+    .gmii_tx_clk   (rgmii_rx_clk_bufg),
     .rst_n         (phy_rst_n),
     .s_axis_tdata  (tx_mac_tdata),
     .s_axis_tvalid (tx_mac_tvalid),

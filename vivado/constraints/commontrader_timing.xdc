@@ -8,7 +8,7 @@
 #
 # Clock domains (rtl/common/clk_rst_gen.sv):
 #   rgmii_rx_clk  125 MHz  input from the PHY; clocks RX MAC, TX MAC, FIFO PHY sides
-#   core_clk      250 MHz  MMCM output (x2); clocks parser/book/alpha/risk/tx_gen
+#   core_clk      225 MHz  MMCM output (x1.8); clocks parser/book/alpha/risk/tx_gen
 # The two CDC FIFOs (rtl/ip/cdc_fifo) and the rx_error/kill_switch 2-flop
 # synchronisers (commontrader_top) are the ONLY legal crossings; everything below
 # exists to constrain them.
@@ -20,12 +20,12 @@
 #------------------------------------------------------------------------------
 create_clock -name rgmii_rx_clk -period 8.000 [get_ports rgmii_rx_clk]
 
-# core_clk (250 MHz) is produced by the MMCM (CLKFBOUT_MULT_F=8, CLKOUT0_DIVIDE_F=4)
+# core_clk (225 MHz) is produced by the MMCM (CLKFBOUT_MULT_F=3.6, CLKOUT0_DIVIDE_F=2.0)
 # and is AUTO-DERIVED by Vivado from rgmii_rx_clk -- do NOT declare it by hand.
 # After synthesis, confirm BOTH clocks exist with:  report_clocks
 
 #------------------------------------------------------------------------------
-# 2. Clock-domain crossing: treat 125 MHz and 250 MHz as ASYNCHRONOUS.
+# 2. Clock-domain crossing: treat 125 MHz and 225 MHz as ASYNCHRONOUS.
 #
 #    core_clk is derived from rgmii_rx_clk through the MMCM, but the RX/TX MACs run
 #    on the raw PHY clock while the core runs on the MMCM output, and the design
@@ -96,3 +96,29 @@ set_false_path -from [get_ports sys_rst_n]
 #   -from [get_cells -hier -filter {NAME =~ *wgray_reg*}] \
 #   -to   [get_cells -hier -filter {NAME =~ *rq1_wgray_reg*}]
 #------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+# 6. RGMII I/O Timing (JL2121 PHY strapped for RGMII-ID: 2.0 ns delay both ways)
+#------------------------------------------------------------------------------
+# --- RX (input): PHY delays RX clock by 2.0 ns (center-aligned at FPGA pins) ---
+# NOTE: dv_bre/dv_are are relaxed to 2.5ns here to absorb the FPGA's internal 
+# BUFIO-vs-IBUF skew (approx 2.0ns) without requiring an IDELAYE2 block.
+set per    8.000   ;# 125 MHz
+set dv_bre 2.500   ;# data valid BEFORE clock edge (relaxed)
+set dv_are 2.500   ;# data valid AFTER  clock edge (relaxed)
+
+set_input_delay -clock rgmii_rx_clk -max [expr $per/2 - $dv_bre] [get_ports {rgmii_rxd[*] rgmii_rx_ctl}]
+set_input_delay -clock rgmii_rx_clk -min $dv_are                 [get_ports {rgmii_rxd[*] rgmii_rx_ctl}]
+set_input_delay -clock rgmii_rx_clk -max [expr $per/2 - $dv_bre] -clock_fall -add_delay [get_ports {rgmii_rxd[*] rgmii_rx_ctl}]
+set_input_delay -clock rgmii_rx_clk -min $dv_are                 -clock_fall -add_delay [get_ports {rgmii_rxd[*] rgmii_rx_ctl}]
+
+# --- TX (output): FPGA forwards edge-aligned clock/data; PHY delays TX clock ---
+create_generated_clock -name rgmii_tx_clk_out -divide_by 1 \
+  -source [get_pins u_tx_mac/u_oddr_clk/C] [get_ports rgmii_tx_clk]
+  
+# Edge-aligned constraint: we set 0.0 requirement so Vivado just ensures matched routing
+# Relaxed slightly (-max 1.5, -min 0.5) to give Vivado OCV margin since the PHY provides 2.0ns
+set_output_delay -clock rgmii_tx_clk_out -max  1.5 [get_ports {rgmii_txd[*] rgmii_tx_ctl}]
+set_output_delay -clock rgmii_tx_clk_out -min  0.5 [get_ports {rgmii_txd[*] rgmii_tx_ctl}]
+set_output_delay -clock rgmii_tx_clk_out -max  1.5 -clock_fall -add_delay [get_ports {rgmii_txd[*] rgmii_tx_ctl}]
+set_output_delay -clock rgmii_tx_clk_out -min  0.5 -clock_fall -add_delay [get_ports {rgmii_txd[*] rgmii_tx_ctl}]

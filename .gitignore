@@ -21,6 +21,9 @@ vivado/report_*
 # logs/reports/result.json for each /compile run) -- see compile_manager.py
 sw/service/compiler_jobs/
 
+vivado/capstone_g46/*
+# Owen capstone folder
+
 # Simulation
 sim/obj*
 sim/logs/
