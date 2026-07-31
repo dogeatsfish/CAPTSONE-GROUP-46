@@ -394,7 +394,7 @@ module commontrader_top_tb
     // ---- Ethernet ----
     check_hex({label, " dst MAC"}, {16'h0, txf[L2_OFF+0], txf[L2_OFF+1],
               txf[L2_OFF+2], txf[L2_OFF+3], txf[L2_OFF+4], txf[L2_OFF+5]},
-              64'h0000_AABB_CCDD_EEFF);
+              64'h0000_8C51_0920_8A75);
     check_hex({label, " src MAC"}, {16'h0, txf[L2_OFF+6], txf[L2_OFF+7],
               txf[L2_OFF+8], txf[L2_OFF+9], txf[L2_OFF+10], txf[L2_OFF+11]},
               64'h0000_000A_3501_0203);
