@@ -4,7 +4,7 @@ from typing import List
 
 from pydantic import BaseModel
 
-from common import PnLPoint, Trade
+from common import PnLPoint, SummaryMetrics, Trade
 
 
 class SimulationResponse(BaseModel):
@@ -13,6 +13,7 @@ class SimulationResponse(BaseModel):
     compute_time_us: int
     trades: List[Trade]
     pnl_curve: List[PnLPoint]
+    metrics: SummaryMetrics
 
 
 class StreamStartResponse(BaseModel):
