@@ -24,6 +24,7 @@ INCLUDES := -Ishared/include -Imatch/include -Isimulation/include
 # Windows branch of the pymodule target below.
 OFFLINE_CORE_SRCS := simulation/src/offline_simulation.cpp \
                      simulation/src/protocol.cpp \
+                     simulation/src/strategy_base.cpp \
                      simulation/src/user_strategy.cpp \
                      match/src/orderbook.cpp
 ONLINE_SRCS := simulation/src/online_simulation.cpp
