@@ -196,10 +196,31 @@ button.secondary {
     padding: 1px 5px;
 }
 
-.section-divider {
-    border: none;
-    border-top: 1px solid var(--border);
-    margin: 32px 0;
+.top-nav {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 28px;
+    border-bottom: 1px solid var(--border);
+}
+
+.top-nav a {
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 4px;
+    margin-right: 20px;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.top-nav a:hover {
+    color: var(--text);
+}
+
+.top-nav a.active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
 }
 
 .code-editor {

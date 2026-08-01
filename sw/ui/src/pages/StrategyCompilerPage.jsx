@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import PnlCharts from "./PnlCharts.jsx";
-import StatCards from "./StatCards.jsx";
-import StatusIndicator from "./StatusIndicator.jsx";
+import PnlCharts from "../components/PnlCharts.jsx";
+import StatCards from "../components/StatCards.jsx";
+import StatusIndicator from "../components/StatusIndicator.jsx";
 import { fmt } from "../lib/format.js";
 import { pnlCurveToPoints } from "../lib/pnl.js";
 import { useEventSourceRun } from "../lib/useEventSourceRun.js";
@@ -72,7 +72,7 @@ last_spread = current_spread;
 
 return order_to_send;`;
 
-export default function StrategyCompiler() {
+export default function StrategyCompilerPage() {
     const [body, setBody] = useState(DEFAULT_BODY);
     const [datasets, setDatasets] = useState([]);
     const [dataset, setDataset] = useState("");
