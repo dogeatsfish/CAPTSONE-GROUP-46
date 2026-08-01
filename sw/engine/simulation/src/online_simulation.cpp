@@ -237,6 +237,8 @@ void OnlineSimulation::handle_ouch_client(int client_fd) {
             continue;
         }
 
+        if (ouch_observer_) ouch_observer_(msg, buf, frame_len);
+
         const FillReport fill = apply_ouch_order(msg);
 
         // Reply to the client for ENTER orders: an execution report if any
@@ -316,6 +318,8 @@ void OnlineSimulation::ouch_udp_loop() {
         if (!protocol::from_ouch(buf, frame_len, msg)) {
             continue; // malformed frame
         }
+
+        if (ouch_observer_) ouch_observer_(msg, buf, frame_len);
 
         const FillReport fill = apply_ouch_order(msg);
 
