@@ -22,6 +22,18 @@ COMPILE_TCL_SCRIPT = REPO_TOP / "vivado" / "scripts" / "compile_alpha_engine.tcl
 COMPILE_JOBS_DIR = SERVICE_ROOT / "compiler_jobs"
 COMPILE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
 
+# --- Software strategy compile pipeline (UI "compiler" section, sw-only) ---
+# g++ (or another compiler) used to build a per-job native simulation binary
+# from the submitted on_market_update body; override via env var if it isn't
+# on PATH.
+CXX_BIN = os.environ.get("CXX_BIN", "g++")
+STRATEGY_JOB_TEMPLATE = ENGINE_DIR / "simulation" / "src" / "user_strategy.job_template.cpp"
+STRATEGY_MAIN_JOB_SRC = ENGINE_DIR / "simulation" / "src" / "main_job.cpp"
+# Wall-clock caps on the compile and run subprocesses (basic isolation tier --
+# same trust model as the Vivado CompileJob above, not a container sandbox).
+STRATEGY_COMPILE_TIMEOUT_S = float(os.environ.get("STRATEGY_COMPILE_TIMEOUT_S", "15"))
+STRATEGY_RUN_TIMEOUT_S = float(os.environ.get("STRATEGY_RUN_TIMEOUT_S", "15"))
+
 # --- Persistent run logging (FS-15 -- see db.py for current scope) ---
 # Override via env var so a containerized deployment can point this at a
 # mounted volume outside the code tree (see sw/Dockerfile, docker-compose.yml).

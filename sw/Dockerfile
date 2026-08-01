@@ -35,6 +35,14 @@ RUN make pymodule
 # ---- Stage 2: runtime image -- FastAPI service + the compiled module ------
 FROM python:3.12-slim AS runtime
 
+# The /compile/software route shells out to g++ per request to build a
+# per-job strategy binary (see strategy_compile_manager.py) -- unlike
+# engine_sim itself (built once above and just copied in), that compile has
+# to happen at request time, so the compiler needs to live in this stage too.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY service/api/requirements.txt ./service/api/requirements.txt
@@ -42,6 +50,12 @@ RUN pip install --no-cache-dir -r ./service/api/requirements.txt
 
 COPY service/ ./service/
 COPY data_pipeline/data/ ./data_pipeline/data/
+# The engine source tree itself (not just the prebuilt module) -- the
+# /compile/software route above needs shared/match/simulation sources +
+# headers on disk to compile each per-job strategy binary. .dockerignore
+# excludes build artifacts (*.so, simulation_run, etc.) from this copy, so
+# the builder's own compiled module below can't be shadowed by it.
+COPY engine/ ./engine/
 COPY --from=builder /app/engine/engine_sim*.so ./engine/
 
 # A dedicated, code-free directory for anything that needs to survive a

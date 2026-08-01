@@ -17,12 +17,14 @@ from config import (
     engine_sim,
 )
 import db
-from common import PnLPoint, Trade
+from common import PnLPoint, Trade, apply_limit
 from compile import CompileRequest, CompileStartResponse
 from compile_manager import compile_manager
 from request import SimulationRequest
 from response import RunDetail, RunSummary, SimulationResponse, StreamStartResponse
 from stream_manager import stream_manager, build_online_config
+from strategy_compile import StrategyCompileRequest, StrategyCompileStartResponse
+from strategy_compile_manager import InvalidStrategyBodyError, strategy_compile_manager
 
 router = APIRouter()
 
@@ -67,12 +69,8 @@ def _log_run(data_file: Path, mode: str, started_at_ns: int, result) -> None:
 
 def _to_response(data_file: Path, result, req) -> SimulationResponse:
     """Map an engine SimulationResult into the API response schema."""
-    trades = result.trades
-    pnl_curve = result.pnl_curve
-    if req.trade_limit is not None:
-        trades = trades[: req.trade_limit]
-    if req.pnl_limit is not None:
-        pnl_curve = pnl_curve[: req.pnl_limit]
+    trades = apply_limit(result.trades, req.trade_limit)
+    pnl_curve = apply_limit(result.pnl_curve, req.pnl_limit)
 
     return SimulationResponse(
         data_file=str(data_file),
@@ -247,6 +245,56 @@ async def compile_stream(job_id: str, request: Request):
         )
     return StreamingResponse(
         compile_manager.event_stream(job, request),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
+
+
+@router.post(
+    "/compile/software",
+    response_model=StrategyCompileStartResponse,
+    tags=["compile"],
+)
+def start_strategy_compile(req: StrategyCompileRequest):
+    """Create a software strategy compile-and-run job and return its stream URL.
+
+    Builds a native offline-simulation binary from the submitted
+    on_market_update body (spliced into user_strategy.job_template.cpp),
+    then runs it against a dataset -- no Vivado/hardware involved. The job
+    starts when a client attaches to the returned ``stream_url`` via
+    Server-Sent Events, mirroring the Vivado compile job's handshake above.
+    """
+    data_file = _resolve_data_file(req.data_file)
+    try:
+        job = strategy_compile_manager.create(
+            req.on_market_update_body, data_file, req.trade_limit, req.pnl_limit
+        )
+    except InvalidStrategyBodyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return StrategyCompileStartResponse(
+        job_id=job.job_id,
+        stream_url=f"/compile/software/{job.job_id}/stream",
+    )
+
+
+@router.get("/compile/software/{job_id}/stream", tags=["compile"])
+async def strategy_compile_stream(job_id: str, request: Request):
+    """Attach a Server-Sent Events stream to a previously created software compile job.
+
+    Emits one JSON object per `data:` frame:
+      {"type": "log", "line": "<one line of compiler/run output>"}
+      {"type": "complete", "job_id", "result": <SimulationResponse-shaped object>}
+      {"type": "error", "detail"}
+    """
+    job = strategy_compile_manager.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown or expired compile job")
+    if job.started:
+        raise HTTPException(
+            status_code=409, detail="Compile job is already being consumed"
+        )
+    return StreamingResponse(
+        strategy_compile_manager.event_stream(job, request),
         media_type="text/event-stream",
         headers=_SSE_HEADERS,
     )
