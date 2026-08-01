@@ -68,23 +68,26 @@ function OnlineDemo() {
 
             {error && <div className="error-banner">{error}</div>}
 
-            <StatCards
-                items={[
-                    { label: "Total PnL", display: fmt(totalPnl), raw: totalPnl },
-                    {
-                        label: "Position",
-                        display: last ? fmt(last.position, 0) : "—",
-                        raw: last?.position ?? 0,
-                    },
-                    { label: "Sim Elapsed", display: elapsed },
-                    {
-                        label: "Total Trades",
-                        display: summary ? summary.total_trades.toLocaleString() : "—",
-                    },
-                ]}
-            />
-
-            <PnlCharts points={points} />
+            {points.length > 0 && (
+                <>
+                    <StatCards
+                        items={[
+                            { label: "Total PnL", display: fmt(totalPnl), raw: totalPnl },
+                            {
+                                label: "Position",
+                                display: fmt(last.position, 0),
+                                raw: last.position,
+                            },
+                            { label: "Sim Elapsed", display: elapsed },
+                            {
+                                label: "Total Trades",
+                                display: summary ? summary.total_trades.toLocaleString() : "—",
+                            },
+                        ]}
+                    />
+                    <PnlCharts points={points} />
+                </>
+            )}
 
             <div className="hint">
                 Data: server default MBO stream (data_pipeline/data/synthetic_mbo_stream.bin).

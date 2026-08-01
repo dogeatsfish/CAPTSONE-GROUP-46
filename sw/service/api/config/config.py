@@ -53,10 +53,14 @@ ONLINE_OUCH_PORT = 26001
 ONLINE_DEFAULT_TIME_SCALE = 0.0
 
 # Pacing for the streaming endpoint. The engine samples PnL once per SIMULATED
-# second, so a factor of 1.0 (true real time) makes telemetry arrive at roughly
-# one event per wall-clock second -- the cadence the live UI expects. Lower it
-# (e.g. 0.1) to fast-forward the replay while still streaming.
-ONLINE_STREAM_TIME_SCALE = 1.0
+# second, so a factor of 1.0 (true real time) would make telemetry arrive at
+# roughly one event per wall-clock second -- but the bundled dataset's replay
+# spans ~19,200 simulated seconds (~5.3 real hours) and the default strategy
+# stays flat for most of that before its PnL moves late in the replay, so 1.0
+# makes the live demo look inert for a very long time. 0.005 (~200x) finishes
+# the full replay in well under two minutes while still streaming visibly
+# rather than jumping straight to the end.
+ONLINE_STREAM_TIME_SCALE = 0.005
 
 # Make the schema modules and the compiled engine importable.
 for _path in (INCLUDE_DIR, ENGINE_DIR):
