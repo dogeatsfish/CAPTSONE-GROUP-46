@@ -134,9 +134,14 @@ int main() {
     std::cout << "Market data: " << MARKET_BOOK << " (100 bid adds, 100.00 step +0.05, 50ms)\n";
 
     OnlineSimulation::Config cfg;
+    cfg.itch_address = "127.0.0.1"; // loopback (ITCH is not inspected by this test)
     cfg.itch_port  = ITCH_PORT;
     cfg.ouch_port  = OUCH_PORT;
     cfg.time_scale = 1.0; // real time: ladder streams over ~5s
+    // The OUCH client below is a TCP stream client, so run order entry in TCP
+    // mode. (The engine defaults to UDP to match the FPGA; see
+    // online_simulation.h.)
+    cfg.ouch_transport = OnlineSimulation::OuchTransport::TCP;
 
     OnlineSimulation sim(MARKET_BOOK, cfg);
 
