@@ -68,5 +68,10 @@ Thumbs.db
 .idea/
 *.swp
 
+# AI tooling (local config/session state, not shared repo content)
+.claude/
+.cursor/
+.github/copilot-instructions.md
+
 # Personal working notes -- not for the shared repo, see TODO.md for that
 NOTES.md
