@@ -29,6 +29,10 @@ The Python module and the online tests additionally need Python 3 with
 | `stress-book`  | Builds + runs the OrderBook stress/correctness harness.             |
 | `test-online`  | Generates a market book, then builds + runs the end-to-end online test. |
 | `socket-test`  | Generates a market book, then builds + runs the OUCH socket test.   |
+| `flood-test`   | Generates a dense market book, then stress-tests the engine with a burst of ITCH messages. |
+| `hw-smoke-test`| Builds `online_run` and streams a short book at the real FPGA (`docs/connection-test.md`). |
+| `fpga-test`    | Builds the FPGA hardware harness `fpga_test` (does not run it).      |
+| `run-fpga-test`| Builds + runs the FPGA harness against the real board.              |
 | `clean`        | Removes all build artifacts.                                        |
 
 ## Overridable variables
@@ -41,6 +45,8 @@ Pass these on the command line as `make <target> VAR=value`:
   (default `0.001` = 1000× faster; `1.0` = real time; `0` = no pacing).
 - `PY` — Python interpreter for the online tests
   (default `../service/.venv/bin/python`).
+- `FPGA_FILE` / `FPGA_SCALE` — MBO stream and pacing for `run-fpga-test`
+  (defaults `../data_pipeline/data/synthetic_mbo_stream.bin` and `1.0`).
 - `CXX` / `CXXFLAGS` — compiler and flags.
 
 ## Running each part
@@ -73,23 +79,47 @@ Or call the binary directly for full control over networking args (see
 make stress-book       # pure C++ OrderBook stress + correctness, no Python/network
 make test-online       # end-to-end: ITCH replay + OUCH connect/send/receive
 make socket-test       # OUCH socket client vs a rising bid ladder
+make flood-test        # same, but against a dense 5000-order book (stress)
 ```
 
-`test-online` and `socket-test` first run `tests/src/gen_market_ladder.py`
-(via `$(PY)`) to produce `tests/data/market_ladder.bin`, then compile and run.
-If your Python isn't at the default venv path, override it:
+`test-online`, `socket-test`, and `flood-test` are the same binary
+(`tests/src/socket_test.cpp`) pointed at three different `tests/config/*.ini`
+files -- which orders it sends, expected trade counts, and whether it also
+verifies the ITCH broadcast are config, not separate source files. All three
+first generate their market book (via `$(PY)`), then compile and run. If your
+Python isn't at the default venv path, override it:
 
 ```bash
 make test-online PY=python3
 make socket-test PY=/path/to/venv/bin/python
 ```
 
-> **Transport note:** these two tests open an OUCH **TCP** client
-> (`connect_ouch` in `tests/src/`), while the engine's default OUCH transport is
-> now **UDP**. If a test hangs or fails to connect, set the transport to TCP in
-> the test's `Config` (`cfg.ouch_transport = OnlineSimulation::OuchTransport::TCP;`)
-> or point the test client at UDP. See
-> `sw/engine/simulation/include/online_simulation.h`.
+Each reads its socket addresses/ports/transport, dataset path, and test
+scenario (orders to send, expected trade counts, ITCH verification) from a
+`tests/config/*.ini` file instead of hardcoded values in the `.cpp` —
+override with e.g. `TEST_ONLINE_CONFIG=path/to/other.ini` or
+`SOCKET_TEST_CONFIG=...`. See `tests/config/test_online.ini` or the header
+comment in `tests/src/socket_test.cpp` for the full key list.
+
+> **Transport note:** `socket_test.cpp`'s OUCH client (`connect_ouch`) only
+> speaks **TCP**, while the engine's default OUCH transport is now **UDP** —
+> that's why its `.ini` files pin `ouch_transport = tcp`. Pointing one of
+> these configs at `udp` fails fast with a clear error instead of hanging.
+> See `sw/engine/simulation/include/online_simulation.h`.
+
+### Hardware smoke test
+
+```bash
+make hw-smoke-test
+```
+
+Builds `online_run` and streams a short 10-order book at the real FPGA
+(`tests/config/hardware_smoke.ini`: UDP, `192.168.0.1:50001`). This assumes
+the host↔FPGA link is already set up — see `docs/connection-test.md`, which
+this is the quick/checked-in version of step 4's manual command.
+
+Same override pattern as `test-online`/`socket-test`: point it at a different
+`.ini` with `HW_SMOKE_CONFIG=...` instead of editing the Makefile.
 
 ## Building the Python module — macOS vs Linux
 

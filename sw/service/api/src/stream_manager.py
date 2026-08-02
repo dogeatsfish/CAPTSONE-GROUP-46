@@ -11,7 +11,9 @@ Two independent planes are involved:
   * South-bound (engine <-> exchange/FPGA): ITCH/UDP + OUCH/TCP, handled inside
     the C++ engine and never exposed here.
   * North-bound (server -> browser): the SSE stream produced here, carrying a
-    copy of each per-second PnL sample plus a terminal event.
+    copy of each per-second PnL sample (plus the current top-of-book, L1:
+    best_bid/best_ask) and a terminal event with the full run (same shape as
+    the blocking endpoints' SimulationResponse).
 
 The blocking ``engine.run(callback)`` executes on a dedicated daemon thread
 (the C++ hot loop releases the GIL), so the asyncio event loop stays free. The
@@ -23,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import queue
 import threading
 import time
@@ -30,13 +33,15 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, Optional
 
+import db
 from config import (
-    ONLINE_ITCH_ADDRESS,
-    ONLINE_ITCH_PORT,
-    ONLINE_OUCH_PORT,
+    ONLINE_STREAM_ITCH_ADDRESS,
+    ONLINE_STREAM_ITCH_PORT,
+    ONLINE_STREAM_OUCH_PORT,
     ONLINE_STREAM_TIME_SCALE,
     engine_sim,
 )
+from metrics import compute_summary_metrics
 
 # Sentinel enqueued after the run ends so the consumer knows to stop.
 _DONE = object()
@@ -58,13 +63,16 @@ _KEEPALIVE_TICKS = 100
 def build_online_config() -> Any:
     """Build the server-side engine transport/pacing config for a stream run.
 
-    None of these socket details are ever surfaced to the client.
+    Loopback, not the FPGA hardware addressing -- this is a software-only
+    live view for the browser (see the config.py comment on
+    ONLINE_STREAM_ITCH_ADDRESS). None of these socket details are ever
+    surfaced to the client.
     """
     cfg = engine_sim.OnlineConfig()
-    cfg.itch_address = ONLINE_ITCH_ADDRESS
-    cfg.itch_port = ONLINE_ITCH_PORT
-    cfg.ouch_port = ONLINE_OUCH_PORT
-    cfg.time_scale = ONLINE_STREAM_TIME_SCALE  # ~1 telemetry event / wall-clock sec
+    cfg.itch_address = ONLINE_STREAM_ITCH_ADDRESS
+    cfg.itch_port = ONLINE_STREAM_ITCH_PORT
+    cfg.ouch_port = ONLINE_STREAM_OUCH_PORT
+    cfg.time_scale = ONLINE_STREAM_TIME_SCALE
     return cfg
 
 
@@ -81,6 +89,7 @@ class StreamSession:
     )
     _thread: Optional[threading.Thread] = None
     _started: bool = False
+    _engine: Optional[Any] = None  # set once _run() constructs it
 
     @property
     def started(self) -> bool:
@@ -100,9 +109,30 @@ class StreamSession:
         if self._thread is not None:
             self._thread.join(timeout)
 
+    def stop(self) -> bool:
+        """Request an early stop (e.g. the UI's Stop Simulation button, or a
+        disconnected client). Just an atomic store on the C++ side (see
+        OnlineSimulation::stop()) -- safe to call from any thread, and a
+        no-op if the engine hasn't been constructed yet (session created but
+        never started) or has already finished. run() unwinds through its
+        normal end-of-file path either way, so the client still gets a
+        regular "complete" event with whatever was collected so far.
+        Returns whether there was a live engine to stop.
+        """
+        if self._engine is None:
+            return False
+        self._engine.stop()
+        return True
+
     # --- runs on the engine's daemon thread -------------------------------
     def _on_sample(
-        self, ts_ns: int, realized: float, unrealized: float, position: float
+        self,
+        ts_ns: int,
+        realized: float,
+        unrealized: float,
+        position: float,
+        best_bid: float,
+        best_ask: float,
     ) -> None:
         try:
             self.events.put_nowait(
@@ -112,22 +142,64 @@ class StreamSession:
                     "realized_pnl": realized,
                     "unrealized_pnl": unrealized,
                     "position_size": position,
+                    "best_bid": best_bid,
+                    "best_ask": best_ask,
                 }
             )
         except queue.Full:
             pass  # slow/absent client: drop this sample, never block the engine
 
-    def _run(self) -> None:
+    def _log_run(self, started_at_ns: int, result: Any) -> None:
+        """Persist a completed streaming run to the database (FS-15).
+
+        Best-effort, same as routes.py's _log_run: a logging failure must
+        never take down an otherwise-successful stream.
+        """
         try:
-            result = engine_sim.OnlineSimulation(self.data_file, self.cfg).run(
-                self._on_sample
+            db.log_run(
+                data_file=self.data_file,
+                mode="online",
+                started_at_ns=started_at_ns,
+                compute_time_us=result.compute_time_us,
+                total_trades=result.total_trades,
+                trades=result.trades,
+                pnl_curve=result.pnl_curve,
             )
+        except Exception:  # noqa: BLE001 - logging must never break the stream
+            logging.getLogger(__name__).exception("Failed to persist run to database")
+
+    def _run(self) -> None:
+        started_at_ns = time.time_ns()
+        try:
+            self._engine = engine_sim.OnlineSimulation(self.data_file, self.cfg)
+            result = self._engine.run(self._on_sample)
+            self._log_run(started_at_ns, result)
+            metrics = compute_summary_metrics(result.pnl_curve, result.compute_time_us)
             self.events.put(
                 {
                     "type": "complete",
                     "data_file": self.data_file,
                     "total_trades": result.total_trades,
                     "compute_time_us": result.compute_time_us,
+                    "trades": [
+                        {
+                            "timestamp_ns": t.timestamp_ns,
+                            "side": t.side,
+                            "price": t.price,
+                            "size": t.size,
+                        }
+                        for t in result.trades
+                    ],
+                    "pnl_curve": [
+                        {
+                            "timestamp_ns": p.timestamp_ns,
+                            "realized_pnl": p.realized_pnl,
+                            "unrealized_pnl": p.unrealized_pnl,
+                            "position_size": p.position_size,
+                        }
+                        for p in result.pnl_curve
+                    ],
+                    "metrics": metrics.model_dump(),
                 }
             )
         except Exception as exc:  # noqa: BLE001 - forward engine errors to client
@@ -202,9 +274,13 @@ class StreamManager:
                     break
                 yield f"data: {json.dumps(evt)}\n\n"
         finally:
-            # Reap the engine thread if it's already finishing; it's a daemon
-            # thread either way, so a disconnected client can't leak it past
-            # process exit.
+            # Whatever ended this loop -- a disconnected client, the run
+            # finishing on its own, or an explicit stop request racing us
+            # here -- ask the engine to stop. A no-op if it's already done;
+            # otherwise this is what actually cuts a disconnected client's
+            # run short instead of letting it keep going in the background
+            # until the input file is exhausted.
+            session.stop()
             session.join(timeout=1.0)
             self.remove(session.session_id)
 

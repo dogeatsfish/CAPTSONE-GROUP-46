@@ -17,12 +17,18 @@ CXXFLAGS := -std=c++17 -O2 -Wall -Wextra
 # Per-module include directories (headers are referenced by bare name)
 INCLUDES := -Ishared/include -Imatch/include -Isimulation/include
 
-# Core engine sources shared by both the CLI and the Python module
-CORE_SRCS := simulation/src/offline_simulation.cpp \
-             simulation/src/online_simulation.cpp \
-             simulation/src/protocol.cpp \
-             simulation/src/user_strategy.cpp \
-             match/src/orderbook.cpp
+# Core engine sources shared by both the CLI and the Python module.
+# OFFLINE_CORE_SRCS has no socket usage and is portable as-is; ONLINE_SRCS
+# (real-time ITCH/OUCH replay) uses POSIX sockets (sys/socket.h etc.) that
+# don't exist on native Windows/MinGW without a Winsock2 port -- see the
+# Windows branch of the pymodule target below.
+OFFLINE_CORE_SRCS := simulation/src/offline_simulation.cpp \
+                     simulation/src/protocol.cpp \
+                     simulation/src/strategy_base.cpp \
+                     simulation/src/user_strategy.cpp \
+                     match/src/orderbook.cpp
+ONLINE_SRCS := simulation/src/online_simulation.cpp
+CORE_SRCS := $(OFFLINE_CORE_SRCS) $(ONLINE_SRCS)
 
 # ---------------------------------------------------------
 # Native CLI binary
@@ -46,11 +52,38 @@ SCALE ?= 0.001
 # ---------------------------------------------------------
 PY_MODULE  := engine_sim
 PY_INCLUDES := $(shell python3 -m pybind11 --includes)
-PY_SUFFIX   := $(shell python3-config --extension-suffix)
+# $(strip ...) matters here: some python3-config builds (observed with MSYS2's
+# mingw-w64 Python) emit a trailing space on --extension-suffix, which Windows
+# silently rejects as part of a filename.
+PY_SUFFIX   := $(strip $(shell python3-config --extension-suffix))
 PY_TARGET   := $(PY_MODULE)$(PY_SUFFIX)
-PY_SRCS     := bindings/src/bindings.cpp $(CORE_SRCS)
 
-.PHONY: all run online run-online pymodule stress-book test-online socket-test clean
+# Native Windows/MinGW has no OnlineSimulation support yet (see ONLINE_SRCS
+# above) and needs explicit linking against the Python library instead of the
+# macOS-only "-undefined dynamic_lookup" (which GNU ld on Linux rejects
+# outright -- it's an ld64/Apple-only flag). Detected via Make's standard
+# $(OS) (set to "Windows_NT" by the Windows environment; unset elsewhere) and
+# `uname -s` for the macOS/Linux split.
+ifeq ($(OS),Windows_NT)
+PY_SRCS      := bindings/src/bindings.cpp $(OFFLINE_CORE_SRCS)
+PY_DEFINES   := -DCT_NO_ONLINE_SIM
+PY_LINK_LIBS := $(shell python3-config --ldflags)
+else
+PY_SRCS      := bindings/src/bindings.cpp $(CORE_SRCS)
+PY_DEFINES   :=
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+PY_LINK_LIBS := -undefined dynamic_lookup
+else
+# Linux: extension modules conventionally link nothing and resolve Python
+# symbols against the hosting interpreter at import time -- no special flag
+# needed (ELF shared objects tolerate unresolved symbols by default, unlike
+# Windows PE/COFF).
+PY_LINK_LIBS :=
+endif
+endif
+
+.PHONY: all run online run-online pymodule stress-book test-online socket-test flood-test hw-smoke-test fpga-test run-fpga-test clean
 
 all: $(TARGET) $(ONLINE_TARGET)
 
@@ -74,8 +107,8 @@ run-online: $(ONLINE_TARGET)
 pymodule: $(PY_TARGET)
 
 $(PY_TARGET): $(PY_SRCS)
-	$(CXX) $(CXXFLAGS) -shared -fPIC -undefined dynamic_lookup \
-		$(INCLUDES) $(PY_INCLUDES) $(PY_SRCS) -o $(PY_TARGET)
+	$(CXX) $(CXXFLAGS) $(PY_DEFINES) -shared -fPIC \
+		$(INCLUDES) $(PY_INCLUDES) $(PY_SRCS) $(PY_LINK_LIBS) -o $(PY_TARGET)
 
 # ---------------------------------------------------------
 # Stress / correctness tests
@@ -92,25 +125,77 @@ stress-book: $(STRESS_BOOK_SRCS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(STRESS_BOOK_SRCS) -o $(STRESS_BOOK_BIN)
 	./$(STRESS_BOOK_BIN)
 
-# Online simulation end-to-end test (ITCH replay + OUCH connect/send/receive).
-# The market-data book is produced by the Python EventGenerator first.
-TEST_ONLINE_BIN  := tests/src/test_online
-TEST_ONLINE_SRCS := tests/src/test_online.cpp $(CORE_SRCS)
-GEN_LADDER       := tests/src/gen_market_ladder.py
-
-test-online: $(TEST_ONLINE_SRCS) $(GEN_LADDER)
-	$(PY) $(GEN_LADDER)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(TEST_ONLINE_SRCS) -o $(TEST_ONLINE_BIN) -lpthread
-	./$(TEST_ONLINE_BIN)
-
-# OUCH socket client vs a generated rising bid ladder.
-SOCKET_TEST_BIN  := tests/src/socket_test
-SOCKET_TEST_SRCS := tests/src/socket_test.cpp $(CORE_SRCS)
+# OUCH socket client vs a generated rising bid ladder -- one binary, three
+# scenarios selected entirely by which .ini it's pointed at (see the header
+# comment in tests/src/socket_test.cpp):
+#   make socket-test  -> tests/config/socket_test.ini (loopback smoke test)
+#   make test-online  -> tests/config/test_online.ini (adds ITCH-broadcast
+#                         verification + per-order expected-response checks)
+#   make flood-test   -> tests/config/flood_test.ini (below)
+# Override with SOCKET_TEST_CONFIG=.../TEST_ONLINE_CONFIG=... to run against
+# a different .ini.
+SOCKET_TEST_BIN    := tests/src/socket_test
+SOCKET_TEST_SRCS   := tests/src/socket_test.cpp $(CORE_SRCS)
+SOCKET_TEST_CONFIG ?= tests/config/socket_test.ini
+TEST_ONLINE_CONFIG ?= tests/config/test_online.ini
+GEN_LADDER         := tests/src/gen_market_ladder.py
 
 socket-test: $(SOCKET_TEST_SRCS) $(GEN_LADDER)
 	$(PY) $(GEN_LADDER)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SOCKET_TEST_SRCS) -o $(SOCKET_TEST_BIN) -lpthread
-	./$(SOCKET_TEST_BIN)
+	./$(SOCKET_TEST_BIN) $(SOCKET_TEST_CONFIG)
+
+test-online: $(SOCKET_TEST_SRCS) $(GEN_LADDER)
+	$(PY) $(GEN_LADDER)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SOCKET_TEST_SRCS) -o $(SOCKET_TEST_BIN) -lpthread
+	./$(SOCKET_TEST_BIN) $(TEST_ONLINE_CONFIG)
+
+# tests/src/gen_test_datasets.py produces smoke_book.bin (hw-smoke-test) and
+# flood_book.bin (flood-test) -- same price band/shape as market_ladder.bin,
+# just shorter or denser, so the existing test assertions still hold.
+GEN_TEST_DATASETS := tests/src/gen_test_datasets.py
+
+# Flood/stress the online engine with a dense burst of ITCH messages, reusing
+# socket_test's OUCH client against tests/config/flood_test.ini (loopback).
+flood-test: $(SOCKET_TEST_SRCS) $(GEN_TEST_DATASETS)
+	$(PY) $(GEN_TEST_DATASETS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SOCKET_TEST_SRCS) -o $(SOCKET_TEST_BIN) -lpthread
+	./$(SOCKET_TEST_BIN) tests/config/flood_test.ini
+
+# Quick "is the board alive" check for demo day -- streams a short ladder at
+# the real FPGA over UDP/192.168.0.1 and relies on tcpdump/the activity LED
+# to confirm OUCH responses (see docs/connection-test.md step 4). Needs the
+# host <-> FPGA link already configured; this only builds/runs online_run.
+# Override with HW_SMOKE_CONFIG=... to run against a different .ini (same
+# override pattern as SOCKET_TEST_CONFIG/TEST_ONLINE_CONFIG above).
+HW_SMOKE_CONFIG ?= tests/config/hardware_smoke.ini
+
+hw-smoke-test: $(ONLINE_TARGET) $(GEN_TEST_DATASETS)
+	$(PY) $(GEN_TEST_DATASETS)
+	./$(ONLINE_TARGET) $(HW_SMOKE_CONFIG)
+
+# ---------------------------------------------------------
+# FPGA hardware test (real board over Ethernet)
+# ---------------------------------------------------------
+# Streams the synthetic MBO stream to the board using the DEFAULT network config
+# (ITCH -> 192.168.0.1:50001, OUCH received over UDP on 50001) and decodes/prints
+# every OUCH packet the FPGA sends back. Requires the board link to be up
+# (sudo ../../setup/net_setup.sh) and the bitstream loaded.
+FPGA_TEST_BIN  := fpga_test
+FPGA_TEST_SRCS := tests/src/fpga_test.cpp $(CORE_SRCS)
+
+# Market-data stream fed to the board (override with FILE=...).
+FPGA_FILE ?= ../data_pipeline/data/synthetic_mbo_stream.bin
+# Real-time pacing for the hardware run (override with SCALE=...).
+FPGA_SCALE ?= 1.0
+
+fpga-test: $(FPGA_TEST_BIN)
+
+$(FPGA_TEST_BIN): $(FPGA_TEST_SRCS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(FPGA_TEST_SRCS) -o $(FPGA_TEST_BIN) -lpthread
+
+run-fpga-test: $(FPGA_TEST_BIN)
+	./$(FPGA_TEST_BIN) $(FPGA_FILE) $(FPGA_SCALE)
 
 clean:
-	rm -f $(TARGET) $(ONLINE_TARGET) $(PY_MODULE)*.so $(STRESS_BOOK_BIN) $(TEST_ONLINE_BIN) $(SOCKET_TEST_BIN)
+	rm -f $(TARGET) $(ONLINE_TARGET) $(PY_MODULE)*.so $(STRESS_BOOK_BIN) $(SOCKET_TEST_BIN) $(FPGA_TEST_BIN)

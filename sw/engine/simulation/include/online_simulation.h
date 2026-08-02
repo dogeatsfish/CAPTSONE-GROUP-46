@@ -37,7 +37,7 @@ public:
 
         // Wall-clock pacing.
         // 1.0 = true real time, 0.001 = 1000x faster, 0.0 = no pacing.
-        double      time_scale   = 0.001;
+        double      time_scale   = 1;
 
         // Cap on any single sleep so a large timestamp gap can't stall the
         // replay indefinitely (nanoseconds). 0 disables the cap.
@@ -60,8 +60,27 @@ public:
     OnlineSimulation(const OnlineSimulation&) = delete;
     OnlineSimulation& operator=(const OnlineSimulation&) = delete;
 
-    using SampleCallback = std::function<void(const PnLSnapshot&)>;
+    // Second arg is the current top-of-book (best bid/ask) at the same
+    // instant as the PnL sample -- both are read under the same book_mutex
+    // hold in apply_market_event, so they're always mutually consistent.
+    using SampleCallback = std::function<void(const PnLSnapshot&, const L1State&)>;
     SimulationResult run(SampleCallback on_sample = {});
+
+    // Requests an early stop of an in-progress run() -- e.g. from a SIGINT
+    // handler on Ctrl+C. Safe to call from any thread/signal context (just an
+    // atomic store). run() notices on its next loop iteration and unwinds
+    // through its normal end-of-file path: stop the OUCH thread, close
+    // itch_fd/ouch_listen_fd, return whatever telemetry was collected so far.
+    // A no-op if no run() is in progress.
+    void stop() { running = false; }
+
+    // Observer invoked for every OUCH order-entry message received from a
+    // connected client or the FPGA, with the decoded message and the raw frame
+    // bytes. Set before run(); it is invoked on the OUCH thread. Optional, used
+    // by the hardware bring-up harness to print/decode inbound orders.
+    using OuchObserver =
+        std::function<void(const protocol::OuchMessage&, const uint8_t*, size_t)>;
+    void set_ouch_observer(OuchObserver cb) { ouch_observer_ = std::move(cb); }
 
 private:
     std::string mbo_file_path;
@@ -81,6 +100,7 @@ private:
     std::atomic<bool>     running{false};
     std::thread           ouch_thread;
     SampleCallback        on_sample_cb; // optional live-telemetry hook
+    OuchObserver          ouch_observer_; // optional inbound-OUCH observer
     // Most recent market timestamp seen on the ITCH side. Used to stamp trades
     // that originate from OUCH orders (OUCH frames carry no timestamp).
     std::atomic<uint64_t> last_market_ts_ns{0};

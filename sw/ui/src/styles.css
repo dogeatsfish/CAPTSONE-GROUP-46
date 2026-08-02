@@ -1,51 +1,121 @@
+/* ===========================================================
+   CommonTrader Simulation Terminal
+   ---------------------------------------------------------
+   Visual identity: an instrument panel, not a SaaS dashboard.
+   Dark graphite surface, bid/ask green-amber exchange convention,
+   monospace-first numerics (tabular figures for aligned price
+   columns), and a single signature: oscilloscope-style corner
+   brackets on the primary PnL readout -- a nod to the FPGA test
+   equipment this whole project is built around.
+   =========================================================== */
+
 :root {
-    --bg: #0b0e14;
-    --panel: #121722;
-    --panel-2: #182030;
-    --border: #232c3d;
-    --text: #e6ebf2;
-    --muted: #8a97ad;
-    --accent: #4dd0e1;
-    --green: #35d07f;
-    --red: #ff5c72;
-    --amber: #ffb454;
+    /* --- surface --- */
+    --ink: #0a0d12;
+    --panel: #10141c;
+    --panel-raised: #161b26;
+    --rule: #232a3a;
+
+    /* --- text --- */
+    --paper: #e8ecf3;
+    --dim: #8792a6;
+    --faint: #4b5468;
+
+    /* --- signature accent (oscilloscope phosphor) --- */
+    --trace: #5eead4;
+    --trace-dim: rgba(94, 234, 212, 0.14);
+
+    /* --- exchange convention: bid (buy/up) vs ask (sell/down) --- */
+    --bid: #34d399;
+    --bid-dim: rgba(52, 211, 153, 0.12);
+    --ask: #fb923c;
+    --ask-dim: rgba(251, 146, 60, 0.12);
+
+    /* --- third data series (unrealized PnL line) --- */
+    --amber: #f0b429;
+
+    /* --- type --- */
+    --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 * {
     box-sizing: border-box;
 }
 
+html {
+    color-scheme: dark;
+}
+
 body {
     margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+::selection {
+    background: var(--trace-dim);
+    color: var(--paper);
+}
+
+:focus-visible {
+    outline: 1.5px solid var(--trace);
+    outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
 }
 
 .app {
-    max-width: 1080px;
+    max-width: 1240px;
     margin: 0 auto;
-    padding: 28px 20px 60px;
+    padding: 0 24px 64px;
 }
+
+/* ---------------------------------------------------------
+   Header: wordmark + live session status
+   --------------------------------------------------------- */
 
 .header {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 20px;
+    gap: 20px;
+    padding: 28px 0 20px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--trace-dim);
+}
+
+.eyebrow {
+    font-family: var(--font-display);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin: 0 0 6px;
 }
 
 .title {
-    font-size: 20px;
+    font-family: var(--font-display);
+    font-size: 26px;
     font-weight: 700;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.01em;
+    color: var(--paper);
 }
 
 .subtitle {
-    color: var(--muted);
-    font-size: 12px;
-    margin-top: 4px;
+    color: var(--dim);
+    font-size: 12.5px;
+    margin-top: 6px;
 }
 
 .controls {
@@ -54,60 +124,87 @@ body {
     gap: 12px;
 }
 
+/* ---------------------------------------------------------
+   Buttons
+   --------------------------------------------------------- */
+
 button {
-    font-family: inherit;
-    font-size: 13px;
+    font-family: var(--font-display);
+    font-size: 12.5px;
     font-weight: 600;
-    color: #06121a;
-    background: var(--accent);
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--ink);
+    background: var(--trace);
     border: none;
-    border-radius: 6px;
-    padding: 10px 18px;
+    border-radius: 3px;
+    padding: 11px 20px;
     cursor: pointer;
-    transition: filter 0.15s ease;
+    transition: filter 0.12s ease, transform 0.12s ease;
 }
 
 button:hover:not(:disabled) {
-    filter: brightness(1.1);
+    filter: brightness(1.08);
+}
+
+button:active:not(:disabled) {
+    transform: translateY(1px);
 }
 
 button:disabled {
-    opacity: 0.5;
+    opacity: 0.35;
     cursor: not-allowed;
 }
 
 button.secondary {
-    color: var(--text);
-    background: var(--panel-2);
-    border: 1px solid var(--border);
+    color: var(--paper);
+    background: var(--panel-raised);
+    border: 1px solid var(--rule);
 }
+
+button.danger {
+    color: var(--ask);
+    background: var(--ask-dim);
+    border: 1px solid rgba(251, 146, 60, 0.35);
+}
+
+/* ---------------------------------------------------------
+   Status indicator
+   --------------------------------------------------------- */
 
 .status {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
-    color: var(--muted);
+    font-family: var(--font-display);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--dim);
 }
 
 .dot {
-    width: 9px;
-    height: 9px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
-    background: var(--muted);
+    background: var(--faint);
 }
 
 .dot.running {
-    background: var(--amber);
-    animation: pulse 1s infinite;
+    background: var(--trace);
+    box-shadow: 0 0 0 3px var(--trace-dim);
+    animation: pulse 1.1s ease-in-out infinite;
 }
 
 .dot.complete {
-    background: var(--green);
+    background: var(--bid);
+    box-shadow: 0 0 0 3px var(--bid-dim);
 }
 
 .dot.error {
-    background: var(--red);
+    background: var(--ask);
+    box-shadow: 0 0 0 3px var(--ask-dim);
 }
 
 @keyframes pulse {
@@ -118,9 +215,410 @@ button.secondary {
     }
 
     50% {
-        opacity: 0.3;
+        opacity: 0.35;
     }
 }
+
+/* ---------------------------------------------------------
+   Panels (shared card/section surface)
+   --------------------------------------------------------- */
+
+.panel {
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 18px;
+    margin-bottom: 16px;
+}
+
+.panel h3 {
+    margin: 0 0 14px;
+    font-family: var(--font-display);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--dim);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--rule);
+}
+
+.hint {
+    color: var(--faint);
+    font-size: 11.5px;
+    line-height: 1.6;
+}
+
+.hint code {
+    color: var(--paper);
+    background: var(--panel-raised);
+    border-radius: 3px;
+    padding: 1px 5px;
+}
+
+.error-text {
+    color: var(--ask);
+}
+
+.error-banner {
+    background: var(--ask-dim);
+    border: 1px solid rgba(251, 146, 60, 0.35);
+    color: var(--ask);
+    border-radius: 3px;
+    padding: 11px 14px;
+    font-size: 12.5px;
+    margin-bottom: 16px;
+}
+
+/* ---------------------------------------------------------
+   Control panel: mode toggle, dataset selector, run button
+   --------------------------------------------------------- */
+
+.controls-panel {
+    background: var(--panel-raised);
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 18px 20px;
+}
+
+.controls-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 28px;
+}
+
+.controls-row-actions {
+    justify-content: flex-end;
+    border-top: 1px solid var(--rule);
+    padding-top: 16px;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    min-width: 220px;
+    flex: 1;
+}
+
+.field-label {
+    font-family: var(--font-display);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--faint);
+}
+
+.segmented {
+    display: inline-flex;
+    background: var(--ink);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 3px;
+    width: fit-content;
+}
+
+.segmented-option {
+    background: transparent;
+    color: var(--dim);
+    border: none;
+    border-radius: 2px;
+    padding: 7px 18px;
+    font-size: 11.5px;
+}
+
+.segmented-option:hover:not(:disabled) {
+    filter: none;
+    color: var(--paper);
+}
+
+.segmented-option.active {
+    background: var(--trace-dim);
+    color: var(--trace);
+    box-shadow: inset 0 0 0 1px var(--trace);
+}
+
+.toggle-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.toggle-option {
+    font-family: var(--font-mono);
+    background: var(--ink);
+    color: var(--dim);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 7px 14px;
+    font-size: 11.5px;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.toggle-option:hover:not(:disabled) {
+    filter: none;
+    color: var(--paper);
+    border-color: var(--faint);
+}
+
+.toggle-option.active {
+    background: var(--trace-dim);
+    color: var(--trace);
+    border-color: var(--trace);
+}
+
+/* ---------------------------------------------------------
+   Results: hero PnL readout + supporting stat strip
+   --------------------------------------------------------- */
+
+.results-grid {
+    display: grid;
+    grid-template-columns: minmax(220px, 1.1fr) repeat(4, minmax(120px, 1fr));
+    gap: 12px;
+}
+
+.card {
+    position: relative;
+    background: var(--panel-raised);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 16px 18px;
+}
+
+.card .label {
+    font-family: var(--font-display);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--faint);
+}
+
+.card .value {
+    font-variant-numeric: tabular-nums;
+    font-size: 19px;
+    font-weight: 600;
+    margin-top: 8px;
+}
+
+.value.pos {
+    color: var(--bid);
+}
+
+.value.neg {
+    color: var(--ask);
+}
+
+/* Hero card: the PnL readout is the thesis of a completed run --
+   sized up, and framed with the signature corner-bracket motif. */
+.card-hero {
+    padding: 20px 22px;
+    border-color: var(--trace-dim);
+}
+
+.card-hero .label {
+    color: var(--trace);
+    letter-spacing: 0.14em;
+}
+
+.card-hero .value {
+    font-size: 34px;
+    font-weight: 700;
+    margin-top: 10px;
+}
+
+.corner {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border: 1.5px solid var(--trace);
+    opacity: 0.75;
+}
+
+.corner-tl {
+    top: -1px;
+    left: -1px;
+    border-right: none;
+    border-bottom: none;
+}
+
+.corner-tr {
+    top: -1px;
+    right: -1px;
+    border-left: none;
+    border-bottom: none;
+}
+
+.corner-bl {
+    bottom: -1px;
+    left: -1px;
+    border-right: none;
+    border-top: none;
+}
+
+.corner-br {
+    bottom: -1px;
+    right: -1px;
+    border-left: none;
+    border-top: none;
+}
+
+/* ---------------------------------------------------------
+   Market grid: PnL chart + trade blotter side by side
+   --------------------------------------------------------- */
+
+.market-grid {
+    display: grid;
+    grid-template-columns: 1.6fr 1fr;
+    gap: 16px;
+    align-items: start;
+}
+
+/* ---------------------------------------------------------
+   Trade blotter table
+   --------------------------------------------------------- */
+
+.table-scroll {
+    max-height: 420px;
+    overflow-y: auto;
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+}
+
+.trade-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.trade-table thead th {
+    position: sticky;
+    top: 0;
+    background: var(--panel-raised);
+    text-align: left;
+    padding: 9px 12px;
+    color: var(--faint);
+    font-family: var(--font-display);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 9.5px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--rule);
+}
+
+.trade-table td {
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--rule);
+}
+
+.trade-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.trade-table tbody tr:hover {
+    background: var(--panel-raised);
+}
+
+.side-badge {
+    font-family: var(--font-display);
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 2px 8px;
+    border-radius: 2px;
+}
+
+.side-badge.buy {
+    color: var(--bid);
+    background: var(--bid-dim);
+}
+
+.side-badge.sell {
+    color: var(--ask);
+    background: var(--ask-dim);
+}
+
+/* ---------------------------------------------------------
+   Responsive
+   --------------------------------------------------------- */
+
+@media (max-width: 980px) {
+    .market-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 860px) {
+    .results-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .card-hero {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (max-width: 640px) {
+    .app {
+        padding: 0 16px 48px;
+    }
+
+    .header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .results-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .controls-row {
+        gap: 18px;
+    }
+}
+
+/* ---------------------------------------------------------
+   Top nav: routed pages (Online Simulation / Strategy Compiler)
+   --------------------------------------------------------- */
+
+.top-nav {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 28px;
+    border-bottom: 1px solid var(--rule);
+}
+
+.top-nav a {
+    color: var(--dim);
+    text-decoration: none;
+    font-family: var(--font-display);
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 10px 4px;
+    margin-right: 20px;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.top-nav a:hover {
+    color: var(--paper);
+}
+
+.top-nav a.active {
+    color: var(--paper);
+    border-bottom-color: var(--trace);
+}
+
+/* ---------------------------------------------------------
+   Plain stat-card strip (strategy compiler page)
+   --------------------------------------------------------- */
 
 .cards {
     display: grid;
@@ -129,62 +627,52 @@ button.secondary {
     margin-bottom: 20px;
 }
 
-.card {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 16px;
-}
+/* ---------------------------------------------------------
+   Strategy compiler: code editor, dataset select, run log
+   --------------------------------------------------------- */
 
-.card .label {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--muted);
-}
-
-.card .value {
-    font-size: 22px;
-    font-weight: 700;
-    margin-top: 6px;
-}
-
-.value.pos {
-    color: var(--green);
-}
-
-.value.neg {
-    color: var(--red);
-}
-
-.panel {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 16px;
-    margin-bottom: 16px;
-}
-
-.panel h3 {
-    margin: 0 0 12px;
+.code-editor {
+    width: 100%;
+    background: var(--panel-raised);
+    color: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 12px;
+    font-family: var(--font-mono);
     font-size: 13px;
-    font-weight: 600;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    line-height: 1.5;
+    resize: vertical;
 }
 
-.error-banner {
-    background: rgba(255, 92, 114, 0.12);
-    border: 1px solid var(--red);
-    color: var(--red);
-    border-radius: 8px;
-    padding: 10px 14px;
+.code-editor:disabled {
+    opacity: 0.6;
+}
+
+select {
+    font-family: var(--font-mono);
     font-size: 13px;
-    margin-bottom: 16px;
+    color: var(--paper);
+    background: var(--panel-raised);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 8px 10px;
 }
 
-.hint {
-    color: var(--muted);
+select:disabled {
+    opacity: 0.5;
+}
+
+.log-panel {
+    max-height: 240px;
+    overflow-y: auto;
+    background: var(--ink);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 10px 12px;
     font-size: 12px;
+    line-height: 1.5;
+    color: var(--dim);
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
 }

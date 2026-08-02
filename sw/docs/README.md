@@ -27,6 +27,11 @@ workspace. To use it: open the `sw/` folder in VS Code and choose
 - [Building and running the engine](build-and-test.md) — every Makefile target,
   overridable variables, how to run each test, and the macOS vs Linux
   difference for the Python module.
+- [Running the simulation dashboard](run-dashboard.md) — build `engine_sim`,
+  start the FastAPI service, launch the React UI, and use the dashboard.
+- [Engine tests](testing.md) — what each test covers (`stress_orderbook`,
+  `socket_test` (which drives the `socket-test`/`test-online`/`flood-test`
+  scenarios), `gen_market_ladder.py`) and its specific cases.
 
 ## Related documents
 

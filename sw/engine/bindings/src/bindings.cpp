@@ -13,7 +13,12 @@
 #include <pybind11/stl.h>       // automatic std::vector <-> list conversion
 
 #include "offline_simulation.h"
+// OnlineSimulation uses POSIX sockets and isn't buildable on native Windows
+// yet (see the Windows branch of the pymodule target in engine/Makefile,
+// which defines CT_NO_ONLINE_SIM). macOS/Linux builds are unaffected.
+#ifndef CT_NO_ONLINE_SIM
 #include "online_simulation.h"
+#endif
 
 namespace py = pybind11;
 
@@ -62,6 +67,9 @@ PYBIND11_MODULE(engine_sim, m) {
              "Execute the event loop and return a SimulationResult.");
 
     // ---- Online (real-time) simulation ----
+    // Not registered in Windows builds (CT_NO_ONLINE_SIM) -- see the #include
+    // guard above.
+#ifndef CT_NO_ONLINE_SIM
     py::enum_<OnlineSimulation::OuchTransport>(m, "OuchTransport")
         .value("UDP", OnlineSimulation::OuchTransport::UDP)
         .value("TCP", OnlineSimulation::OuchTransport::TCP);
@@ -97,11 +105,12 @@ PYBIND11_MODULE(engine_sim, m) {
                  // GIL is released.
                  OnlineSimulation::SampleCallback hook;
                  if (!callback.is_none()) {
-                     hook = [&callback](const PnLSnapshot& s) {
+                     hook = [&callback](const PnLSnapshot& s, const L1State& l1) {
                          py::gil_scoped_acquire gil;
                          try {
                              callback(s.timestamp_ns, s.realized_pnl,
-                                      s.unrealized_pnl, s.position_size);
+                                      s.unrealized_pnl, s.position_size,
+                                      l1.best_bid, l1.best_ask);
                          } catch (const py::error_already_set&) {
                              // Never let a Python exception unwind into C++.
                              PyErr_Clear();
@@ -118,5 +127,16 @@ PYBIND11_MODULE(engine_sim, m) {
              "Broadcast ITCH market data in real time while serving OUCH order "
              "entry. If a callback is given, it is called once per simulated "
              "second as callback(timestamp_ns, realized_pnl, unrealized_pnl, "
-             "position_size). Returns a SimulationResult.");
+             "position_size, best_bid, best_ask). Returns a SimulationResult.")
+        .def("stop", &OnlineSimulation::stop,
+             // Just an atomic store (see OnlineSimulation::stop()); called from
+             // a different thread than the one blocked in run(), so it must
+             // not wait on anything run() might be holding. No GIL release
+             // needed -- this returns immediately either way.
+             "Request an early stop of an in-progress run() from another "
+             "thread (e.g. a Stop button). run() unwinds through its normal "
+             "cleanup path and returns whatever telemetry was collected so "
+             "far. Safe to call at any time, including before run() starts "
+             "or after it's already finished (no-op).");
+#endif  // CT_NO_ONLINE_SIM
 }

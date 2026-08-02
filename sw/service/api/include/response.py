@@ -4,7 +4,7 @@ from typing import List
 
 from pydantic import BaseModel
 
-from common import PnLPoint, Trade
+from common import PnLPoint, SummaryMetrics, Trade
 
 
 class SimulationResponse(BaseModel):
@@ -13,6 +13,7 @@ class SimulationResponse(BaseModel):
     compute_time_us: int
     trades: List[Trade]
     pnl_curve: List[PnLPoint]
+    metrics: SummaryMetrics
 
 
 class StreamStartResponse(BaseModel):
@@ -25,3 +26,21 @@ class StreamStartResponse(BaseModel):
     session_id: str
     data_file: str
     stream_url: str
+
+
+class RunSummary(BaseModel):
+    """One persisted run's headline fields (db.py's `runs` table)."""
+
+    run_id: int
+    data_file: str
+    mode: str
+    started_at_ns: int
+    compute_time_us: int
+    total_trades: int
+
+
+class RunDetail(RunSummary):
+    """A run summary plus its persisted fills and PnL curve."""
+
+    fills: List[Trade]
+    pnl_curve: List[PnLPoint]

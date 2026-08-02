@@ -125,6 +125,7 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
     // under the lock but the telemetry callback is invoked afterwards, without
     // the lock held, so a slow consumer can never stall the OUCH thread.
     std::optional<PnLSnapshot> sampled;
+    L1State l1; // read under the lock below, used for the callback outside it
 
     {
         std::lock_guard<std::mutex> lock(book_mutex);
@@ -138,7 +139,7 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
             matching_engine.process_cancel(rec.order_id, rec.side);
         }
 
-        const L1State l1 = matching_engine.get_l1_state();
+        l1 = matching_engine.get_l1_state();
 
         // 3. Sample the PnL curve once per simulated second.
         if (ts >= next_sample_ns) {
@@ -158,7 +159,7 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
 
     // 4. Stream the sample to any live-telemetry consumer (outside the lock).
     if (sampled && on_sample_cb) {
-        on_sample_cb(*sampled);
+        on_sample_cb(*sampled, l1);
     }
 }
 
@@ -236,6 +237,8 @@ void OnlineSimulation::handle_ouch_client(int client_fd) {
         if (!protocol::from_ouch(buf, frame_len, msg)) {
             continue;
         }
+
+        if (ouch_observer_) ouch_observer_(msg, buf, frame_len);
 
         const FillReport fill = apply_ouch_order(msg);
 
@@ -317,6 +320,8 @@ void OnlineSimulation::ouch_udp_loop() {
             continue; // malformed frame
         }
 
+        if (ouch_observer_) ouch_observer_(msg, buf, frame_len);
+
         const FillReport fill = apply_ouch_order(msg);
 
         // Reply to the sender for ENTER orders: an execution report if any
@@ -380,8 +385,13 @@ SimulationResult OnlineSimulation::run(SampleCallback on_sample) {
     bool     have_prev      = false;
 
     size_t n;
-    while ((n = std::fread(buffer.data(), sizeof(MBORecord), READ_CHUNK, fp)) > 0) {
+    while (running.load(std::memory_order_relaxed) &&
+           (n = std::fread(buffer.data(), sizeof(MBORecord), READ_CHUNK, fp)) > 0) {
         for (size_t i = 0; i < n; ++i) {
+            // External stop request (e.g. stop() from a SIGINT handler) --
+            // unwind now instead of finishing the file.
+            if (!running.load(std::memory_order_relaxed)) break;
+
             const MBORecord& rec = buffer[i];
 
             // --- Real-time pacing: wait (future - present) before this line ---
@@ -408,7 +418,8 @@ SimulationResult OnlineSimulation::run(SampleCallback on_sample) {
 
     std::fclose(fp);
 
-    // Market data is exhausted: stop the OUCH server and wait for it to drain.
+    // Market data is exhausted (or an external stop() request broke the loop
+    // above): stop the OUCH server and wait for it to drain.
     running = false;
     if (ouch_thread.joinable()) {
         ouch_thread.join();

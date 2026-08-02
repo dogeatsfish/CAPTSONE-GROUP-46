@@ -17,6 +17,12 @@ vivado/*.ip_user_files/
 vivado/*.sim/
 vivado/report_*
 
+# Alpha Engine compile job workspaces (submitted source + Vivado
+# logs/reports/result.json for each /compile run) -- see compile_manager.py
+sw/service/compiler_jobs/
+
+vivado/capstone_g46/*
+# Owen capstone folder
 
 # Simulation
 sim/obj*
@@ -24,7 +30,6 @@ sim/logs/
 sim/xsim_*
 sim/replay_*.hex
 sim/replay_*.txt
-*.jou
 xsim.dir/
 sim/*.vcd
 sim/*.fst
@@ -38,6 +43,22 @@ __pycache__/
 venv/
 *.egg-info/
 .pytest_cache/
+
+# Compiled engine_sim extension module -- platform/interpreter-specific, must
+# be built locally (see sw/engine/Makefile `make pymodule`), not committed.
+# *.py[cod] above already covers *.pyd; this adds the macOS/Linux *.so form.
+sw/engine/engine_sim*.so
+
+# Compiled engine binaries -- build locally via the Makefile (`make`,
+# `make online`, `make socket-test`, etc.), never committed. PR #15 already
+# purged these once (see TODO.md); listed explicitly so a stray `git add -A`
+# after a local build can't silently reintroduce them.
+sw/engine/simulation_run
+sw/engine/online_run
+sw/engine/fpga_test
+sw/engine/tests/src/socket_test
+sw/engine/tests/src/stress_orderbook
+sw/engine/tests/src/test_online
 
 # Node / React
 node_modules/
@@ -66,3 +87,10 @@ synth.tcl
 
 # Executables
 *.exe
+# AI tooling (local config/session state, not shared repo content)
+.claude/
+.cursor/
+.github/copilot-instructions.md
+
+# Personal working notes -- not for the shared repo, see TODO.md for that
+NOTES.md
