@@ -170,10 +170,13 @@ def start_online_stream(req: SimulationRequest):
 
     The run starts when a client attaches to the returned ``stream_url`` via
     Server-Sent Events (so the client never misses the opening telemetry). The
-    engine's ITCH/OUCH sockets stay entirely server-side.
+    engine's ITCH/OUCH sockets stay entirely server-side. ``req.online_target``
+    picks loopback (default, software-only) vs the real FPGA board.
     """
     data_file = _resolve_data_file(req.data_file)
-    session = stream_manager.create(str(data_file), build_online_config())
+    session = stream_manager.create(
+        str(data_file), build_online_config(req.online_target)
+    )
     return StreamStartResponse(
         session_id=session.session_id,
         data_file=str(data_file),

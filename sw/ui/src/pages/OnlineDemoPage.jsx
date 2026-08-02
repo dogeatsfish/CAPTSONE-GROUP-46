@@ -16,6 +16,7 @@ export default function OnlineDemoPage() {
     const [topOfBook, setTopOfBook] = useState(null); // { bestBid, bestAsk } -- live, online mode only
     const [liveCurve, setLiveCurve] = useState([]); // pnl_curve built up live from "pnl" events
     const [streamResult, setStreamResult] = useState(null); // set from the SSE "complete" event
+    const [onlineTarget, setOnlineTarget] = useState("loopback"); // "loopback" | "hardware"
 
     const { datasets, loading: datasetsLoading, error: datasetsError } = useDatasets();
 
@@ -69,7 +70,7 @@ export default function OnlineDemoPage() {
             setTopOfBook(null);
             setLiveCurve([]);
             setStreamResult(null);
-            streaming.start({ data_file: selectedDataset || undefined });
+            streaming.start({ data_file: selectedDataset || undefined, online_target: onlineTarget });
         } else {
             blocking.run({ mode, dataFile: selectedDataset });
         }
@@ -99,6 +100,8 @@ export default function OnlineDemoPage() {
                 onRun={handleRun}
                 canRun={canRun}
                 onStop={isOnline ? streaming.stop : undefined}
+                onlineTarget={onlineTarget}
+                onOnlineTargetChange={isOnline ? setOnlineTarget : undefined}
             />
 
             {isOnline && (running || topOfBook) && (
