@@ -74,6 +74,29 @@ void rest_order(const Order& order, Book& book, OrderBook::IdIndex& index) {
     index[order.order_id] = order.price;
 }
 
+// Cancel order_id out of one side's book + index. Returns false (a no-op)
+// if order_id isn't in this side's index at all -- the caller decides
+// whether that means "unknown id" or "try the other side."
+template <class Book>
+bool cancel_from(uint64_t order_id, Book& book, OrderBook::IdIndex& index) {
+    auto idx_it = index.find(order_id);
+    if (idx_it == index.end()) return false;
+
+    auto level_it = book.find(idx_it->second);
+    if (level_it != book.end()) {
+        auto& queue = level_it->second;
+        for (auto it = queue.begin(); it != queue.end(); ++it) {
+            if (it->order_id == order_id) {
+                queue.erase(it);
+                break;
+            }
+        }
+        if (queue.empty()) book.erase(level_it);
+    }
+    index.erase(idx_it);
+    return true;
+}
+
 } // namespace
 
 // ---------------------------------------------------------
@@ -105,35 +128,17 @@ FillReport OrderBook::process_add(Order& aggressive_order, uint64_t timestamp_ns
 
 void OrderBook::process_cancel(uint64_t order_id, char side) {
     if (side == 'B') {
-        auto idx_it = bid_index.find(order_id);
-        if (idx_it == bid_index.end()) return; // unknown id: no-op
-        auto level_it = bids.find(idx_it->second);
-        if (level_it != bids.end()) {
-            auto& queue = level_it->second;
-            for (auto it = queue.begin(); it != queue.end(); ++it) {
-                if (it->order_id == order_id) {
-                    queue.erase(it);
-                    break;
-                }
-            }
-            if (queue.empty()) bids.erase(level_it);
-        }
-        bid_index.erase(idx_it);
+        cancel_from(order_id, bids, bid_index);
     } else {
-        auto idx_it = ask_index.find(order_id);
-        if (idx_it == ask_index.end()) return; // unknown id: no-op
-        auto level_it = asks.find(idx_it->second);
-        if (level_it != asks.end()) {
-            auto& queue = level_it->second;
-            for (auto it = queue.begin(); it != queue.end(); ++it) {
-                if (it->order_id == order_id) {
-                    queue.erase(it);
-                    break;
-                }
-            }
-            if (queue.empty()) asks.erase(level_it);
-        }
-        ask_index.erase(idx_it);
+        cancel_from(order_id, asks, ask_index);
+    }
+}
+
+void OrderBook::process_cancel(uint64_t order_id) {
+    // Side unknown: try bids first, then asks. A no-op (both misses) just
+    // means an unrecognized id, same as the side-known overload.
+    if (!cancel_from(order_id, bids, bid_index)) {
+        cancel_from(order_id, asks, ask_index);
     }
 }
 

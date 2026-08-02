@@ -172,7 +172,12 @@ FillReport OnlineSimulation::apply_ouch_order(const protocol::OuchMessage& msg) 
     std::lock_guard<std::mutex> lock(book_mutex);
 
     if (msg.msg_type == protocol::OUCH_CANCEL) {
-        matching_engine.process_cancel(msg.order_id, msg.side);
+        // msg.side is always 0 here -- the OUCH Cancel wire format carries no
+        // side (see protocol::from_ouch) -- so this must use the side-agnostic
+        // overload, not guess. Passing msg.side straight through used to
+        // silently no-op every bid-side cancel (process_cancel(id, side)'s
+        // side != 'B' branch always looked in the ask index).
+        matching_engine.process_cancel(msg.order_id);
         return FillReport{};
     }
 

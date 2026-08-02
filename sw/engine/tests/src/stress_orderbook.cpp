@@ -142,6 +142,40 @@ static void test_cancel() {
     CHECK(almost_equal(l1.best_ask, 101.0), "phantom cancel is a no-op");
 }
 
+// Regression: OUCH Cancel carries no side on the wire (protocol::from_ouch
+// sets it to 0), so OnlineSimulation::apply_ouch_order must use the
+// side-agnostic process_cancel(id) overload, not process_cancel(id, side).
+// Passing a wrong/default side into the side-known overload silently no-ops
+// on the wrong book half -- this pins that both overloads actually work,
+// especially the bid side (side-known's `if (side == 'B') ... else` means
+// anything that ISN'T 'B', including a stray 0, falls into the ask branch,
+// so a bid-side bug here would be easy to miss by only testing asks).
+static void test_cancel_side_agnostic() {
+    OrderBook ob;
+    Order b1 = mk(1, 'B', 100.0, 5.0);
+    Order b2 = mk(2, 'B', 99.0, 5.0);
+    Order a1 = mk(3, 'S', 101.0, 5.0);
+    ob.process_add(b1, 1);
+    ob.process_add(b2, 2);
+    ob.process_add(a1, 3);
+
+    // Cancel a BID with the side unknown -- must find it via bid_index, not
+    // silently miss it by only checking asks.
+    ob.process_cancel(1);
+    L1State l1 = ob.get_l1_state();
+    CHECK(almost_equal(l1.best_bid, 99.0), "side-agnostic cancel removes the bid, best bid moves to 99");
+
+    // Cancel an ASK with the side unknown -- symmetric case.
+    ob.process_cancel(3);
+    l1 = ob.get_l1_state();
+    CHECK(almost_equal(l1.best_ask, 0.0), "side-agnostic cancel removes the only ask");
+
+    // Unknown id on both sides: no-op, no crash.
+    ob.process_cancel(999);
+    l1 = ob.get_l1_state();
+    CHECK(almost_equal(l1.best_bid, 99.0), "phantom side-agnostic cancel is a no-op");
+}
+
 // ---------------------------------------------------------------------------
 // 2. Randomized stress with invariant checking
 // ---------------------------------------------------------------------------
@@ -220,6 +254,7 @@ int main() {
     test_multi_level_sweep_vwap();
     test_price_time_priority();
     test_cancel();
+    test_cancel_side_agnostic();
     std::cout << "  correctness checks done\n\n";
 
     std::cout << "=== OrderBook randomized stress ===\n";
