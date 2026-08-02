@@ -66,6 +66,14 @@ public:
     using SampleCallback = std::function<void(const PnLSnapshot&, const L1State&)>;
     SimulationResult run(SampleCallback on_sample = {});
 
+    // Requests an early stop of an in-progress run() -- e.g. from a SIGINT
+    // handler on Ctrl+C. Safe to call from any thread/signal context (just an
+    // atomic store). run() notices on its next loop iteration and unwinds
+    // through its normal end-of-file path: stop the OUCH thread, close
+    // itch_fd/ouch_listen_fd, return whatever telemetry was collected so far.
+    // A no-op if no run() is in progress.
+    void stop() { running = false; }
+
     // Observer invoked for every OUCH order-entry message received from a
     // connected client or the FPGA, with the decoded message and the raw frame
     // bytes. Set before run(); it is invoked on the OUCH thread. Optional, used

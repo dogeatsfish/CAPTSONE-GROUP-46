@@ -385,8 +385,13 @@ SimulationResult OnlineSimulation::run(SampleCallback on_sample) {
     bool     have_prev      = false;
 
     size_t n;
-    while ((n = std::fread(buffer.data(), sizeof(MBORecord), READ_CHUNK, fp)) > 0) {
+    while (running.load(std::memory_order_relaxed) &&
+           (n = std::fread(buffer.data(), sizeof(MBORecord), READ_CHUNK, fp)) > 0) {
         for (size_t i = 0; i < n; ++i) {
+            // External stop request (e.g. stop() from a SIGINT handler) --
+            // unwind now instead of finishing the file.
+            if (!running.load(std::memory_order_relaxed)) break;
+
             const MBORecord& rec = buffer[i];
 
             // --- Real-time pacing: wait (future - present) before this line ---
@@ -413,7 +418,8 @@ SimulationResult OnlineSimulation::run(SampleCallback on_sample) {
 
     std::fclose(fp);
 
-    // Market data is exhausted: stop the OUCH server and wait for it to drain.
+    // Market data is exhausted (or an external stop() request broke the loop
+    // above): stop the OUCH server and wait for it to drain.
     running = false;
     if (ouch_thread.joinable()) {
         ouch_thread.join();
