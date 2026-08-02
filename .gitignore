@@ -49,6 +49,17 @@ venv/
 # *.py[cod] above already covers *.pyd; this adds the macOS/Linux *.so form.
 sw/engine/engine_sim*.so
 
+# Compiled engine binaries -- build locally via the Makefile (`make`,
+# `make online`, `make socket-test`, etc.), never committed. PR #15 already
+# purged these once (see TODO.md); listed explicitly so a stray `git add -A`
+# after a local build can't silently reintroduce them.
+sw/engine/simulation_run
+sw/engine/online_run
+sw/engine/fpga_test
+sw/engine/tests/src/socket_test
+sw/engine/tests/src/stress_orderbook
+sw/engine/tests/src/test_online
+
 # Node / React
 node_modules/
 sw/ui/build/
