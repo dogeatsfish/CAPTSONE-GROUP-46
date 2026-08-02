@@ -127,6 +127,14 @@ L1, now pinned by a regression test).
 
 ## Compile API (`sw/service/api/`, `vivado/scripts/compile_alpha_engine.tcl`)
 
+- [x] No UI existed for the `/compile` (Alpha Engine hardware synthesis)
+      endpoint at all — `compile_manager.py`/`CompileRequest` backed a route
+      nothing in the frontend called. Added
+      `sw/ui/src/pages/AlphaEngineCompilerPage.jsx` (third routed page,
+      mirrors the Strategy Compiler's edit/run/stream-log pattern), source
+      editor pre-filled with the shipped `alpha_engine_core.sv`. Requires
+      Vivado on the host running the API — confirmed it fails cleanly (SSE
+      `error` event, no crash) when Vivado isn't installed.
 - [ ] Currently out-of-context (OOC) synthesis + report only — no full
       bitstream generation, no DFX partial reconfiguration, no JTAG board
       flash. The top-level completeness blocker is now resolved (PR #16),
@@ -177,9 +185,10 @@ L1, now pinned by a regression test).
       and `pnl_curve`). Getting that data means extending the C++ matching
       engine / pybind11 bindings (`orderbook.cpp`, `bindings.cpp`) — needs
       buy-in from whoever owns that code before touching it.
-- [ ] Not wired into the SSE streaming path (`/simulate/online/stream` in
-      `stream_manager.py`) yet — only the two blocking endpoints log today.
-      Would need a per-run write hook added to `StreamSession`.
+- [x] Wired into the SSE streaming path (`/simulate/online/stream` in
+      `stream_manager.py`) — `StreamSession._run` now calls the same
+      best-effort `db.log_run` as the blocking endpoints once the engine
+      thread finishes.
 - [ ] `db.py` opens a fresh connection per call under a single process-wide
       lock, sized for the end-of-run bulk-write case (one INSERT batch per
       completed run). If per-tick streaming writes get added (previous
@@ -191,15 +200,30 @@ L1, now pinned by a regression test).
 
 ## UI (`sw/ui/`)
 
-- [ ] **The single biggest gap between the design doc and reality.**
-      `sw/ui/src/` is just `App.jsx` — a PnL/position line-chart demo
-      connected to the SSE stream. FS-18 (marked *Essential*) calls for a
-      live L2 order-book ladder/depth chart and a full order blotter
-      (New/Partial Fill/Filled/Cancelled-Rejected lifecycle); neither exists
-      in code at all. This is presumably Nikola's in-progress work (Discord:
-      "filler for now") — not something to build without syncing with him
-      first, but worth being clear-eyed that it's not close to done, not
-      just polish-away-from-done.
+- [x] Online mode's "live" telemetry was never actually wired up — it POSTed
+      to the blocking `/simulate/online` and just waited for the whole run,
+      same as offline mode, even though `/simulate/online/stream` (SSE) was
+      fully built on the backend. Rewired `OnlineDemoPage`'s Online mode to
+      use the existing stream instead; the "complete" SSE event now also
+      carries the full `trades`/`pnl_curve`/`metrics` (previously just
+      `total_trades`/`compute_time_us`) so the rest of the page (PnL chart,
+      results, blotter) renders the same way it does for offline mode.
+- [x] Added a live L1 top-of-book readout (`TopOfBook.jsx`) driven by
+      `best_bid`/`best_ask`, now threaded through
+      `OrderBook::get_l1_state()` -> `OnlineSimulation::SampleCallback` (new
+      second arg) -> pybind11 -> `stream_manager.py`'s `"pnl"` SSE event.
+      Team decision: L1 only, not the full FS-18 L2/L3 ladder or an
+      order-lifecycle blotter (New/Partial/Filled/Cancelled/Rejected) —
+      those remain unbuilt and are still Nikola's territory; don't start
+      them without syncing first.
+- [x] Found and fixed while testing the above: `_resolve_data_file` in
+      `routes.py` resolved relative filenames against the *service*
+      directory, not `DATA_DIR` — so selecting anything from the dataset
+      dropdown (which sends bare filenames straight from `/datasets`) 404'd,
+      across every mode (offline, online, and the new stream), not just
+      online. Pre-existing bug, unrelated to this round of changes; now
+      tries `DATA_DIR` first and falls back to the old service-relative
+      behavior for an explicit path.
 
 ## Testing / verification gaps
 
@@ -234,7 +258,6 @@ L1, now pinned by a regression test).
       its own, since the pipeline only actually uses `CSVL1Reader` in
       practice, but now entangled with the symbol-identity decision above
       if the pipeline gets real rework.
-- [ ] No install instructions for Docker itself anywhere (only how to run
-      `docker compose up` once it's installed) — raised in Discord. Low
-      effort, worth adding if anyone else needs to set up the containerized
-      workflow from scratch.
+- [x] Docker install instructions — added to the root `README.md`
+      ("Don't have Docker yet?"): Docker Desktop for Windows/macOS, Docker
+      Engine for Linux, plus the `docker info` sanity check.

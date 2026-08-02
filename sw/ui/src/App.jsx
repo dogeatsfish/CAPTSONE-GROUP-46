@@ -2,6 +2,7 @@ import React from "react";
 import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
 import OnlineDemoPage from "./pages/OnlineDemoPage.jsx";
 import StrategyCompilerPage from "./pages/StrategyCompilerPage.jsx";
+import AlphaEngineCompilerPage from "./pages/AlphaEngineCompilerPage.jsx";
 
 function TopNav() {
     return (
@@ -11,6 +12,9 @@ function TopNav() {
             </NavLink>
             <NavLink to="/strategy-compiler" className={({ isActive }) => (isActive ? "active" : "")}>
                 Strategy Compiler
+            </NavLink>
+            <NavLink to="/alpha-engine-compiler" className={({ isActive }) => (isActive ? "active" : "")}>
+                Alpha Engine Compiler
             </NavLink>
         </nav>
     );
@@ -24,6 +28,7 @@ export default function App() {
                 <Routes>
                     <Route path="/" element={<OnlineDemoPage />} />
                     <Route path="/strategy-compiler" element={<StrategyCompilerPage />} />
+                    <Route path="/alpha-engine-compiler" element={<AlphaEngineCompilerPage />} />
                 </Routes>
             </div>
         </BrowserRouter>

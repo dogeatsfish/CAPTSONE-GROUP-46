@@ -38,10 +38,20 @@ _SSE_HEADERS = {
 
 
 def _resolve_data_file(data_file: str | None) -> Path:
-    """Resolve a requested data file to an existing .bin, or raise HTTP 404."""
-    path = Path(data_file) if data_file else DEFAULT_DATA_FILE
+    """Resolve a requested data file to an existing .bin, or raise HTTP 404.
+
+    Relative paths are tried against DATA_DIR first -- this is what /datasets
+    advertises (bare filenames) and what the UI's dataset picker sends, so a
+    name straight out of that list must resolve. Falls back to resolving
+    against the service directory (this module's documented, pre-existing
+    behavior for a caller passing an explicit relative path of their own).
+    """
+    if not data_file:
+        return DEFAULT_DATA_FILE
+    path = Path(data_file)
     if not path.is_absolute():
-        path = (SERVICE_ROOT / path).resolve()
+        in_data_dir = DATA_DIR / path
+        path = in_data_dir if in_data_dir.is_file() else (SERVICE_ROOT / path).resolve()
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"Data file not found: {path}")
     return path
@@ -176,8 +186,10 @@ async def online_stream(session_id: str, request: Request):
     """Attach a Server-Sent Events stream to a previously created run.
 
     Emits one JSON object per `data:` frame:
-      {"type": "pnl", "timestamp_ns", "realized_pnl", "unrealized_pnl", "position_size"}
-      {"type": "complete", "data_file", "total_trades", "compute_time_us"}
+      {"type": "pnl", "timestamp_ns", "realized_pnl", "unrealized_pnl",
+       "position_size", "best_bid", "best_ask"}
+      {"type": "complete", "data_file", "total_trades", "compute_time_us",
+       "trades", "pnl_curve", "metrics"} -- same shape as SimulationResponse
       {"type": "error", "detail"}
     """
     session = stream_manager.get(session_id)

@@ -22,6 +22,7 @@
 #include "protocol.h"
 
 #include <atomic>
+#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -29,6 +30,18 @@
 #include <string>
 
 namespace {
+
+// Set by main() before run() starts; cleared once run() returns. A signal
+// handler can't capture state, so this is the only way handle_sigint() can
+// reach the running OnlineSimulation to ask it to unwind (close its sockets,
+// stop the OUCH thread) instead of leaving the process to be killed out from
+// under them.
+std::atomic<OnlineSimulation*> g_sim{nullptr};
+
+void handle_sigint(int /*signum*/) {
+    OnlineSimulation* sim = g_sim.load(std::memory_order_relaxed);
+    if (sim != nullptr) sim->stop(); // async-signal-safe: just an atomic store
+}
 
 // Print one received OUCH packet: raw hex followed by decoded fields.
 void print_ouch(size_t index, const protocol::OuchMessage& m,
@@ -69,12 +82,18 @@ int main(int argc, char* argv[]) {
     std::cout << "ITCH broadcast:    udp " << cfg.itch_address << ":" << cfg.itch_port << "\n";
     std::cout << "OUCH order entry:  " << proto << " 0.0.0.0:" << cfg.ouch_port << "\n";
     std::cout << "Time scale:        " << cfg.time_scale << "x\n";
-    std::cout << "Waiting for OUCH orders from the FPGA...\n";
+    std::cout << "Waiting for OUCH orders from the FPGA... (Ctrl+C to stop early)\n";
     std::cout << "========================================\n";
 
     std::atomic<size_t> ouch_count{0};
 
     OnlineSimulation sim(mbo_file, cfg);
+
+    // Ctrl+C now unwinds sim.run() through its normal cleanup path (stop the
+    // OUCH thread, close itch_fd/ouch_listen_fd) instead of the OS just
+    // killing the process out from under the open sockets.
+    g_sim.store(&sim, std::memory_order_relaxed);
+    std::signal(SIGINT, handle_sigint);
 
     // Print + decode every OUCH packet the FPGA sends back.
     sim.set_ouch_observer(
@@ -84,6 +103,11 @@ int main(int argc, char* argv[]) {
         });
 
     SimulationResult result = sim.run();
+
+    // run() has already closed the sockets and returned; the handler must
+    // not touch `sim` anymore (it's about to go out of scope).
+    g_sim.store(nullptr, std::memory_order_relaxed);
+    std::signal(SIGINT, SIG_DFL);
 
     std::cout << "\n=== FPGA test complete ===\n";
     std::cout << "OUCH packets received from FPGA: " << ouch_count.load() << "\n";

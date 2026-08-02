@@ -1,6 +1,6 @@
 # Engine Tests
 
-The software engine has three test executables plus a market-data generator,
+The software engine has two test executables plus a market-data generator,
 all under `sw/engine/tests/`. This document describes **what each one tests** and
 **the specific cases** it covers. For how to build/run them (and variable
 overrides like `PY=`), see [build-and-test.md](build-and-test.md).
@@ -8,12 +8,19 @@ overrides like `PY=`), see [build-and-test.md](build-and-test.md).
 | Target / file | Layer under test | Network? |
 |---|---|---|
 | `stress-book` — `tests/src/stress_orderbook.cpp` | `OrderBook` matching engine | no |
-| `test-online` — `tests/src/test_online.cpp` | Full online sim: ITCH out + OUCH in/out | loopback |
-| `socket-test` — `tests/src/socket_test.cpp` | OUCH order-entry path via socket | loopback |
+| `socket-test` — `tests/src/socket_test.cpp` (`socket_test.ini`) | OUCH order-entry path via socket | loopback |
+| `test-online` — `tests/src/socket_test.cpp` (`test_online.ini`) | Full online sim: ITCH out + OUCH in/out | loopback |
+| `flood-test` — `tests/src/socket_test.cpp` (`flood_test.ini`) | `socket-test`'s scenario, denser resting book | loopback |
 | `fpga-test` — `tests/src/fpga_test.cpp` | Real FPGA over Ethernet: ITCH out, decode OUCH in | **real hardware** |
-| `tests/src/gen_market_ladder.py` | Generates the market-data book the online tests replay | n/a |
+| `tests/src/gen_market_ladder.py` | Generates the market-data book the loopback tests replay | n/a |
 
-> **Transport note.** `test_online` and `socket_test` drive order entry with a
+`socket-test`/`test-online`/`flood-test` are one binary (`tests/src/socket_test.cpp`)
+driven by three different `tests/config/*.ini` files -- which orders it sends,
+what response type/trade count each order is expected to produce, and whether
+it also verifies the ITCH broadcast are all config, not separate `.cpp` files.
+See the header comment in `socket_test.cpp` for the full key list.
+
+> **Transport note.** All three loopback scenarios drive order entry with a
 > **TCP** client, so they set `cfg.ouch_transport = OuchTransport::TCP`. The
 > engine's *default* is UDP (to match the FPGA). They also pin
 > `cfg.itch_address = "127.0.0.1"` so the loopback ITCH subscriber receives the
@@ -48,52 +55,33 @@ then randomized/adversarial stress with invariant checking. Uses a small
 
 ---
 
-## `test_online.cpp` — end-to-end online simulation
+## `socket_test.cpp` — OUCH client vs a rising bid ladder
 
-Exercises the whole real-time path against the generated bid ladder: the ITCH
-market-data broadcast *and* the OUCH order-entry request/response cycle.
+The online engine makes no trading decisions itself; every order arrives over
+the OUCH socket, exactly like a co-located FPGA/strategy would send it. This
+one binary plays that external client, config-driven so the same source
+covers three scenarios (see the header comment in the file for the full key
+list: `order_count`/`orderN_*`, `min_trades`/`max_trades`, `verify_itch`,
+`pre_send_delay_ms`). Self-contained -- regenerates the ladder book if it's
+missing.
 
-**Flow:**
-1. Subscribes to the ITCH UDP broadcast on loopback **before** the run starts,
-   so it captures every market-data datagram.
-2. Runs `OnlineSimulation::run()` on a background thread (real-time pacing; the
-   100-order ladder streams over ~5 s).
-3. Connects to the OUCH port (TCP) and sends aggressive **SELL** orders against
-   the resting bid ladder.
-4. Verifies the OUCH responses and the run's final telemetry.
-
-**OUCH packet printing.** Every OUCH packet the client receives is printed both
-as raw hex and decoded, because raw OUCH bytes are binary and unreadable as
-text. Example:
+**Flow:** optionally subscribe to the ITCH UDP broadcast (`verify_itch`), run
+the sim on the ladder in the background, connect over OUCH (TCP), send the
+configured orders and read each response (printed as both raw hex and decoded
+fields, since raw OUCH bytes are binary and unreadable as text), then check
+the configured trade-count bounds (and, if `verify_itch`, the captured ITCH
+packets). Example printed response:
 
 ```
    raw OUCH [25 B]: 45 00 00 00 00 35 A4 E9 01 40 59 00 00 00 00 00 00 40 59 1C CC CC CC CC CD
    decoded: type=EXECUTED('E')  order_id=900000001  size=100.0000  price=100.4500
 ```
 
-### Cases
+### `socket-test` / `flood-test` — `socket_test.ini` / `flood_test.ini`
 
-| Order | Setup | Expected |
-|---|---|---|
-| SELL 100 @ 100.00 | Crosses the resting bids | **EXECUTED** response; contributes the run's single trade. |
-| SELL 100 @ 200.00 | Above every bid, cannot cross | **ACCEPTED** response (rests, no fill). |
-
-**Pass criteria:** ≥1 ITCH packet received and all captured ITCH packets are
-Adds (`'A'`); first order EXECUTED, second ACCEPTED; exactly 1 total trade.
-
----
-
-## `socket_test.cpp` — OUCH order-entry over the socket
-
-Focuses on the order-entry path: the online engine makes no decisions itself;
-every order arrives over the OUCH socket, exactly like a co-located FPGA/strategy
-would send it. Self-contained, it regenerates the ladder book if missing.
-
-**Flow:** run the sim on the ladder, connect over OUCH (TCP), send two
-aggressive SELLs that cross the resting bids, read each execution report, print
-final telemetry.
-
-### Cases
+Same client behavior (`flood_test.ini` just points at a far denser resting
+book -- see `gen_test_datasets.py`); no ITCH verification, no per-order
+expected-response check.
 
 | Order | Setup | Expected |
 |---|---|---|
@@ -102,6 +90,21 @@ final telemetry.
 
 **Pass criteria:** at least 2 OUCH-driven trades. Final position ends short
 (`-200`) after the two sells.
+
+### `test-online` — `test_online.ini`
+
+The fuller end-to-end check: also subscribes to the ITCH UDP broadcast on
+loopback **before** the run starts (so it captures every market-data
+datagram), and checks each OUCH response's *exact* type, not just a trade
+count.
+
+| Order | Setup | Expected |
+|---|---|---|
+| SELL 100 @ 100.00 | Crosses the resting bids | **EXECUTED** response; contributes the run's single trade. |
+| SELL 100 @ 200.00 | Above every bid, cannot cross | **ACCEPTED** response (rests, no fill). |
+
+**Pass criteria:** ≥1 ITCH packet received and all captured ITCH packets are
+Adds (`'A'`); first order EXECUTED, second ACCEPTED; exactly 1 total trade.
 
 ---
 

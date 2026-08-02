@@ -11,7 +11,9 @@ Two independent planes are involved:
   * South-bound (engine <-> exchange/FPGA): ITCH/UDP + OUCH/TCP, handled inside
     the C++ engine and never exposed here.
   * North-bound (server -> browser): the SSE stream produced here, carrying a
-    copy of each per-second PnL sample plus a terminal event.
+    copy of each per-second PnL sample (plus the current top-of-book, L1:
+    best_bid/best_ask) and a terminal event with the full run (same shape as
+    the blocking endpoints' SimulationResponse).
 
 The blocking ``engine.run(callback)`` executes on a dedicated daemon thread
 (the C++ hot loop releases the GIL), so the asyncio event loop stays free. The
@@ -23,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import queue
 import threading
 import time
@@ -30,6 +33,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, Optional
 
+import db
 from config import (
     ONLINE_ITCH_ADDRESS,
     ONLINE_ITCH_PORT,
@@ -37,6 +41,7 @@ from config import (
     ONLINE_STREAM_TIME_SCALE,
     engine_sim,
 )
+from metrics import compute_summary_metrics
 
 # Sentinel enqueued after the run ends so the consumer knows to stop.
 _DONE = object()
@@ -103,7 +108,13 @@ class StreamSession:
 
     # --- runs on the engine's daemon thread -------------------------------
     def _on_sample(
-        self, ts_ns: int, realized: float, unrealized: float, position: float
+        self,
+        ts_ns: int,
+        realized: float,
+        unrealized: float,
+        position: float,
+        best_bid: float,
+        best_ask: float,
     ) -> None:
         try:
             self.events.put_nowait(
@@ -113,22 +124,65 @@ class StreamSession:
                     "realized_pnl": realized,
                     "unrealized_pnl": unrealized,
                     "position_size": position,
+                    "best_bid": best_bid,
+                    "best_ask": best_ask,
                 }
             )
         except queue.Full:
             pass  # slow/absent client: drop this sample, never block the engine
 
+    def _log_run(self, started_at_ns: int, result: Any) -> None:
+        """Persist a completed streaming run to the database (FS-15).
+
+        Best-effort, same as routes.py's _log_run: a logging failure must
+        never take down an otherwise-successful stream.
+        """
+        try:
+            db.log_run(
+                data_file=self.data_file,
+                mode="online",
+                started_at_ns=started_at_ns,
+                compute_time_us=result.compute_time_us,
+                total_trades=result.total_trades,
+                trades=result.trades,
+                pnl_curve=result.pnl_curve,
+            )
+        except Exception:  # noqa: BLE001 - logging must never break the stream
+            logging.getLogger(__name__).exception("Failed to persist run to database")
+
     def _run(self) -> None:
+        started_at_ns = time.time_ns()
         try:
             result = engine_sim.OnlineSimulation(self.data_file, self.cfg).run(
                 self._on_sample
             )
+            self._log_run(started_at_ns, result)
+            metrics = compute_summary_metrics(result.pnl_curve, result.compute_time_us)
             self.events.put(
                 {
                     "type": "complete",
                     "data_file": self.data_file,
                     "total_trades": result.total_trades,
                     "compute_time_us": result.compute_time_us,
+                    "trades": [
+                        {
+                            "timestamp_ns": t.timestamp_ns,
+                            "side": t.side,
+                            "price": t.price,
+                            "size": t.size,
+                        }
+                        for t in result.trades
+                    ],
+                    "pnl_curve": [
+                        {
+                            "timestamp_ns": p.timestamp_ns,
+                            "realized_pnl": p.realized_pnl,
+                            "unrealized_pnl": p.unrealized_pnl,
+                            "position_size": p.position_size,
+                        }
+                        for p in result.pnl_curve
+                    ],
+                    "metrics": metrics.model_dump(),
                 }
             )
         except Exception as exc:  # noqa: BLE001 - forward engine errors to client

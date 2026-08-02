@@ -60,8 +60,19 @@ public:
     OnlineSimulation(const OnlineSimulation&) = delete;
     OnlineSimulation& operator=(const OnlineSimulation&) = delete;
 
-    using SampleCallback = std::function<void(const PnLSnapshot&)>;
+    // Second arg is the current top-of-book (best bid/ask) at the same
+    // instant as the PnL sample -- both are read under the same book_mutex
+    // hold in apply_market_event, so they're always mutually consistent.
+    using SampleCallback = std::function<void(const PnLSnapshot&, const L1State&)>;
     SimulationResult run(SampleCallback on_sample = {});
+
+    // Requests an early stop of an in-progress run() -- e.g. from a SIGINT
+    // handler on Ctrl+C. Safe to call from any thread/signal context (just an
+    // atomic store). run() notices on its next loop iteration and unwinds
+    // through its normal end-of-file path: stop the OUCH thread, close
+    // itch_fd/ouch_listen_fd, return whatever telemetry was collected so far.
+    // A no-op if no run() is in progress.
+    void stop() { running = false; }
 
     // Observer invoked for every OUCH order-entry message received from a
     // connected client or the FPGA, with the decoded message and the raw frame
