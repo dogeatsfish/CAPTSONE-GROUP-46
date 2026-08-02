@@ -52,15 +52,11 @@ set_property -dict {PACKAGE_PIN F15 IOSTANDARD LVCMOS33} [get_ports sys_rst_n]
 # Driven from sys_rst_n in RTL; the PHY must leave reset for the RX clock to run.
 set_property -dict {PACKAGE_PIN R14 IOSTANDARD LVCMOS33} [get_ports eth_phy_rst_n]
 
-# sys_clk is UNUSED by the datapath. It SURVIVES synthesis (it is still a port in
-# synth_1/commontrader_top.dcp, defaulted to LVCMOS18 with no LOC) and is trimmed
-# by opt_design -- confirmed absent from impl_1/commontrader_top_io_placed.rpt.
-# So it needs no LOC today, but it only stays DRC-clean because opt_design drops
-# it; the durable fix is to delete the port from commontrader_top.
 # The board's system clock is a 200 MHz DIFFERENTIAL pair (SYS_CLK_P R4 /
-# SYS_CLK_N T4, MRCC in BANK34): it does not map to a single-ended port, and
-# BANK34 is the 1.5 V DDR3 bank, so wiring it up later means an IBUFGDS with
-# DIFF_SSTL15 -- never LVCMOS33. Leave sys_clk unconstrained (or drop the port).
+# SYS_CLK_N T4, MRCC in BANK34). BANK34 is the 1.5 V DDR3 bank.
+# It is used by the reset tree sequencer as a free-running clock.
+set_property -dict {PACKAGE_PIN R4 IOSTANDARD DIFF_SSTL15} [get_ports sys_clk_p]
+set_property -dict {PACKAGE_PIN T4 IOSTANDARD DIFF_SSTL15} [get_ports sys_clk_n]
 
 #------------------------------------------------------------------------------
 # RGMII receive (input, DDR) -- BANK14, 3.3 V

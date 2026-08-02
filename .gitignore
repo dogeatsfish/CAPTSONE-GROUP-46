@@ -79,6 +79,14 @@ Thumbs.db
 .idea/
 *.swp
 
+# Owen Specific Stuff
+vivado/capstone_g46/* 
+vivado/copy_bitstream.tcl
+.agents/*
+synth.tcl
+
+# Executables
+*.exe
 # AI tooling (local config/session state, not shared repo content)
 .claude/
 .cursor/

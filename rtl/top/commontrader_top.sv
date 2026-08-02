@@ -24,11 +24,9 @@ module commontrader_top
   import ct_pkg::*;
 (
   // --- Board clocks / reset -------------------------------------------------
-  /* verilator lint_off UNUSEDSIGNAL */
-  // The core clock is synthesised from the RGMII reference (the PHY is clock
-  // master), so the board oscillator is not currently a datapath source. Kept
-  // on the port list for the MMCM reference option and for board bring-up.
-  input  logic       sys_clk,
+  // 200 MHz differential system clock from the board
+  input  logic       sys_clk_p,
+  input  logic       sys_clk_n,
   /* verilator lint_on UNUSEDSIGNAL */
   input  logic       sys_rst_n,
 
@@ -81,28 +79,27 @@ module commontrader_top
   logic core_rst_n;
   logic phy_rst_n;
 
+  logic board_clk;
+
+`ifdef SYNTHESIS
+  IBUFGDS u_ibufg_sys_clk (
+    .I  (sys_clk_p),
+    .IB (sys_clk_n),
+    .O  (board_clk)
+  );
+`else
+  assign board_clk = sys_clk_p;
+`endif
+
   clk_rst_gen u_clk_rst (
+    .board_clk    (board_clk),
     .sys_rst_n    (sys_rst_n),
     .rgmii_rx_clk (rgmii_rx_clk_bufg),
     .core_clk     (core_clk),
     .core_rst_n   (core_rst_n),
-    .phy_rst_n    (phy_rst_n)
+    .phy_rst_n    (phy_rst_n),
+    .eth_phy_rst_n(eth_phy_rst_n)
   );
-
-  //--------------------------------------------------------------------------
-  // Ethernet PHY hardware reset (active-low), driven from the async board reset.
-  //
-  // The PHY must come out of reset before it drives the 125 MHz RGMII RX clock,
-  // and that clock is the ONLY clock in the whole design (the MMCM in
-  // clk_rst_gen makes core_clk from it). There is therefore NO on-chip clock
-  // available to sequence a timed reset pulse -- so the PHY is simply held in
-  // reset while the board reset is asserted and released otherwise, relying on
-  // the PHY's own power-on reset at power-up. A robust timed power-on reset
-  // would need an independent free-running board oscillator (the 200 MHz
-  // crystal on R4/T4, via IBUFGDS + a counter); deferred, this is enough for
-  // bring-up. WITHOUT this the PHY never leaves reset and the board looks dead.
-  //--------------------------------------------------------------------------
-  assign eth_phy_rst_n = sys_rst_n;
 
   //--------------------------------------------------------------------------
   // Shared free-running timestamp counter (FS-12)

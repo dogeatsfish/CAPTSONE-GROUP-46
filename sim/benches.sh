@@ -13,6 +13,7 @@
 #==============================================================================
 
 declare -A BENCH_TOP=(
+  [clk_rst_gen]="clk_rst_gen_tb"
   [cdc_fifo]="axis_cdc_fifo_tb"
   [rx_mac]="tb_rx_mac_core"
   [tx_mac]="tx_mac_core_tb"
@@ -30,6 +31,7 @@ declare -A BENCH_TOP=(
 # Unit benches first, integration last: if a block is broken, its own bench
 # should be what tells you, not the full-chip run.
 BENCH_ORDER=(
+  clk_rst_gen
   cdc_fifo
   rx_mac
   tx_mac

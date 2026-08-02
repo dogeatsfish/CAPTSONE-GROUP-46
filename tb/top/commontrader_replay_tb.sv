@@ -55,12 +55,14 @@ module commontrader_replay_tb
   //--------------------------------------------------------------------------
   // Clocks / reset
   //--------------------------------------------------------------------------
-  logic sys_clk;
+  logic sys_clk_p;
+  logic sys_clk_n;
   logic sys_rst_n;
   logic rgmii_rx_clk;
 
-  initial sys_clk = 1'b0;
-  always #5 sys_clk = ~sys_clk;
+  initial sys_clk_p = 1'b0;
+  always #2.5 sys_clk_p = ~sys_clk_p;       // 200 MHz differential clock
+  assign sys_clk_n = ~sys_clk_p;
 
   initial rgmii_rx_clk = 1'b0;
   always #4 rgmii_rx_clk = ~rgmii_rx_clk;      // 125 MHz
@@ -79,7 +81,8 @@ module commontrader_replay_tb
   logic        ts_wrapped;
 
   commontrader_top dut (
-    .sys_clk          (sys_clk),
+    .sys_clk_p        (sys_clk_p),
+    .sys_clk_n        (sys_clk_n),
     .sys_rst_n        (sys_rst_n),
     .rgmii_rx_clk     (rgmii_rx_clk),
     .rgmii_rxd        (rgmii_rxd),
@@ -207,6 +210,7 @@ module commontrader_replay_tb
   initial begin
     int offset;
     int exp_wrap;
+    realtime start_time;
 
     void'($value$plusargs("FRAMES=%s", f_frames));
     void'($value$plusargs("LENS=%s",   f_lens));
@@ -240,9 +244,11 @@ module commontrader_replay_tb
     rgmii_rx_ctl   = 1'b0;
     hw_kill_switch_n = 1'b1;   // active-low: idle high = kill NOT asserted
 
-    repeat (20) @(posedge rgmii_rx_clk);
+    #6_000_000;
     sys_rst_n = 1'b1;
-    repeat (40) @(posedge rgmii_rx_clk);
+    wait(dut.core_rst_n);
+    @(posedge dut.core_clk);
+    start_time = $realtime;
 
     offset = 0;
     for (int f = 0; f < n_frames; f++) begin
@@ -271,8 +277,8 @@ module commontrader_replay_tb
     // exceeding the range, which cannot happen while end-to-end latency is
     // ~108 ns. So assert the flag agrees with elapsed time rather than
     // asserting it never sets, which would just be wrong on long runs.
-    exp_wrap = ($realtime > 262144.0) ? 1 : 0;
-    $display("  elapsed %0.1f us, counter range 262.1 us", $realtime / 1000.0);
+    exp_wrap = (($realtime - start_time) > 262144.0) ? 1 : 0;
+    $display("  elapsed %0.1f us, counter range 262.1 us", ($realtime - start_time) / 1000.0);
     check_int("R4 timestamp wrap flag matches elapsed time",
               int'(ts_wrapped), exp_wrap);
 
