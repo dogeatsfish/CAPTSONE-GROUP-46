@@ -31,6 +31,8 @@ The Python module and the online tests additionally need Python 3 with
 | `socket-test`  | Generates a market book, then builds + runs the OUCH socket test.   |
 | `flood-test`   | Generates a dense market book, then stress-tests the engine with a burst of ITCH messages. |
 | `hw-smoke-test`| Builds `online_run` and streams a short book at the real FPGA (`docs/connection-test.md`). |
+| `fpga-test`    | Builds the FPGA hardware harness `fpga_test` (does not run it).      |
+| `run-fpga-test`| Builds + runs the FPGA harness against the real board.              |
 | `clean`        | Removes all build artifacts.                                        |
 
 ## Overridable variables
@@ -43,6 +45,8 @@ Pass these on the command line as `make <target> VAR=value`:
   (default `0.001` = 1000× faster; `1.0` = real time; `0` = no pacing).
 - `PY` — Python interpreter for the online tests
   (default `../service/.venv/bin/python`).
+- `FPGA_FILE` / `FPGA_SCALE` — MBO stream and pacing for `run-fpga-test`
+  (defaults `../data_pipeline/data/synthetic_mbo_stream.bin` and `1.0`).
 - `CXX` / `CXXFLAGS` — compiler and flags.
 
 ## Running each part

@@ -130,7 +130,6 @@ int main(int argc, char* argv[]) {
     IniConfig ini;
     if (!ini.load(config_path)) return 1;
 
-    const std::string itch_address = ini.get_string("itch_address", "127.0.0.1");
     const uint16_t     ITCH_PORT   = ini.get_port("itch_port", 27200);
     const uint16_t     OUCH_PORT   = ini.get_port("ouch_port", 27201);
     const std::string ouch_transport = ini.get_string("ouch_transport", "tcp");
@@ -152,11 +151,14 @@ int main(int argc, char* argv[]) {
     std::cout << "Market data: " << market_book << " (100 bid adds, 100.00 step +0.05, 50ms)\n";
 
     OnlineSimulation::Config cfg;
-    cfg.itch_address   = itch_address;
-    cfg.ouch_transport = OnlineSimulation::OuchTransport::TCP;
+    cfg.itch_address = "127.0.0.1"; // loopback (ITCH is not inspected by this test)
     cfg.itch_port  = ITCH_PORT;
     cfg.ouch_port  = OUCH_PORT;
-    cfg.time_scale = ini.get_double("time_scale", 1.0);
+    cfg.time_scale = 1.0; // real time: ladder streams over ~5s
+    // The OUCH client below is a TCP stream client, so run order entry in TCP
+    // mode. (The engine defaults to UDP to match the FPGA; see
+    // online_simulation.h.)
+    cfg.ouch_transport = OnlineSimulation::OuchTransport::TCP;
 
     OnlineSimulation sim(market_book, cfg);
 

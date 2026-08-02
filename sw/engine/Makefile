@@ -83,7 +83,7 @@ PY_LINK_LIBS :=
 endif
 endif
 
-.PHONY: all run online run-online pymodule stress-book test-online socket-test flood-test hw-smoke-test clean
+.PHONY: all run online run-online pymodule stress-book test-online socket-test flood-test hw-smoke-test fpga-test run-fpga-test clean
 
 all: $(TARGET) $(ONLINE_TARGET)
 
@@ -171,5 +171,28 @@ hw-smoke-test: $(ONLINE_TARGET) $(GEN_TEST_DATASETS)
 	$(PY) $(GEN_TEST_DATASETS)
 	./$(ONLINE_TARGET) tests/config/hardware_smoke.ini
 
+# ---------------------------------------------------------
+# FPGA hardware test (real board over Ethernet)
+# ---------------------------------------------------------
+# Streams the synthetic MBO stream to the board using the DEFAULT network config
+# (ITCH -> 192.168.0.1:50001, OUCH received over UDP on 50001) and decodes/prints
+# every OUCH packet the FPGA sends back. Requires the board link to be up
+# (sudo ../../setup/net_setup.sh) and the bitstream loaded.
+FPGA_TEST_BIN  := fpga_test
+FPGA_TEST_SRCS := tests/src/fpga_test.cpp $(CORE_SRCS)
+
+# Market-data stream fed to the board (override with FILE=...).
+FPGA_FILE ?= ../data_pipeline/data/synthetic_mbo_stream.bin
+# Real-time pacing for the hardware run (override with SCALE=...).
+FPGA_SCALE ?= 1.0
+
+fpga-test: $(FPGA_TEST_BIN)
+
+$(FPGA_TEST_BIN): $(FPGA_TEST_SRCS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(FPGA_TEST_SRCS) -o $(FPGA_TEST_BIN) -lpthread
+
+run-fpga-test: $(FPGA_TEST_BIN)
+	./$(FPGA_TEST_BIN) $(FPGA_FILE) $(FPGA_SCALE)
+
 clean:
-	rm -f $(TARGET) $(ONLINE_TARGET) $(PY_MODULE)*.so $(STRESS_BOOK_BIN) $(TEST_ONLINE_BIN) $(SOCKET_TEST_BIN)
+	rm -f $(TARGET) $(ONLINE_TARGET) $(PY_MODULE)*.so $(STRESS_BOOK_BIN) $(TEST_ONLINE_BIN) $(SOCKET_TEST_BIN) $(FPGA_TEST_BIN)

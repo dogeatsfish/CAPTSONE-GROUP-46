@@ -96,6 +96,26 @@ bool recv_exact(int fd, uint8_t* buf, size_t len, double timeout_s) {
     return true;
 }
 
+// Print a received OUCH packet. Raw OUCH is binary and shows up as gibberish on
+// a terminal, so we dump the bytes as hex AND decode them into readable fields.
+void print_ouch_packet(const uint8_t* buf, size_t len) {
+    std::printf("   raw OUCH [%zu B]:", len);
+    for (size_t i = 0; i < len; ++i) std::printf(" %02X", buf[i]);
+    std::printf("\n");
+
+    protocol::OuchResponse r;
+    if (protocol::from_ouch_response(buf, len, r)) {
+        const char* kind = (r.type == protocol::OUCH_EXECUTED) ? "EXECUTED"
+                         : (r.type == protocol::OUCH_ACCEPTED) ? "ACCEPTED"
+                         : "UNKNOWN";
+        std::printf("   decoded: type=%s('%c')  order_id=%llu  size=%.4f  price=%.4f\n",
+                    kind, (r.type ? r.type : '?'),
+                    static_cast<unsigned long long>(r.order_id), r.size, r.price);
+    } else {
+        std::printf("   decoded: <unrecognised OUCH response frame>\n");
+    }
+}
+
 // Send one OUCH ENTER order and return its decoded response.
 bool send_and_recv(int fd, uint64_t id, char side, double price, double size,
                    protocol::OuchResponse& out) {
@@ -112,13 +132,14 @@ bool send_and_recv(int fd, uint64_t id, char side, double price, double size,
         std::cerr << "FAIL: no OUCH response for id=" << id << "\n";
         return false;
     }
+
+    // Print every OUCH packet we receive, raw + decoded.
+    print_ouch_packet(resp, sizeof(resp));
+
     if (!protocol::from_ouch_response(resp, sizeof(resp), out)) {
         std::cerr << "FAIL: bad OUCH response for id=" << id << "\n";
         return false;
     }
-    std::cout << "<- OUCH " << (out.type == protocol::OUCH_EXECUTED ? "EXECUTED" : "ACCEPTED")
-              << " id=" << out.order_id << " size=" << out.size
-              << " price=" << out.price << "\n";
     return true;
 }
 
@@ -174,11 +195,14 @@ int main(int argc, char* argv[]) {
     });
 
     OnlineSimulation::Config cfg;
-    cfg.itch_address   = itch_address;
-    cfg.ouch_transport = OnlineSimulation::OuchTransport::TCP;
+    cfg.itch_address = "127.0.0.1"; // loopback: the ITCH subscriber binds here
     cfg.itch_port  = ITCH_PORT;
     cfg.ouch_port  = OUCH_PORT;
-    cfg.time_scale = ini.get_double("time_scale", 1.0);
+    cfg.time_scale = 1.0; // real time; the 100-order ladder streams over ~5s
+    // This test's OUCH client is a TCP stream client (connect/send/recv), so
+    // run the engine's order-entry server in TCP mode. (The engine defaults to
+    // UDP to match the FPGA; see online_simulation.h.)
+    cfg.ouch_transport = OnlineSimulation::OuchTransport::TCP;
 
     OnlineSimulation sim(market_book, cfg);
 
