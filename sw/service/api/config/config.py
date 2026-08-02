@@ -56,7 +56,7 @@ ONLINE_ITCH_PORT = 50001
 ONLINE_OUCH_PORT = 50001
 # Wall-clock pacing factor used when the request does not specify one.
 # 0.0 = no pacing (return as fast as possible); 1.0 = true real time.
-ONLINE_DEFAULT_TIME_SCALE = 0.0
+ONLINE_DEFAULT_TIME_SCALE = 1.0
 
 # Pacing for the streaming endpoint. The engine samples PnL once per SIMULATED
 # second, so a factor of 1.0 (true real time) would make telemetry arrive at
