@@ -16,8 +16,7 @@ vivado/*.hw/
 vivado/*.ip_user_files/
 vivado/*.sim/
 vivado/report_*
-vivado/capstone_g46/* 
-# Owen capstone folder
+
 
 # Simulation
 sim/obj*
@@ -58,3 +57,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Owen Specific Stuff
+vivado/capstone_g46/* 
+.agents/*
