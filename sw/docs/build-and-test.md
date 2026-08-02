@@ -118,6 +118,9 @@ Builds `online_run` and streams a short 10-order book at the real FPGA
 the host↔FPGA link is already set up — see `docs/connection-test.md`, which
 this is the quick/checked-in version of step 4's manual command.
 
+Same override pattern as `test-online`/`socket-test`: point it at a different
+`.ini` with `HW_SMOKE_CONFIG=...` instead of editing the Makefile.
+
 ## Building the Python module — macOS vs Linux
 
 This is the one target that differs by platform. The `pymodule` recipe uses the

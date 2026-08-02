@@ -166,9 +166,13 @@ flood-test: $(SOCKET_TEST_SRCS) $(GEN_TEST_DATASETS)
 # the real FPGA over UDP/192.168.0.1 and relies on tcpdump/the activity LED
 # to confirm OUCH responses (see docs/connection-test.md step 4). Needs the
 # host <-> FPGA link already configured; this only builds/runs online_run.
+# Override with HW_SMOKE_CONFIG=... to run against a different .ini (same
+# override pattern as SOCKET_TEST_CONFIG/TEST_ONLINE_CONFIG above).
+HW_SMOKE_CONFIG ?= tests/config/hardware_smoke.ini
+
 hw-smoke-test: $(ONLINE_TARGET) $(GEN_TEST_DATASETS)
 	$(PY) $(GEN_TEST_DATASETS)
-	./$(ONLINE_TARGET) tests/config/hardware_smoke.ini
+	./$(ONLINE_TARGET) $(HW_SMOKE_CONFIG)
 
 # ---------------------------------------------------------
 # FPGA hardware test (real board over Ethernet)
