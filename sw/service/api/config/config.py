@@ -27,7 +27,9 @@ COMPILE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
 # from the submitted on_market_update body; override via env var if it isn't
 # on PATH.
 CXX_BIN = os.environ.get("CXX_BIN", "g++")
-STRATEGY_JOB_TEMPLATE = ENGINE_DIR / "simulation" / "src" / "user_strategy.job_template.cpp"
+STRATEGY_JOB_TEMPLATE = (
+    ENGINE_DIR / "simulation" / "src" / "user_strategy.job_template.cpp"
+)
 STRATEGY_MAIN_JOB_SRC = ENGINE_DIR / "simulation" / "src" / "main_job.cpp"
 # Wall-clock caps on the compile and run subprocesses (basic isolation tier --
 # same trust model as the Vivado CompileJob above, not a container sandbox).
@@ -41,16 +43,20 @@ DB_PATH = Path(os.environ.get("CT_DB_PATH", str(SERVICE_ROOT / "commontrader.db"
 
 # --- Online (real-time) simulation transport (server-side ONLY) ---
 # The online simulation broadcasts market data over a UDP (ITCH) socket and
-# accepts order entry over a TCP (OUCH) socket. These are internal transport
+# accepts order entry over an OUCH socket. These are internal transport
 # details of the C++ engine and are deliberately NOT surfaced in any API
 # request/response schema, so front-end clients never deal with sockets,
 # hosts, or ports. Adjust here if the ports collide with something else.
-ONLINE_ITCH_ADDRESS = "127.0.0.1"
-ONLINE_ITCH_PORT = 26000
-ONLINE_OUCH_PORT = 26001
+#
+# These are the FPGA hardware defaults: ITCH market data is unicast to the
+# board at 192.168.0.1:50001 (the RTL's SRC_IP), and OUCH order entry is
+# received over UDP on the same port to match the FPGA's OUCH DST_PORT.
+ONLINE_ITCH_ADDRESS = "192.168.0.1"
+ONLINE_ITCH_PORT = 50001
+ONLINE_OUCH_PORT = 50001
 # Wall-clock pacing factor used when the request does not specify one.
 # 0.0 = no pacing (return as fast as possible); 1.0 = true real time.
-ONLINE_DEFAULT_TIME_SCALE = 0.0
+ONLINE_DEFAULT_TIME_SCALE = 1.0
 
 # Pacing for the streaming endpoint. The engine samples PnL once per SIMULATED
 # second, so a factor of 1.0 (true real time) would make telemetry arrive at

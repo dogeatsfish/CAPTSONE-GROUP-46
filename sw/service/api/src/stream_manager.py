@@ -69,6 +69,7 @@ def build_online_config() -> Any:
     cfg.itch_address = ONLINE_ITCH_ADDRESS
     cfg.itch_port = ONLINE_ITCH_PORT
     cfg.ouch_port = ONLINE_OUCH_PORT
+    cfg.ouch_transport = engine_sim.OuchTransport.UDP  # matches the FPGA
     cfg.time_scale = ONLINE_STREAM_TIME_SCALE  # ~1 telemetry event / wall-clock sec
     return cfg
 
