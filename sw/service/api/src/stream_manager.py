@@ -117,11 +117,23 @@ class StreamSession:
         never started) or has already finished. run() unwinds through its
         normal end-of-file path either way, so the client still gets a
         regular "complete" event with whatever was collected so far.
-        Returns whether there was a live engine to stop.
+        Returns whether an early stop was actually requested.
+
+        Called unconditionally from event_stream()'s cleanup path (every run,
+        not just an explicit Stop click), so a stale engine_sim build built
+        before OnlineSimulation.stop() existed must not crash the stream --
+        rebuild via `make pymodule` in sw/engine to pick up the new binding.
         """
         if self._engine is None:
             return False
-        self._engine.stop()
+        stop_fn = getattr(self._engine, "stop", None)
+        if stop_fn is None:
+            logging.getLogger(__name__).warning(
+                "engine_sim.OnlineSimulation has no stop() -- rebuild engine_sim "
+                "(make pymodule in sw/engine) to support stopping a run early"
+            )
+            return False
+        stop_fn()
         return True
 
     # --- runs on the engine's daemon thread -------------------------------
