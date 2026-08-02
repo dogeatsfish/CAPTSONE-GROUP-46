@@ -47,12 +47,14 @@ module commontrader_top_tb
   //--------------------------------------------------------------------------
   // Clocks / reset
   //--------------------------------------------------------------------------
-  logic sys_clk;
+  logic sys_clk_p;
+  logic sys_clk_n;
   logic sys_rst_n;
   logic rgmii_rx_clk;
 
-  initial sys_clk = 1'b0;
-  always #5 sys_clk = ~sys_clk;             // 100 MHz, unused by the datapath
+  initial sys_clk_p = 1'b0;
+  always #2.5 sys_clk_p = ~sys_clk_p;       // 200 MHz differential clock
+  assign sys_clk_n = ~sys_clk_p;
 
   initial rgmii_rx_clk = 1'b0;
   always #4 rgmii_rx_clk = ~rgmii_rx_clk;   // 125 MHz RGMII
@@ -72,7 +74,8 @@ module commontrader_top_tb
   logic        ts_wrapped;
 
   commontrader_top dut (
-    .sys_clk          (sys_clk),
+    .sys_clk_p        (sys_clk_p),
+    .sys_clk_n        (sys_clk_n),
     .sys_rst_n        (sys_rst_n),
     .rgmii_rx_clk     (rgmii_rx_clk),
     .rgmii_rxd        (rgmii_rxd),
@@ -447,9 +450,10 @@ module commontrader_top_tb
     rgmii_rx_ctl     = 1'b0;
     hw_kill_switch_n = 1'b1;   // active-low: idle high = kill NOT asserted
 
-    repeat (20) @(posedge rgmii_rx_clk);
+    #6_000_000;
     sys_rst_n = 1'b1;
-    repeat (40) @(posedge rgmii_rx_clk);   // MMCM lock + reset release
+    wait(dut.core_rst_n);
+    @(posedge dut.core_clk);
 
     //------------------------------------------------------------------------
     $display("\n[T1] Reset and idle");
@@ -591,7 +595,7 @@ module commontrader_top_tb
   // Global watchdog
   //--------------------------------------------------------------------------
   initial begin
-    #200_000;
+    #200_000_000;
     $display("  [FAIL] watchdog timeout -- the chip stopped making progress");
     $display("  commontrader_top_tb : %0d checks, %0d failures", checks, errors + 1);
     $display("  RESULT: TIMEOUT");
