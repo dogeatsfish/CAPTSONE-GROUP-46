@@ -61,3 +61,6 @@ Thumbs.db
 # Owen Specific Stuff
 vivado/capstone_g46/* 
 .agents/*
+
+# Executables
+*.exe
