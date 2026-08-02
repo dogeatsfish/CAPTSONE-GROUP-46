@@ -61,12 +61,14 @@ ONLINE_OUCH_PORT = 50001
 ONLINE_DEFAULT_TIME_SCALE = 1.0
 
 # --- Live streaming demo (UI "Online mode", /simulate/online/stream) ---
-# This is a software-only live view for the browser -- it never talks to real
-# hardware -- so it deliberately does NOT use the FPGA addressing above.
-# Sending UDP to a real device's unicast IP (192.168.0.1) with no such host
-# actually reachable can stall per-packet on ARP resolution depending on the
-# host's network config (observed under WSL2), which made the "live" demo
-# look hung rather than just slow. Loopback avoids that entirely.
+# This is the LOOPBACK half of that endpoint's config (SimulationRequest.
+# online_target picks between this and the FPGA addressing above; see
+# stream_manager.build_online_config). Deliberately separate from the FPGA
+# addressing: sending UDP to a real device's unicast IP (192.168.0.1) with no
+# such host actually reachable can stall per-packet on ARP resolution
+# depending on the host's network config (observed under WSL2), which made
+# the "live" demo look hung rather than just slow whenever nothing was
+# plugged in. Loopback avoids that entirely, and is the default.
 ONLINE_STREAM_ITCH_ADDRESS = "127.0.0.1"
 ONLINE_STREAM_ITCH_PORT = 26000
 ONLINE_STREAM_OUCH_PORT = 26001

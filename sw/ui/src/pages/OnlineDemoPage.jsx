@@ -38,7 +38,17 @@ export default function OnlineDemoPage() {
     // Blotter still only populates once the full result lands.
     const onStreamEvent = useCallback((evt) => {
         if (evt.type === "pnl") {
-            setTopOfBook({ bestBid: evt.best_bid, bestAsk: evt.best_ask });
+            // Hold each side's last known value instead of overwriting both
+            // on every sample: this dataset's book is thin and routinely
+            // one-sided at any given instant (best_bid/best_ask legitimately
+            // read 0 when nothing rests on that side right then), so blindly
+            // replacing both fields every time made a real, still-resting
+            // quote flash briefly then blank out the moment the *other*
+            // side's momentary zero came through.
+            setTopOfBook((prev) => ({
+                bestBid: evt.best_bid > 0 ? evt.best_bid : prev?.bestBid,
+                bestAsk: evt.best_ask > 0 ? evt.best_ask : prev?.bestAsk,
+            }));
             setLiveCurve((prev) => [
                 ...prev,
                 {
@@ -115,6 +125,21 @@ export default function OnlineDemoPage() {
     // then, show what's streamed in live.
     const pnlCurve = isOnline ? streamResult?.pnl_curve ?? liveCurve : blocking.result?.pnl_curve ?? [];
 
+    // A hardware run can go for minutes (or, at real-time pacing, hours)
+    // before "complete" ever arrives, so Final Results would otherwise sit
+    // on "--" the whole time even though real PnL is accruing. Derive a
+    // live approximation of just final_pnl from the latest streamed sample
+    // -- the rest (drawdown/Sharpe/volatility/throughput) genuinely need the
+    // full curve to mean anything, so those stay blank until the real
+    // server-computed metrics land; fmtCurrency/fmtNumber already render
+    // undefined as "--", so a partial object here is safe to pass through.
+    const lastLiveSample = liveCurve.length > 0 ? liveCurve[liveCurve.length - 1] : null;
+    const liveMetrics =
+        isOnline && running && lastLiveSample
+            ? { final_pnl: lastLiveSample.realized_pnl + lastLiveSample.unrealized_pnl }
+            : null;
+    const metrics = result?.metrics ?? liveMetrics;
+
     return (
         <div>
             <Header status={status} />
@@ -147,7 +172,7 @@ export default function OnlineDemoPage() {
                 <OuchPacketLog packets={ouchPackets} />
             )}
 
-            <ResultsSummary metrics={result?.metrics} />
+            <ResultsSummary metrics={metrics} />
 
             <div className="market-grid">
                 <PnLChart pnlCurve={pnlCurve} />
