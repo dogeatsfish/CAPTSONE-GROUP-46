@@ -92,7 +92,7 @@ def _to_response(data_file: Path, result, req) -> SimulationResponse:
         )
         for p in result.pnl_curve
     ]
-    metrics = compute_summary_metrics(full_pnl_curve, result.compute_time_us)
+    metrics = compute_summary_metrics(full_pnl_curve, result.compute_time_us, result.total_trades)
 
     trades = apply_limit(result.trades, req.trade_limit)
     pnl_curve = apply_limit(full_pnl_curve, req.pnl_limit)
