@@ -105,11 +105,12 @@ PYBIND11_MODULE(engine_sim, m) {
                  // GIL is released.
                  OnlineSimulation::SampleCallback hook;
                  if (!callback.is_none()) {
-                     hook = [&callback](const PnLSnapshot& s) {
+                     hook = [&callback](const PnLSnapshot& s, const L1State& l1) {
                          py::gil_scoped_acquire gil;
                          try {
                              callback(s.timestamp_ns, s.realized_pnl,
-                                      s.unrealized_pnl, s.position_size);
+                                      s.unrealized_pnl, s.position_size,
+                                      l1.best_bid, l1.best_ask);
                          } catch (const py::error_already_set&) {
                              // Never let a Python exception unwind into C++.
                              PyErr_Clear();
@@ -126,6 +127,6 @@ PYBIND11_MODULE(engine_sim, m) {
              "Broadcast ITCH market data in real time while serving OUCH order "
              "entry. If a callback is given, it is called once per simulated "
              "second as callback(timestamp_ns, realized_pnl, unrealized_pnl, "
-             "position_size). Returns a SimulationResult.");
+             "position_size, best_bid, best_ask). Returns a SimulationResult.");
 #endif  // CT_NO_ONLINE_SIM
 }

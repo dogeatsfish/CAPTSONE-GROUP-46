@@ -125,6 +125,7 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
     // under the lock but the telemetry callback is invoked afterwards, without
     // the lock held, so a slow consumer can never stall the OUCH thread.
     std::optional<PnLSnapshot> sampled;
+    L1State l1; // read under the lock below, used for the callback outside it
 
     {
         std::lock_guard<std::mutex> lock(book_mutex);
@@ -138,7 +139,7 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
             matching_engine.process_cancel(rec.order_id, rec.side);
         }
 
-        const L1State l1 = matching_engine.get_l1_state();
+        l1 = matching_engine.get_l1_state();
 
         // 3. Sample the PnL curve once per simulated second.
         if (ts >= next_sample_ns) {
@@ -158,7 +159,7 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
 
     // 4. Stream the sample to any live-telemetry consumer (outside the lock).
     if (sampled && on_sample_cb) {
-        on_sample_cb(*sampled);
+        on_sample_cb(*sampled, l1);
     }
 }
 

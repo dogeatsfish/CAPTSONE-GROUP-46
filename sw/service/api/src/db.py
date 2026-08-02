@@ -12,8 +12,9 @@ per completed run, its executed trades, and its PnL samples -- and leaves
 book_snapshots/orders/order_events as a follow-up tracked in TODO.md.
 
 Wired into the blocking /simulate and /simulate/online endpoints in
-routes.py only. Deliberately NOT wired into the SSE streaming path
-(stream_manager.py) yet, to avoid conflicting with in-progress work there.
+routes.py, and into the SSE streaming path (stream_manager.py) -- a run is
+logged once the engine thread finishes, same best-effort pattern in both
+places.
 """
 
 from __future__ import annotations
