@@ -56,6 +56,22 @@ module clk_rst_gen #(
   //--------------------------------------------------------------------------
 `ifdef SYNTHESIS
   logic clk_fb, clkout0, core_clk_unbuf;
+  logic [19:0] phy_clk_ready_cnt = '0;
+  logic mmcm_rst_sync;
+
+  always_ff @(posedge rgmii_rx_clk or negedge sys_rst_n) begin
+    if (!sys_rst_n) begin
+      phy_clk_ready_cnt <= '0;
+      mmcm_rst_sync     <= 1'b1;
+    end else begin
+      if (phy_clk_ready_cnt < 20'd125_000) begin
+        phy_clk_ready_cnt <= phy_clk_ready_cnt + 1;
+        mmcm_rst_sync     <= 1'b1;
+      end else begin
+        mmcm_rst_sync     <= 1'b0;
+      end
+    end
+  end
 
   MMCME2_BASE #(
     .CLKIN1_PERIOD    (8.0),    // 125 MHz
@@ -70,7 +86,7 @@ module clk_rst_gen #(
     .CLKOUT0  (core_clk_unbuf),
     .LOCKED   (mmcm_locked),
     .PWRDWN   (1'b0),
-    .RST      (~sys_rst_n)
+    .RST      (~sys_rst_n | mmcm_rst_sync)
   );
 
   BUFG u_bufg_core (.I(core_clk_unbuf), .O(core_clk));
