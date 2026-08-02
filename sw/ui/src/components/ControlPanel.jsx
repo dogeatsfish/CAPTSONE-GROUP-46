@@ -14,6 +14,7 @@ export default function ControlPanel({
     running,
     onRun,
     canRun,
+    onStop, // optional -- only modes that can actually be interrupted wire this (online)
 }) {
     return (
         <div className="panel controls-panel">
@@ -32,6 +33,11 @@ export default function ControlPanel({
                 <button onClick={onRun} disabled={running || !canRun}>
                     {running ? "Running…" : "Run Simulation"}
                 </button>
+                {onStop && (
+                    <button type="button" className="danger" onClick={onStop} disabled={!running}>
+                        Stop Simulation
+                    </button>
+                )}
             </div>
         </div>
     );

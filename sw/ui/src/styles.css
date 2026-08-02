@@ -162,6 +162,12 @@ button.secondary {
     border: 1px solid var(--rule);
 }
 
+button.danger {
+    color: var(--ask);
+    background: var(--ask-dim);
+    border: 1px solid rgba(251, 146, 60, 0.35);
+}
+
 /* ---------------------------------------------------------
    Status indicator
    --------------------------------------------------------- */

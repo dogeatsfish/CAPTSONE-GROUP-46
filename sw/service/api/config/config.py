@@ -50,7 +50,9 @@ DB_PATH = Path(os.environ.get("CT_DB_PATH", str(SERVICE_ROOT / "commontrader.db"
 #
 # These are the FPGA hardware defaults: ITCH market data is unicast to the
 # board at 192.168.0.1:50001 (the RTL's SRC_IP), and OUCH order entry is
-# received over UDP on the same port to match the FPGA's OUCH DST_PORT.
+# received over UDP on the same port to match the FPGA's OUCH DST_PORT. Used
+# by the blocking /simulate/online endpoint and the hardware test targets --
+# anything meant to actually reach the board.
 ONLINE_ITCH_ADDRESS = "192.168.0.1"
 ONLINE_ITCH_PORT = 50001
 ONLINE_OUCH_PORT = 50001
@@ -58,15 +60,27 @@ ONLINE_OUCH_PORT = 50001
 # 0.0 = no pacing (return as fast as possible); 1.0 = true real time.
 ONLINE_DEFAULT_TIME_SCALE = 1.0
 
+# --- Live streaming demo (UI "Online mode", /simulate/online/stream) ---
+# This is a software-only live view for the browser -- it never talks to real
+# hardware -- so it deliberately does NOT use the FPGA addressing above.
+# Sending UDP to a real device's unicast IP (192.168.0.1) with no such host
+# actually reachable can stall per-packet on ARP resolution depending on the
+# host's network config (observed under WSL2), which made the "live" demo
+# look hung rather than just slow. Loopback avoids that entirely.
+ONLINE_STREAM_ITCH_ADDRESS = "127.0.0.1"
+ONLINE_STREAM_ITCH_PORT = 26000
+ONLINE_STREAM_OUCH_PORT = 26001
+
 # Pacing for the streaming endpoint. The engine samples PnL once per SIMULATED
 # second, so a factor of 1.0 (true real time) would make telemetry arrive at
 # roughly one event per wall-clock second -- but the bundled dataset's replay
 # spans ~19,200 simulated seconds (~5.3 real hours) and the default strategy
 # stays flat for most of that before its PnL moves late in the replay, so 1.0
-# makes the live demo look inert for a very long time. 0.005 (~200x) finishes
-# the full replay in well under two minutes while still streaming visibly
-# rather than jumping straight to the end.
-ONLINE_STREAM_TIME_SCALE = 0.005
+# makes the live demo look inert for a very long time. 0.001 (~1000x) finishes
+# the full replay in well under 30s while still streaming visibly rather than
+# jumping straight to the end -- use the new stop endpoint (see routes.py) if
+# even that's more than you want to sit through.
+ONLINE_STREAM_TIME_SCALE = 0.001
 
 # Make the schema modules and the compiled engine importable.
 for _path in (INCLUDE_DIR, ENGINE_DIR):

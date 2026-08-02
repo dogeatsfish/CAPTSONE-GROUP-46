@@ -78,6 +78,7 @@ export default function OnlineDemoPage() {
                 running={running}
                 onRun={handleRun}
                 canRun={canRun}
+                onStop={isOnline ? streaming.stop : undefined}
             />
 
             {isOnline && (running || topOfBook) && (

@@ -206,6 +206,22 @@ async def online_stream(session_id: str, request: Request):
     )
 
 
+@router.post("/simulate/online/stream/{session_id}/stop", tags=["simulation"])
+def stop_online_stream(session_id: str):
+    """Stop a running online-simulation stream early (the UI's Stop button).
+
+    The engine unwinds through its normal end-of-file cleanup path and the
+    SSE stream still ends with a regular "complete" event, just with
+    whatever trades/telemetry were collected before the stop. A no-op --
+    not an error -- if the run already finished or the session is unknown,
+    since a client racing its own completion event against a stop click is
+    normal, not exceptional.
+    """
+    session = stream_manager.get(session_id)
+    stopped = session.stop() if session is not None else False
+    return {"stopped": stopped}
+
+
 @router.get("/datasets", tags=["simulation"])
 def list_datasets():
     """List the .bin MBO streams available in the bundled data directory."""
