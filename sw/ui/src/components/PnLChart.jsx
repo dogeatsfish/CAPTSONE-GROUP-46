@@ -9,12 +9,12 @@ import {
     ReferenceLine,
     Legend,
 } from "recharts";
-import { elapsedSeconds } from "../utils/format";
+import { elapsedSeconds, fmtCompactCurrency, fmtCurrency, pickElapsedUnit } from "../utils/format";
 
 // pnlCurve: SimulationResponse.pnl_curve, i.e.
 // [{ timestamp_ns, realized_pnl, unrealized_pnl, position_size }, ...]
 export default function PnLChart({ pnlCurve }) {
-    const points = toChartPoints(pnlCurve);
+    const { points, unit } = toChartPoints(pnlCurve);
 
     return (
         <div className="panel">
@@ -29,8 +29,9 @@ export default function PnLChart({ pnlCurve }) {
                             dataKey="t"
                             stroke="#4b5468"
                             tick={{ fontSize: 11, fontFamily: "JetBrains Mono, monospace" }}
+                            tickFormatter={(v) => v.toLocaleString()}
                             label={{
-                                value: "sim seconds",
+                                value: unit.label,
                                 position: "insideBottom",
                                 offset: -4,
                                 fill: "#4b5468",
@@ -40,8 +41,15 @@ export default function PnLChart({ pnlCurve }) {
                         <YAxis
                             stroke="#4b5468"
                             tick={{ fontSize: 11, fontFamily: "JetBrains Mono, monospace" }}
-                            width={76}
-                            tickFormatter={(v) => v.toLocaleString()}
+                            width={64}
+                            tickFormatter={fmtCompactCurrency}
+                            label={{
+                                value: "PnL ($)",
+                                angle: -90,
+                                position: "insideLeft",
+                                fill: "#4b5468",
+                                fontSize: 10,
+                            }}
                         />
                         <Tooltip
                             contentStyle={{
@@ -52,6 +60,8 @@ export default function PnLChart({ pnlCurve }) {
                                 fontSize: 12,
                             }}
                             labelStyle={{ color: "#8792a6" }}
+                            formatter={(value) => fmtCurrency(value)}
+                            labelFormatter={(t) => `${t.toLocaleString()} ${unit.suffix} elapsed`}
                         />
                         <Legend wrapperStyle={{ fontSize: 11, fontFamily: "Space Grotesk, sans-serif" }} />
                         <ReferenceLine y={0} stroke="#4b5468" />
@@ -91,12 +101,18 @@ export default function PnLChart({ pnlCurve }) {
 }
 
 function toChartPoints(pnlCurve) {
-    if (!pnlCurve || pnlCurve.length === 0) return [];
+    if (!pnlCurve || pnlCurve.length === 0) {
+        return { points: [], unit: pickElapsedUnit(0) };
+    }
     const firstTs = pnlCurve[0].timestamp_ns;
-    return pnlCurve.map((p) => ({
-        t: Number(elapsedSeconds(p.timestamp_ns, firstTs).toFixed(2)),
+    const lastTs = pnlCurve[pnlCurve.length - 1].timestamp_ns;
+    const unit = pickElapsedUnit(elapsedSeconds(lastTs, firstTs));
+
+    const points = pnlCurve.map((p) => ({
+        t: Number((elapsedSeconds(p.timestamp_ns, firstTs) / unit.divisor).toFixed(2)),
         realized: p.realized_pnl,
         unrealized: p.unrealized_pnl,
         total: p.realized_pnl + p.unrealized_pnl,
     }));
+    return { points, unit };
 }
