@@ -14,10 +14,10 @@ import {
 // Colors here reuse styles.css's :root custom properties -- SVG/Recharts
 // props accept var(...) directly, so there's no need to hardcode hex that
 // could silently drift from the theme.
-const GRID = "var(--border)";
-const AXIS = "var(--muted)";
+const GRID = "var(--rule)";
+const AXIS = "var(--dim)";
 const TOOLTIP_BG = "var(--panel)";
-const ZERO_LINE = "#3a4459"; // one-off shade, no matching token
+const ZERO_LINE = "var(--faint)";
 
 // Shared PnL/position chart pair. `points` is an array of
 // { t, realized, unrealized, total, position } -- see App.jsx's runOnline
@@ -45,7 +45,7 @@ export default function PnlCharts({ points }) {
                         />
                         <Legend wrapperStyle={{ fontSize: 12 }} />
                         <ReferenceLine y={0} stroke={ZERO_LINE} />
-                        <Line type="monotone" dataKey="realized" name="Realized" stroke="var(--accent)" dot={false} isAnimationActive={false} strokeWidth={2} />
+                        <Line type="monotone" dataKey="realized" name="Realized" stroke="var(--trace)" dot={false} isAnimationActive={false} strokeWidth={2} />
                         <Line type="monotone" dataKey="unrealized" name="Unrealized" stroke="var(--amber)" dot={false} isAnimationActive={false} strokeWidth={2} />
                     </LineChart>
                 </ResponsiveContainer>
@@ -63,7 +63,7 @@ export default function PnlCharts({ points }) {
                             labelStyle={{ color: AXIS }}
                         />
                         <ReferenceLine y={0} stroke={ZERO_LINE} />
-                        <Line type="stepAfter" dataKey="position" name="Position" stroke="var(--green)" dot={false} isAnimationActive={false} strokeWidth={2} />
+                        <Line type="stepAfter" dataKey="position" name="Position" stroke="var(--bid)" dot={false} isAnimationActive={false} strokeWidth={2} />
                     </LineChart>
                 </ResponsiveContainer>
             </div>
