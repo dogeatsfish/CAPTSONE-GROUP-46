@@ -1,0 +1,30 @@
+# Convenience wrapper around `docker build`/`docker run` -- see sw/Dockerfile
+# for what's actually in the image and why (engine + service only; not
+# rtl/vivado). Run from the sw/ directory:
+#
+#   docker compose up --build
+#
+# The API is then reachable at http://127.0.0.1:8000, which is exactly what
+# sw/ui/vite.config.js's dev-server proxy already targets -- run the UI
+# natively (npm run dev in sw/ui/) alongside this and it just works.
+#
+# Note: /compile (the Vivado OOC-synthesis endpoint) will fail inside this
+# container -- Vivado isn't installed here and isn't meant to be (see the
+# scope note in sw/Dockerfile). Run the FastAPI service natively instead if
+# you need to exercise /compile.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      # Points config.py's DB_PATH at the mounted volume below instead of
+      # inside the code tree, so it survives image rebuilds.
+      CT_DB_PATH: /app/data/commontrader.db
+    volumes:
+      - commontrader-data:/app/data
+
+volumes:
+  commontrader-data:

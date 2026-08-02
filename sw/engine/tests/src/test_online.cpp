@@ -20,6 +20,7 @@
 #include "online_simulation.h"
 #include "offline_simulation.h" // MBORecord (layout reference)
 #include "protocol.h"
+#include "ini_config.h"
 
 #include <atomic>
 #include <chrono>
@@ -38,12 +39,10 @@
 
 namespace {
 
-const char*        MARKET_BOOK = "tests/data/market_ladder.bin";
-constexpr uint16_t ITCH_PORT   = 27100;
-constexpr uint16_t OUCH_PORT   = 27101;
+const char* DEFAULT_CONFIG_PATH = "tests/config/test_online.ini";
 
 // Bind a UDP socket to receive the ITCH broadcast. Returns -1 on failure.
-int open_itch_subscriber(uint16_t port) {
+int open_itch_subscriber(const std::string& address, uint16_t port) {
     const int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0) return -1;
 
@@ -55,7 +54,7 @@ int open_itch_subscriber(uint16_t port) {
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port   = htons(port);
-    ::inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    ::inet_pton(AF_INET, address.c_str(), &addr.sin_addr);
 
     if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
         ::close(fd);
@@ -64,6 +63,8 @@ int open_itch_subscriber(uint16_t port) {
     return fd;
 }
 
+// Connects into the OnlineSimulation's OUCH listener, which always binds
+// 0.0.0.0:port -- so this is loopback regardless of cfg.itch_address.
 int connect_ouch(uint16_t port) {
     const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return -1;
@@ -144,15 +145,35 @@ bool send_and_recv(int fd, uint64_t id, char side, double price, double size,
 
 } // namespace
 
-int main() {
+int main(int argc, char* argv[]) {
     std::cout << "=== OnlineSimulation end-to-end test ===\n";
 
-    std::cout << "Market data: " << MARKET_BOOK << " (100 bid adds, 100.00 step +0.05)\n";
+    const std::string config_path = argc > 1 ? argv[1] : DEFAULT_CONFIG_PATH;
+    IniConfig ini;
+    if (!ini.load(config_path)) return 1;
+
+    const std::string itch_address = ini.get_string("itch_address", "127.0.0.1");
+    const uint16_t     ITCH_PORT   = ini.get_port("itch_port", 27100);
+    const uint16_t     OUCH_PORT   = ini.get_port("ouch_port", 27101);
+    const std::string ouch_transport = ini.get_string("ouch_transport", "tcp");
+    const std::string market_book  = ini.get_string("market_book", "tests/data/market_ladder.bin");
+
+    // The OUCH client below only speaks TCP; catch a udp-configured .ini here
+    // instead of silently hanging on connect_ouch().
+    if (ouch_transport != "tcp") {
+        std::cerr << "FAIL: " << config_path << " sets ouch_transport=" << ouch_transport
+                  << ", but this test's OUCH client only supports TCP\n";
+        return 1;
+    }
+
+    std::cout << "Config: " << config_path << "\n";
+    std::cout << "Market data: " << market_book << " (100 bid adds, 100.00 step +0.05)\n";
 
     // --- Subscribe to the ITCH broadcast BEFORE the simulation runs ---
-    const int itch_fd = open_itch_subscriber(ITCH_PORT);
+    const int itch_fd = open_itch_subscriber(itch_address, ITCH_PORT);
     if (itch_fd < 0) {
-        std::cerr << "FAIL: could not bind ITCH subscriber on port " << ITCH_PORT << "\n";
+        std::cerr << "FAIL: could not bind ITCH subscriber on " << itch_address
+                  << ":" << ITCH_PORT << "\n";
         return 1;
     }
 
@@ -183,7 +204,7 @@ int main() {
     // UDP to match the FPGA; see online_simulation.h.)
     cfg.ouch_transport = OnlineSimulation::OuchTransport::TCP;
 
-    OnlineSimulation sim(MARKET_BOOK, cfg);
+    OnlineSimulation sim(market_book, cfg);
 
     SimulationResult result;
     std::thread sim_thread([&]() { result = sim.run(); });

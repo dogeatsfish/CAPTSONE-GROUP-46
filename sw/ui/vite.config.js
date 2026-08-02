@@ -13,6 +13,8 @@ export default defineConfig({
         proxy: {
             "/simulate": { target: API_TARGET, changeOrigin: true },
             "/datasets": { target: API_TARGET, changeOrigin: true },
+            "/compile": { target: API_TARGET, changeOrigin: true },
+            "/runs": { target: API_TARGET, changeOrigin: true },
         },
     },
 });

@@ -243,6 +243,13 @@ button.secondary {
     line-height: 1.6;
 }
 
+.hint code {
+    color: var(--paper);
+    background: var(--panel-raised);
+    border-radius: 3px;
+    padding: 1px 5px;
+}
+
 .error-text {
     color: var(--ask);
 }
@@ -569,4 +576,97 @@ button.secondary {
     .controls-row {
         gap: 18px;
     }
+}
+
+/* ---------------------------------------------------------
+   Top nav: routed pages (Online Simulation / Strategy Compiler)
+   --------------------------------------------------------- */
+
+.top-nav {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 28px;
+    border-bottom: 1px solid var(--rule);
+}
+
+.top-nav a {
+    color: var(--dim);
+    text-decoration: none;
+    font-family: var(--font-display);
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 10px 4px;
+    margin-right: 20px;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.top-nav a:hover {
+    color: var(--paper);
+}
+
+.top-nav a.active {
+    color: var(--paper);
+    border-bottom-color: var(--trace);
+}
+
+/* ---------------------------------------------------------
+   Plain stat-card strip (strategy compiler page)
+   --------------------------------------------------------- */
+
+.cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+/* ---------------------------------------------------------
+   Strategy compiler: code editor, dataset select, run log
+   --------------------------------------------------------- */
+
+.code-editor {
+    width: 100%;
+    background: var(--panel-raised);
+    color: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 12px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    resize: vertical;
+}
+
+.code-editor:disabled {
+    opacity: 0.6;
+}
+
+select {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--paper);
+    background: var(--panel-raised);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 8px 10px;
+}
+
+select:disabled {
+    opacity: 0.5;
+}
+
+.log-panel {
+    max-height: 240px;
+    overflow-y: auto;
+    background: var(--ink);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--dim);
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
 }

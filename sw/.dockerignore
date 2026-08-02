@@ -1,0 +1,33 @@
+# Host-built extension modules -- the builder stage compiles its own inside
+# the image; a stale host .so/.pyd copied in would silently shadow it.
+engine/engine_sim*.so
+engine/engine_sim*.pyd
+
+# Native CLI binaries / object files, not needed by the service image.
+engine/simulation_run
+engine/online_run
+engine/tests/src/stress_orderbook
+engine/tests/src/test_online
+engine/tests/src/socket_test
+**/*.o
+
+# Per-job compile workspaces and the sqlite db -- runtime state, not build
+# input (see config.py CT_DB_PATH / COMPILE_JOBS_DIR).
+service/compiler_jobs/
+service/*.db
+service/*.db-wal
+service/*.db-shm
+
+# UI isn't part of this image (see sw/Dockerfile's scope note) and Node
+# modules are large and irrelevant here regardless.
+ui/node_modules/
+ui/dist/
+ui/build/
+
+# Python/general cruft.
+**/__pycache__/
+**/*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.git/

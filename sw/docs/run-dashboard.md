@@ -77,11 +77,17 @@ curl http://127.0.0.1:8000/datasets
 npm run dev
 ```
 
-Open `http://localhost:5173`. The Vite dev server proxies `/simulate` and
-`/datasets` to the API on port 8000 (see `vite.config.js`), so the two just
-need to both be running — no CORS setup required.
+Open `http://localhost:5173`. The Vite dev server proxies `/simulate`,
+`/datasets`, `/compile`, and `/runs` to the API on port 8000 (see
+`vite.config.js`), so the two just need to both be running — no CORS setup
+required.
 
 ## Using the dashboard
+
+The top nav switches between two routed pages: **Online Simulation** (this
+dashboard) and **Strategy Compiler** (edit `on_market_update`, compile it to a
+native binary, and run it against a dataset — see the in-page instructions
+there).
 
 1. **Mode** — `Offline` runs `engine_sim.OfflineSimulation` end to end.
    `Online` runs `engine_sim.OnlineSimulation` over the engine's internal
