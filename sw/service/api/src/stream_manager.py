@@ -35,6 +35,10 @@ from typing import Any, AsyncIterator, Dict, Optional
 
 import db
 from config import (
+    ONLINE_DEFAULT_TIME_SCALE,
+    ONLINE_ITCH_ADDRESS,
+    ONLINE_ITCH_PORT,
+    ONLINE_OUCH_PORT,
     ONLINE_STREAM_ITCH_ADDRESS,
     ONLINE_STREAM_ITCH_PORT,
     ONLINE_STREAM_OUCH_PORT,
@@ -60,19 +64,31 @@ _POLL_INTERVAL_S = 0.1
 _KEEPALIVE_TICKS = 100
 
 
-def build_online_config() -> Any:
+def build_online_config(target: str = "loopback") -> Any:
     """Build the server-side engine transport/pacing config for a stream run.
 
-    Loopback, not the FPGA hardware addressing -- this is a software-only
-    live view for the browser (see the config.py comment on
-    ONLINE_STREAM_ITCH_ADDRESS). None of these socket details are ever
-    surfaced to the client.
+    target="loopback" (default): a software-only live view for the browser,
+    isolated from the FPGA hardware addressing -- see the config.py comment
+    on ONLINE_STREAM_ITCH_ADDRESS for why (UDP sendto to a real device with
+    no such host reachable can stall per-packet on ARP resolution).
+    target="hardware": the real board, same addressing/pacing as the
+    blocking /simulate/online endpoint and the hw-smoke-test/fpga-test
+    targets.
+
+    None of these socket details are ever surfaced to the client -- it only
+    ever sees "loopback" vs "hardware" (SimulationRequest.online_target).
     """
     cfg = engine_sim.OnlineConfig()
-    cfg.itch_address = ONLINE_STREAM_ITCH_ADDRESS
-    cfg.itch_port = ONLINE_STREAM_ITCH_PORT
-    cfg.ouch_port = ONLINE_STREAM_OUCH_PORT
-    cfg.time_scale = ONLINE_STREAM_TIME_SCALE
+    if target == "hardware":
+        cfg.itch_address = ONLINE_ITCH_ADDRESS
+        cfg.itch_port = ONLINE_ITCH_PORT
+        cfg.ouch_port = ONLINE_OUCH_PORT
+        cfg.time_scale = ONLINE_DEFAULT_TIME_SCALE
+    else:
+        cfg.itch_address = ONLINE_STREAM_ITCH_ADDRESS
+        cfg.itch_port = ONLINE_STREAM_ITCH_PORT
+        cfg.ouch_port = ONLINE_STREAM_OUCH_PORT
+        cfg.time_scale = ONLINE_STREAM_TIME_SCALE
     return cfg
 
 
@@ -117,11 +133,23 @@ class StreamSession:
         never started) or has already finished. run() unwinds through its
         normal end-of-file path either way, so the client still gets a
         regular "complete" event with whatever was collected so far.
-        Returns whether there was a live engine to stop.
+        Returns whether an early stop was actually requested.
+
+        Called unconditionally from event_stream()'s cleanup path (every run,
+        not just an explicit Stop click), so a stale engine_sim build built
+        before OnlineSimulation.stop() existed must not crash the stream --
+        rebuild via `make pymodule` in sw/engine to pick up the new binding.
         """
         if self._engine is None:
             return False
-        self._engine.stop()
+        stop_fn = getattr(self._engine, "stop", None)
+        if stop_fn is None:
+            logging.getLogger(__name__).warning(
+                "engine_sim.OnlineSimulation has no stop() -- rebuild engine_sim "
+                "(make pymodule in sw/engine) to support stopping a run early"
+            )
+            return False
+        stop_fn()
         return True
 
     # --- runs on the engine's daemon thread -------------------------------

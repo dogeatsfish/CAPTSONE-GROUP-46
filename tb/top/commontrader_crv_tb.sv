@@ -101,10 +101,14 @@ module commontrader_crv_tb
   //--------------------------------------------------------------------------
   // Clocks / reset
   //--------------------------------------------------------------------------
-  logic sys_clk, sys_rst_n, rgmii_rx_clk;
+  logic sys_clk_p;
+  logic sys_clk_n;
+  logic sys_rst_n;
+  logic rgmii_rx_clk;
 
-  initial sys_clk = 1'b0;
-  always #5 sys_clk = ~sys_clk;
+  initial sys_clk_p = 1'b0;
+  always #2.5 sys_clk_p = ~sys_clk_p;       // 200 MHz differential clock
+  assign sys_clk_n = ~sys_clk_p;
 
   initial rgmii_rx_clk = 1'b0;
   always #4 rgmii_rx_clk = ~rgmii_rx_clk;
@@ -123,7 +127,8 @@ module commontrader_crv_tb
   logic        ts_wrapped;
 
   commontrader_top dut (
-    .sys_clk          (sys_clk),
+    .sys_clk_p        (sys_clk_p),
+    .sys_clk_n        (sys_clk_n),
     .sys_rst_n        (sys_rst_n),
     .rgmii_rx_clk     (rgmii_rx_clk),
     .rgmii_rxd        (rgmii_rxd),
@@ -754,9 +759,10 @@ module commontrader_crv_tb
           b_px[a][s][l] = '0; b_qty[a][s][l] = '0;
         end
 
-    repeat (20) @(posedge rgmii_rx_clk);
+    #6_000_000;
     sys_rst_n = 1'b1;
-    repeat (40) @(posedge rgmii_rx_clk);
+    wait(dut.core_rst_n);
+    @(posedge dut.core_clk);
 
     //------------------------------------------------------------------------
     $display("\n[Phase A] mixed random traffic, generous gaps");

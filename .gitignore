@@ -79,10 +79,26 @@ Thumbs.db
 .idea/
 *.swp
 
+# Owen Specific Stuff
+vivado/capstone_g46/* 
+vivado/copy_bitstream.tcl
+.agents/*
+synth.tcl
+
+# Executables
+*.exe
 # AI tooling (local config/session state, not shared repo content)
 .claude/
 .cursor/
+.agents/*
 .github/copilot-instructions.md
 
 # Personal working notes -- not for the shared repo, see TODO.md for that
 NOTES.md
+
+# Owen Specific Stuff
+vivado/copy_bitstream.tcl
+synth.tcl
+
+# Executables
+*.exe
