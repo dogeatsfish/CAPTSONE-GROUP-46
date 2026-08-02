@@ -187,6 +187,7 @@ class StreamSession:
         side: str,
         price: float,
         size: float,
+        ticker: str,
         raw: bytes,
     ) -> None:
         """Fires for every inbound OUCH message -- the real FPGA or a test
@@ -204,6 +205,7 @@ class StreamSession:
                     "side": side,
                     "price": price,
                     "size": size,
+                    "ticker": ticker,
                     "raw_hex": raw.hex(" ").upper(),
                 }
             )

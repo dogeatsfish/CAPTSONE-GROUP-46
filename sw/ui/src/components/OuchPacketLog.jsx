@@ -5,7 +5,7 @@ const MSG_TYPE_LABEL = {
     X: "CANCEL",
 };
 
-// packets: [{ timestamp_ns, msg_type, order_id, side, price, size, raw_hex }, ...]
+// packets: [{ timestamp_ns, msg_type, order_id, side, price, size, ticker, raw_hex }, ...]
 // -- every inbound OUCH packet the engine's OUCH thread has seen (see the
 // "ouch" SSE event in stream_manager.py), independent of whether it produced
 // a fill. Hardware bring-up aid: proves the board is actually sending
@@ -31,6 +31,7 @@ export default function OuchPacketLog({ packets }) {
                             <tr>
                                 <th>Elapsed (s)</th>
                                 <th>Type</th>
+                                <th>Ticker</th>
                                 <th>Order ID</th>
                                 <th>Side</th>
                                 <th>Price</th>
@@ -47,6 +48,7 @@ export default function OuchPacketLog({ packets }) {
                                             {MSG_TYPE_LABEL[p.msg_type] ?? "UNKNOWN"}
                                         </span>
                                     </td>
+                                    <td>{p.ticker ? p.ticker : "—"}</td>
                                     <td>{p.order_id}</td>
                                     <td>{p.side === "B" || p.side === "S" ? p.side : "—"}</td>
                                     <td>{p.msg_type === "O" ? fmtCurrency(p.price) : "—"}</td>

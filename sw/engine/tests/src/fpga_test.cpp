@@ -54,10 +54,11 @@ void print_ouch(size_t index, const protocol::OuchMessage& m,
                      : (m.msg_type == protocol::OUCH_CANCEL) ? "CANCEL"
                      : "UNKNOWN";
     std::printf("          decoded: type=%s('%c')  order_id=%llu  side=%c  "
-                "qty=%.0f  price=%.4f\n",
+                "qty=%.0f  price=%.4f  ticker=%s\n",
                 kind, (m.msg_type ? m.msg_type : '?'),
                 static_cast<unsigned long long>(m.order_id),
-                (m.side ? m.side : '-'), m.size, m.price);
+                (m.side ? m.side : '-'), m.size, m.price,
+                (m.ticker.empty() ? "-" : m.ticker.c_str()));
 }
 
 } // namespace

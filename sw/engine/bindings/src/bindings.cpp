@@ -158,7 +158,7 @@ PYBIND11_MODULE(engine_sim, m) {
                              callback(std::string(1, msg.msg_type ? msg.msg_type : '?'),
                                       msg.order_id,
                                       std::string(1, msg.side ? msg.side : '-'),
-                                      msg.price, msg.size,
+                                      msg.price, msg.size, msg.ticker,
                                       py::bytes(reinterpret_cast<const char*>(raw), len));
                          } catch (const py::error_already_set&) {
                              PyErr_Clear();
@@ -168,7 +168,9 @@ PYBIND11_MODULE(engine_sim, m) {
              py::arg("callback"),
              "Set an observer invoked for every inbound OUCH message (real "
              "FPGA or a test client), called as callback(msg_type, order_id, "
-             "side, price, size, raw_bytes). Must be set before run() -- it "
-             "fires on the engine's OUCH thread. Pass None to clear it.");
+             "side, price, size, ticker, raw_bytes) -- ticker is '' for "
+             "OUCH Cancel (no symbol on that wire format) or if the sender "
+             "left it blank. Must be set before run() -- it fires on the "
+             "engine's OUCH thread. Pass None to clear it.");
 #endif  // CT_NO_ONLINE_SIM
 }
