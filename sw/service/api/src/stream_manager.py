@@ -35,9 +35,9 @@ from typing import Any, AsyncIterator, Dict, Optional
 
 import db
 from config import (
-    ONLINE_ITCH_ADDRESS,
-    ONLINE_ITCH_PORT,
-    ONLINE_OUCH_PORT,
+    ONLINE_STREAM_ITCH_ADDRESS,
+    ONLINE_STREAM_ITCH_PORT,
+    ONLINE_STREAM_OUCH_PORT,
     ONLINE_STREAM_TIME_SCALE,
     engine_sim,
 )
@@ -63,14 +63,16 @@ _KEEPALIVE_TICKS = 100
 def build_online_config() -> Any:
     """Build the server-side engine transport/pacing config for a stream run.
 
-    None of these socket details are ever surfaced to the client.
+    Loopback, not the FPGA hardware addressing -- this is a software-only
+    live view for the browser (see the config.py comment on
+    ONLINE_STREAM_ITCH_ADDRESS). None of these socket details are ever
+    surfaced to the client.
     """
     cfg = engine_sim.OnlineConfig()
-    cfg.itch_address = ONLINE_ITCH_ADDRESS
-    cfg.itch_port = ONLINE_ITCH_PORT
-    cfg.ouch_port = ONLINE_OUCH_PORT
-    cfg.ouch_transport = engine_sim.OuchTransport.UDP  # matches the FPGA
-    cfg.time_scale = ONLINE_STREAM_TIME_SCALE  # ~1 telemetry event / wall-clock sec
+    cfg.itch_address = ONLINE_STREAM_ITCH_ADDRESS
+    cfg.itch_port = ONLINE_STREAM_ITCH_PORT
+    cfg.ouch_port = ONLINE_STREAM_OUCH_PORT
+    cfg.time_scale = ONLINE_STREAM_TIME_SCALE
     return cfg
 
 
@@ -87,6 +89,7 @@ class StreamSession:
     )
     _thread: Optional[threading.Thread] = None
     _started: bool = False
+    _engine: Optional[Any] = None  # set once _run() constructs it
 
     @property
     def started(self) -> bool:
@@ -105,6 +108,21 @@ class StreamSession:
     def join(self, timeout: Optional[float] = None) -> None:
         if self._thread is not None:
             self._thread.join(timeout)
+
+    def stop(self) -> bool:
+        """Request an early stop (e.g. the UI's Stop Simulation button, or a
+        disconnected client). Just an atomic store on the C++ side (see
+        OnlineSimulation::stop()) -- safe to call from any thread, and a
+        no-op if the engine hasn't been constructed yet (session created but
+        never started) or has already finished. run() unwinds through its
+        normal end-of-file path either way, so the client still gets a
+        regular "complete" event with whatever was collected so far.
+        Returns whether there was a live engine to stop.
+        """
+        if self._engine is None:
+            return False
+        self._engine.stop()
+        return True
 
     # --- runs on the engine's daemon thread -------------------------------
     def _on_sample(
@@ -153,9 +171,8 @@ class StreamSession:
     def _run(self) -> None:
         started_at_ns = time.time_ns()
         try:
-            result = engine_sim.OnlineSimulation(self.data_file, self.cfg).run(
-                self._on_sample
-            )
+            self._engine = engine_sim.OnlineSimulation(self.data_file, self.cfg)
+            result = self._engine.run(self._on_sample)
             self._log_run(started_at_ns, result)
             metrics = compute_summary_metrics(result.pnl_curve, result.compute_time_us)
             self.events.put(
@@ -257,9 +274,13 @@ class StreamManager:
                     break
                 yield f"data: {json.dumps(evt)}\n\n"
         finally:
-            # Reap the engine thread if it's already finishing; it's a daemon
-            # thread either way, so a disconnected client can't leak it past
-            # process exit.
+            # Whatever ended this loop -- a disconnected client, the run
+            # finishing on its own, or an explicit stop request racing us
+            # here -- ask the engine to stop. A no-op if it's already done;
+            # otherwise this is what actually cuts a disconnected client's
+            # run short instead of letting it keep going in the background
+            # until the input file is exhausted.
+            session.stop()
             session.join(timeout=1.0)
             self.remove(session.session_id)
 

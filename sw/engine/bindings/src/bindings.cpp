@@ -127,6 +127,16 @@ PYBIND11_MODULE(engine_sim, m) {
              "Broadcast ITCH market data in real time while serving OUCH order "
              "entry. If a callback is given, it is called once per simulated "
              "second as callback(timestamp_ns, realized_pnl, unrealized_pnl, "
-             "position_size, best_bid, best_ask). Returns a SimulationResult.");
+             "position_size, best_bid, best_ask). Returns a SimulationResult.")
+        .def("stop", &OnlineSimulation::stop,
+             // Just an atomic store (see OnlineSimulation::stop()); called from
+             // a different thread than the one blocked in run(), so it must
+             // not wait on anything run() might be holding. No GIL release
+             // needed -- this returns immediately either way.
+             "Request an early stop of an in-progress run() from another "
+             "thread (e.g. a Stop button). run() unwinds through its normal "
+             "cleanup path and returns whatever telemetry was collected so "
+             "far. Safe to call at any time, including before run() starts "
+             "or after it's already finished (no-op).");
 #endif  // CT_NO_ONLINE_SIM
 }

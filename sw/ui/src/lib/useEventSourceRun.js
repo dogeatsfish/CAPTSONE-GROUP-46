@@ -9,6 +9,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export function useEventSourceRun({ startUrl, onEvent }) {
     const [status, setStatus] = useState("idle");
     const [error, setError] = useState(null);
+    // The start response's session_id, if the endpoint returns one -- lets a
+    // caller request a server-side stop (POST `${startUrl}/${sessionId}/stop`)
+    // instead of just closing the local EventSource, which only stops this
+    // browser tab from listening; the engine keeps running server-side.
+    const [sessionId, setSessionId] = useState(null);
     const esRef = useRef(null);
 
     // Identifies the most recent start() call. Bumped on every new start()
@@ -38,6 +43,7 @@ export function useEventSourceRun({ startUrl, onEvent }) {
             cleanup();
             setError(null);
             setStatus("running");
+            setSessionId(null);
             const callId = ++callIdRef.current;
 
             let streamUrl;
@@ -51,7 +57,9 @@ export function useEventSourceRun({ startUrl, onEvent }) {
                     const detail = await res.json().catch(() => null);
                     throw new Error(detail?.detail || `start failed: HTTP ${res.status}`);
                 }
-                ({ stream_url: streamUrl } = await res.json());
+                const data = await res.json();
+                streamUrl = data.stream_url;
+                if (callId === callIdRef.current) setSessionId(data.session_id ?? null);
             } catch (e) {
                 if (callId !== callIdRef.current) return; // superseded/unmounted meanwhile
                 setError(String(e.message || e));
@@ -95,9 +103,16 @@ export function useEventSourceRun({ startUrl, onEvent }) {
 
     const stop = useCallback(() => {
         callIdRef.current += 1; // invalidate an in-flight start() too, not just close the socket
+        // Tell the server to actually stop the run, not just stop listening --
+        // best-effort; the local cleanup below happens regardless. Endpoints
+        // that don't hand back a session_id (e.g. the compile pages) never
+        // set one, so this is a no-op for them.
+        if (sessionId) {
+            fetch(`${startUrl}/${sessionId}/stop`, { method: "POST" }).catch(() => {});
+        }
         cleanup();
         setStatus((s) => (s === "running" ? "idle" : s));
-    }, [cleanup]);
+    }, [cleanup, startUrl, sessionId]);
 
-    return { status, error, start, stop };
+    return { status, error, sessionId, start, stop };
 }
