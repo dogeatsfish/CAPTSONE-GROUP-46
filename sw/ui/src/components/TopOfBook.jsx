@@ -17,15 +17,15 @@ export default function TopOfBook({ bestBid, bestAsk }) {
             <h3>Top of Book</h3>
             <div className="cards">
                 <div className="card">
-                    <div className="label">Best Bid</div>
+                    <div className="label">Best Bid ($)</div>
                     <div className="value pos">{hasBid ? fmtCurrency(bestBid) : "—"}</div>
                 </div>
                 <div className="card">
-                    <div className="label">Best Ask</div>
+                    <div className="label">Best Ask ($)</div>
                     <div className="value neg">{hasAsk ? fmtCurrency(bestAsk) : "—"}</div>
                 </div>
                 <div className="card">
-                    <div className="label">Spread</div>
+                    <div className="label">Spread ($)</div>
                     <div className="value">{spread !== null ? fmtCurrency(spread) : "—"}</div>
                 </div>
             </div>

@@ -36,7 +36,9 @@ class SummaryMetrics(BaseModel):
     252-day, 23,400-second-per-day trading year (the NYSE session length
     used elsewhere in the project) since the engine samples the PnL curve
     once per simulated second. compute_time_us is passed through from the
-    engine's own wall-clock measurement of the run.
+    engine's own wall-clock measurement of the run. trades_per_second is
+    total_trades divided by compute_time_us (converted to seconds) -- engine
+    throughput, not a market-timing or latency figure.
     """
 
     final_pnl: float
@@ -45,3 +47,4 @@ class SummaryMetrics(BaseModel):
     volatility: float
     sharpe_ratio: float
     compute_time_us: int
+    trades_per_second: float

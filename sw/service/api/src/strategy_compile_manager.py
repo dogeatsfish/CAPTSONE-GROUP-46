@@ -324,7 +324,7 @@ class StrategyCompileJob:
             self._log("[run] warning: failed to persist run to database")
 
         compute_time_us = raw.get("compute_time_us", 0)
-        metrics = compute_summary_metrics(pnl_curve, compute_time_us)
+        metrics = compute_summary_metrics(pnl_curve, compute_time_us, raw.get("total_trades", 0))
 
         response = SimulationResponse(
             data_file=str(self.data_file),

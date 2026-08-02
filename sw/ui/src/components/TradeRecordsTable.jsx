@@ -18,8 +18,8 @@ export default function TradeRecordsTable({ trades }) {
                             <tr>
                                 <th>Sim Time (s)</th>
                                 <th>Side</th>
-                                <th>Price</th>
-                                <th>Size</th>
+                                <th>Price ($)</th>
+                                <th>Size (shares)</th>
                             </tr>
                         </thead>
                         <tbody>

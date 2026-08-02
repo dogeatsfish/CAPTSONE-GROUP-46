@@ -76,6 +76,25 @@ export default function OnlineDemoPage() {
         }
     };
 
+    // Clears both modes' state unconditionally, not just the active one --
+    // guards against stale results lingering if the mode was switched after
+    // a run (e.g. run offline, flip to online, click Reset: without this an
+    // old offline result could still be sitting in `blocking`).
+    const handleReset = () => {
+        blocking.reset();
+        streaming.reset();
+        setTopOfBook(null);
+        setLiveCurve([]);
+        setStreamResult(null);
+    };
+    // Deliberately excludes "running": the blocking (offline) fetch has no
+    // abort mechanism, so resetting mid-run would only clear the UI
+    // optimistically -- the in-flight request would still resolve later and
+    // overwrite the reset state with stale results. Stop already covers
+    // interrupting an active online run; Reset is for clearing a finished
+    // (complete/error) one.
+    const canReset = status === "complete" || status === "error";
+
     // Once "complete" lands, its pnl_curve is authoritative (it's the same
     // data the DB got, and covers the rare edge case of a sample landing
     // between the last "pnl" event and the run actually finishing); until
@@ -100,6 +119,8 @@ export default function OnlineDemoPage() {
                 onRun={handleRun}
                 canRun={canRun}
                 onStop={isOnline ? streaming.stop : undefined}
+                onReset={handleReset}
+                canReset={canReset}
                 onlineTarget={onlineTarget}
                 onOnlineTargetChange={isOnline ? setOnlineTarget : undefined}
             />

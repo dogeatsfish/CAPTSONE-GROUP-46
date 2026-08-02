@@ -32,16 +32,26 @@ _ZERO_METRICS_KWARGS = dict(
 )
 
 
+def _trades_per_second(total_trades: int, compute_time_us: int) -> float:
+    return total_trades / (compute_time_us / 1_000_000) if compute_time_us > 0 else 0.0
+
+
 def compute_summary_metrics(
-    pnl_curve: Sequence[PnLPoint], compute_time_us: int
+    pnl_curve: Sequence[PnLPoint], compute_time_us: int, total_trades: int
 ) -> SummaryMetrics:
-    """Derive final PnL, max drawdown, volatility, and Sharpe ratio.
+    """Derive final PnL, max drawdown, volatility, Sharpe ratio, and throughput.
 
     Pass the *full* pnl_curve (before any trade_limit/pnl_limit truncation
     applied for the response payload) so the metrics reflect the whole run.
     """
+    trades_per_second = _trades_per_second(total_trades, compute_time_us)
+
     if not pnl_curve:
-        return SummaryMetrics(compute_time_us=compute_time_us, **_ZERO_METRICS_KWARGS)
+        return SummaryMetrics(
+            compute_time_us=compute_time_us,
+            trades_per_second=trades_per_second,
+            **_ZERO_METRICS_KWARGS,
+        )
 
     # "Equity" = realized + unrealized PnL at each sampled instant.
     equity = [p.realized_pnl + p.unrealized_pnl for p in pnl_curve]
@@ -82,4 +92,5 @@ def compute_summary_metrics(
         volatility=volatility,
         sharpe_ratio=sharpe_ratio,
         compute_time_us=compute_time_us,
+        trades_per_second=trades_per_second,
     )

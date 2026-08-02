@@ -202,7 +202,9 @@ class StreamSession:
             self._engine = engine_sim.OnlineSimulation(self.data_file, self.cfg)
             result = self._engine.run(self._on_sample)
             self._log_run(started_at_ns, result)
-            metrics = compute_summary_metrics(result.pnl_curve, result.compute_time_us)
+            metrics = compute_summary_metrics(
+                result.pnl_curve, result.compute_time_us, result.total_trades
+            )
             self.events.put(
                 {
                     "type": "complete",

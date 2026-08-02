@@ -2,8 +2,8 @@ import ModeToggle from "./ModeToggle";
 import DatasetSelector from "./DatasetSelector";
 import OnlineTargetToggle from "./OnlineTargetToggle";
 
-// Layout-only: composes the mode toggle, dataset picker, and run/stop button.
-// Holds no state of its own -- everything is passed down from App.
+// Layout-only: composes the mode toggle, dataset picker, and run/stop/reset
+// buttons. Holds no state of its own -- everything is passed down from App.
 export default function ControlPanel({
     mode,
     onModeChange,
@@ -16,6 +16,8 @@ export default function ControlPanel({
     onRun,
     canRun,
     onStop, // optional -- only modes that can actually be interrupted wire this (online)
+    onReset,
+    canReset,
     onlineTarget, // optional -- only online mode wires this ("loopback" | "hardware")
     onOnlineTargetChange,
 }) {
@@ -40,6 +42,16 @@ export default function ControlPanel({
                 )}
             </div>
             <div className="controls-row controls-row-actions">
+                {onReset && (
+                    <button
+                        type="button"
+                        className="secondary"
+                        onClick={onReset}
+                        disabled={!canReset}
+                    >
+                        Reset
+                    </button>
+                )}
                 <button onClick={onRun} disabled={running || !canRun}>
                     {running ? "Running…" : "Run Simulation"}
                 </button>

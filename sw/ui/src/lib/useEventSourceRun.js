@@ -114,5 +114,20 @@ export function useEventSourceRun({ startUrl, onEvent }) {
         setStatus((s) => (s === "running" ? "idle" : s));
     }, [cleanup, startUrl, sessionId]);
 
-    return { status, error, sessionId, start, stop };
+    // Unlike stop() (only transitions running -> idle), reset() unconditionally
+    // clears back to idle from any state (complete/error/running) -- it's what
+    // backs a Reset button that should always leave a blank slate, not just
+    // interrupt an active run.
+    const reset = useCallback(() => {
+        callIdRef.current += 1;
+        if (sessionId) {
+            fetch(`${startUrl}/${sessionId}/stop`, { method: "POST" }).catch(() => {});
+        }
+        cleanup();
+        setStatus("idle");
+        setError(null);
+        setSessionId(null);
+    }, [cleanup, startUrl, sessionId]);
+
+    return { status, error, sessionId, start, stop, reset };
 }
