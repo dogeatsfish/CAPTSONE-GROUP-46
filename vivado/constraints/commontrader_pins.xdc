@@ -91,18 +91,13 @@ set_property -dict {PACKAGE_PIN N17 IOSTANDARD LVCMOS33 SLEW FAST DRIVE 12} [get
 set_property -dict {PACKAGE_PIN L19 IOSTANDARD LVCMOS33} [get_ports hw_kill_switch_n]
 
 #------------------------------------------------------------------------------
-# Telemetry -- NO PIN CONSTRAINTS ON PURPOSE.
-#
-# order_drop_count / tx_fifo_overflow / ts_wrapped were removed from the
-# commontrader_top PORT LIST (they are internal signals now, observed through an
-# ILA). Constraining them here was leaving three CRITICAL WARNINGs per run:
-#   WARNING  [Vivado 12-584] No ports matched '<name>'
-#   CRITICAL [Common 17-55]  'set_property' expects at least one object
-# If they ever come back as ports, the carrier-board user LEDs are:
-#   LED1 L13   LED2 M13   LED3 K14   LED4 K13    (BANK15, 3.3 V)
-# all ACTIVE-LOW (0 = lit, manual 3.14) while the status signals are active-HIGH,
-# so invert at the assignment if you want "lit == asserted".
+# Status LEDs (BANK15, 3.3 V)
+# All user LEDs are ACTIVE-LOW (0 = lit, manual 3.14).
 #------------------------------------------------------------------------------
+set_property -dict {PACKAGE_PIN L13 IOSTANDARD LVCMOS33} [get_ports led_heartbeat_n] ;# LED1
+set_property -dict {PACKAGE_PIN M13 IOSTANDARD LVCMOS33} [get_ports led_kill_n]      ;# LED2
+set_property -dict {PACKAGE_PIN K14 IOSTANDARD LVCMOS33} [get_ports led_drop_n]      ;# LED3
+set_property -dict {PACKAGE_PIN K13 IOSTANDARD LVCMOS33} [get_ports led_overflow_n]  ;# LED4
 
 #==============================================================================
 # RGMII I/O TIMING  --  the PHY is in RGMII-ID mode (Table 3-2-1: TXDLY + RXDLY,

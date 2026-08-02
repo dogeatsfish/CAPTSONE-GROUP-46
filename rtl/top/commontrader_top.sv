@@ -49,7 +49,13 @@ module commontrader_top
   // The PHY holds its RGMII RX clock in reset until this is released, and that
   // RX clock is the ONLY clock in the design (the MMCM derives core_clk from
   // it). See the driver + rationale near clk_rst_gen.  [FIX: was missing]
-  output logic       eth_phy_rst_n
+  output logic       eth_phy_rst_n,
+
+  // --- Status LEDs ----------------------------------------------------------
+  output logic       led_heartbeat_n,
+  output logic       led_kill_n,
+  output logic       led_drop_n,
+  output logic       led_overflow_n
 
 );
 
@@ -131,6 +137,8 @@ module commontrader_top
   logic rx_error;                       // PHY domain, from RX MAC
   logic rx_error_meta, rx_error_sync;   // core domain
   logic kill_meta,     kill_sync;
+  logic kill_debounced;
+  logic [20:0] kill_debounce_cnt;       // 5ms at 250MHz = 1,250,000 cycles
 
   always_ff @(posedge core_clk or negedge core_rst_n) begin
     if (!core_rst_n) begin
@@ -138,11 +146,23 @@ module commontrader_top
       rx_error_sync <= 1'b0;
       kill_meta     <= 1'b0;
       kill_sync     <= 1'b0;
+      kill_debounced <= 1'b0;
+      kill_debounce_cnt <= 21'd0;
     end else begin
       rx_error_meta <= rx_error;
       rx_error_sync <= rx_error_meta;
       kill_meta     <= ~hw_kill_switch_n;   // active-low pin -> active-high kill
       kill_sync     <= kill_meta;
+
+      if (kill_sync != kill_debounced) begin
+        kill_debounce_cnt <= kill_debounce_cnt + 21'd1;
+        if (kill_debounce_cnt == 21'd1_250_000) begin
+          kill_debounced <= kill_sync;
+          kill_debounce_cnt <= 21'd0;
+        end
+      end else begin
+        kill_debounce_cnt <= 21'd0;
+      end
     end
   end
 
@@ -302,7 +322,7 @@ module commontrader_top
     .s_axis_order_tuser  (order_tuser),
     .s_axis_order_tvalid (order_tvalid),
     .rx_error            (rx_error_sync),
-    .hw_kill_switch      (kill_sync),
+    .hw_kill_switch      (kill_debounced),
     .m_axis_tx_tdata     (tx_tdata),
     .m_axis_tx_tuser     (tx_tuser),
     .m_axis_tx_tvalid    (tx_tvalid)
@@ -417,5 +437,50 @@ module commontrader_top
     .rgmii_txd     (rgmii_txd),
     .rgmii_tx_ctl  (rgmii_tx_ctl)
   );
+
+  //--------------------------------------------------------------------------
+  // Board Status LEDs (Active-Low)
+  //--------------------------------------------------------------------------
+
+  // LED1: Heartbeat (blinks at ~1Hz to prove the core is running)
+  logic [26:0] heartbeat_cnt;
+  always_ff @(posedge core_clk or negedge core_rst_n) begin
+    if (!core_rst_n) heartbeat_cnt <= 27'd0;
+    else             heartbeat_cnt <= heartbeat_cnt + 27'd1;
+  end
+  assign led_heartbeat_n = ~heartbeat_cnt[26];
+
+  // LED2: Kill Switch (lit when active). Tied directly to the debounced kill signal.
+  assign led_kill_n = ~kill_debounced;
+
+  // LED3: Order Dropped (flashes for ~100ms when order_drop_count increments)
+  logic [15:0] last_drop_count;
+  logic [24:0] drop_flash_cnt;  // 25 million cycles = 100ms at 250MHz.
+  
+  always_ff @(posedge core_clk or negedge core_rst_n) begin
+    if (!core_rst_n) begin
+      last_drop_count <= 16'd0;
+      drop_flash_cnt <= 25'd0;
+      led_drop_n <= 1'b1; // idle off
+    end else begin
+      last_drop_count <= order_drop_count;
+      
+      if (order_drop_count != last_drop_count) begin
+        drop_flash_cnt <= 25'd25_000_000;
+        led_drop_n <= 1'b0; // light up
+      end else if (drop_flash_cnt > 0) begin
+        drop_flash_cnt <= drop_flash_cnt - 25'd1;
+        led_drop_n <= 1'b0;
+      end else begin
+        led_drop_n <= 1'b1;
+      end
+    end
+  end
+
+  // LED4: TX Overflow (Latches ON until reset)
+  always_ff @(posedge core_clk or negedge core_rst_n) begin
+    if (!core_rst_n) led_overflow_n <= 1'b1;
+    else if (tx_fifo_overflow) led_overflow_n <= 1'b0;
+  end
 
 endmodule
