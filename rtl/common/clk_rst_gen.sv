@@ -34,12 +34,14 @@ module clk_rst_gen #(
   // 2222 ps -> 4.444 ns period -> 225 MHz, matching ct_pkg::CORE_PERIOD_NS.
   parameter int CORE_HALF_PERIOD_PS = 2222
 )(
-  input  logic sys_rst_n,       // board reset, active low, asynchronous
+  input  logic board_clk,       // 200 MHz free-running system clock
+  input  logic sys_rst_n,       // board reset, active low, bouncy
   input  logic rgmii_rx_clk,    // 125 MHz from PHY
 
   output logic core_clk,        // 250 MHz
   output logic core_rst_n,      // synchronous to core_clk
-  output logic phy_rst_n        // synchronous to rgmii_rx_clk
+  output logic phy_rst_n,       // synchronous to rgmii_rx_clk
+  output logic eth_phy_rst_n    // to PHY hardware reset pin
 );
 
   // Module-scoped, so it cannot leak into other files the way a `timescale
@@ -52,6 +54,46 @@ module clk_rst_gen #(
   logic mmcm_locked;
 
   //--------------------------------------------------------------------------
+  // 1. Debounce sys_rst_n using the free-running board_clk
+  //--------------------------------------------------------------------------
+  logic [19:0] debounce_cnt = '0;
+  logic rst_debounced_n = 1'b0;
+  logic sys_rst_sync_1, sys_rst_sync_2;
+
+  always_ff @(posedge board_clk) begin
+    sys_rst_sync_1 <= sys_rst_n;
+    sys_rst_sync_2 <= sys_rst_sync_1;
+    
+    if (sys_rst_sync_2 == rst_debounced_n) begin
+      debounce_cnt <= '0;
+    end else begin
+      debounce_cnt <= debounce_cnt + 1;
+      if (debounce_cnt == 20'd1_000_000) begin // 5ms debounce @ 200MHz
+        rst_debounced_n <= sys_rst_sync_2;
+        debounce_cnt <= '0;
+      end
+    end
+  end
+
+  //--------------------------------------------------------------------------
+  // 2. Generate a clean 10ms eth_phy_rst_n pulse
+  //--------------------------------------------------------------------------
+  logic [20:0] phy_rst_timer = '0;
+  always_ff @(posedge board_clk) begin
+    if (!rst_debounced_n) begin
+      phy_rst_timer <= '0;
+      eth_phy_rst_n <= 1'b0;
+    end else begin
+      if (phy_rst_timer < 21'd2_000_000) begin // 10ms @ 200MHz
+        phy_rst_timer <= phy_rst_timer + 1;
+        eth_phy_rst_n <= 1'b0;
+      end else begin
+        eth_phy_rst_n <= 1'b1;
+      end
+    end
+  end
+
+  //--------------------------------------------------------------------------
   // Core clock
   //--------------------------------------------------------------------------
 `ifdef SYNTHESIS
@@ -59,8 +101,8 @@ module clk_rst_gen #(
   logic [19:0] phy_clk_ready_cnt = '0;
   logic mmcm_rst_sync;
 
-  always_ff @(posedge rgmii_rx_clk or negedge sys_rst_n) begin
-    if (!sys_rst_n) begin
+  always_ff @(posedge rgmii_rx_clk or negedge eth_phy_rst_n) begin
+    if (!eth_phy_rst_n) begin
       phy_clk_ready_cnt <= '0;
       mmcm_rst_sync     <= 1'b1;
     end else begin
@@ -86,7 +128,7 @@ module clk_rst_gen #(
     .CLKOUT0  (core_clk_unbuf),
     .LOCKED   (mmcm_locked),
     .PWRDWN   (1'b0),
-    .RST      (~sys_rst_n | mmcm_rst_sync)
+    .RST      (~eth_phy_rst_n | mmcm_rst_sync)
   );
 
   BUFG u_bufg_core (.I(core_clk_unbuf), .O(core_clk));
@@ -104,8 +146,8 @@ module clk_rst_gen #(
   localparam int LOCK_CYCLES = 16;
   int unsigned lock_cnt;
 
-  always_ff @(posedge core_clk or negedge sys_rst_n) begin
-    if (!sys_rst_n) begin
+  always_ff @(posedge core_clk or negedge eth_phy_rst_n) begin
+    if (!eth_phy_rst_n) begin
       lock_cnt    <= '0;
       mmcm_locked <= 1'b0;
     end else if (lock_cnt < LOCK_CYCLES) begin
@@ -119,13 +161,6 @@ module clk_rst_gen #(
 
   //--------------------------------------------------------------------------
   // Reset synchronisers: async assert, sync release.
-  //
-  // TIMING: the final flop of each synchroniser drives the async clear/preset
-  // pin of every flop in its domain (core_rst_n reached ~13,600 loads), and the
-  // synchronous RELEASE of that net is timed (recovery). One flop driving the
-  // whole die failed recovery by -3.1 ns on route delay alone. MAX_FANOUT tells
-  // synthesis to replicate the final flop (replicas keep the async-assert pin),
-  // turning one die-spanning net into ~50 short regional ones.
   //--------------------------------------------------------------------------
   logic core_rst_meta, phy_rst_meta;
   logic core_rst_src;
@@ -133,7 +168,7 @@ module clk_rst_gen #(
   (* max_fanout = 256 *) logic core_rst_n_q;
   (* max_fanout = 256 *) logic phy_rst_n_q;
 
-  assign core_rst_src = sys_rst_n & mmcm_locked;
+  assign core_rst_src = rst_debounced_n & mmcm_locked;
 
   assign core_rst_n = core_rst_n_q;
   assign phy_rst_n  = phy_rst_n_q;
@@ -148,8 +183,8 @@ module clk_rst_gen #(
     end
   end
 
-  always_ff @(posedge rgmii_rx_clk or negedge sys_rst_n) begin
-    if (!sys_rst_n) begin
+  always_ff @(posedge rgmii_rx_clk or negedge eth_phy_rst_n) begin
+    if (!eth_phy_rst_n) begin
       phy_rst_meta <= 1'b0;
       phy_rst_n_q  <= 1'b0;
     end else begin
