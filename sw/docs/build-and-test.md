@@ -82,26 +82,30 @@ make socket-test       # OUCH socket client vs a rising bid ladder
 make flood-test        # same, but against a dense 5000-order book (stress)
 ```
 
-`test-online`, `socket-test`, and `flood-test` first generate their market
-book (via `$(PY)`), then compile and run. If your Python isn't at the
-default venv path, override it:
+`test-online`, `socket-test`, and `flood-test` are the same binary
+(`tests/src/socket_test.cpp`) pointed at three different `tests/config/*.ini`
+files -- which orders it sends, expected trade counts, and whether it also
+verifies the ITCH broadcast are config, not separate source files. All three
+first generate their market book (via `$(PY)`), then compile and run. If your
+Python isn't at the default venv path, override it:
 
 ```bash
 make test-online PY=python3
 make socket-test PY=/path/to/venv/bin/python
 ```
 
-Each of these reads its socket addresses/ports/transport and dataset path
-from a `tests/config/*.ini` file (same name as the test) instead of hardcoded
-values in the `.cpp` — override with e.g. `TEST_ONLINE_CONFIG=path/to/other.ini`
-or `SOCKET_TEST_CONFIG=...`. See `tests/config/test_online.ini` for the format.
+Each reads its socket addresses/ports/transport, dataset path, and test
+scenario (orders to send, expected trade counts, ITCH verification) from a
+`tests/config/*.ini` file instead of hardcoded values in the `.cpp` —
+override with e.g. `TEST_ONLINE_CONFIG=path/to/other.ini` or
+`SOCKET_TEST_CONFIG=...`. See `tests/config/test_online.ini` or the header
+comment in `tests/src/socket_test.cpp` for the full key list.
 
-> **Transport note:** `test-online`'s and `socket-test`'s OUCH client
-> (`connect_ouch` in `tests/src/`) only speaks **TCP**, while the engine's
-> default OUCH transport is now **UDP** — that's why their `.ini` files pin
-> `ouch_transport = tcp`. Pointing one of these configs at `udp` fails fast
-> with a clear error instead of hanging. See
-> `sw/engine/simulation/include/online_simulation.h`.
+> **Transport note:** `socket_test.cpp`'s OUCH client (`connect_ouch`) only
+> speaks **TCP**, while the engine's default OUCH transport is now **UDP** —
+> that's why its `.ini` files pin `ouch_transport = tcp`. Pointing one of
+> these configs at `udp` fails fast with a clear error instead of hanging.
+> See `sw/engine/simulation/include/online_simulation.h`.
 
 ### Hardware smoke test
 

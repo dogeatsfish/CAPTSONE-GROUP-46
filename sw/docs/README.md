@@ -30,9 +30,8 @@ workspace. To use it: open the `sw/` folder in VS Code and choose
 - [Running the simulation dashboard](run-dashboard.md) — build `engine_sim`,
   start the FastAPI service, launch the React UI, and use the dashboard.
 - [Engine tests](testing.md) — what each test covers (`stress_orderbook`,
-  `test_online`, `socket_test`, `gen_market_ladder.py`) and its specific cases.
-- [Running the simulation dashboard](run-dashboard.md) — build `engine_sim`,
-  start the FastAPI service, launch the React UI, and use the dashboard.
+  `socket_test` (which drives the `socket-test`/`test-online`/`flood-test`
+  scenarios), `gen_market_ladder.py`) and its specific cases.
 
 ## Related documents
 

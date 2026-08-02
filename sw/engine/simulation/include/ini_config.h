@@ -53,6 +53,19 @@ public:
         return it == values.end() ? fallback : std::stod(it->second);
     }
 
+    int get_int(const std::string& key, int fallback) const {
+        const auto it = values.find(key);
+        return it == values.end() ? fallback : std::stoi(it->second);
+    }
+
+    bool get_bool(const std::string& key, bool fallback) const {
+        const auto it = values.find(key);
+        if (it == values.end()) return fallback;
+        return it->second == "true" || it->second == "1" || it->second == "yes";
+    }
+
+    bool has(const std::string& key) const { return values.count(key) > 0; }
+
 private:
     std::map<std::string, std::string> values;
 

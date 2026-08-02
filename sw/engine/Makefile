@@ -125,31 +125,30 @@ stress-book: $(STRESS_BOOK_SRCS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(STRESS_BOOK_SRCS) -o $(STRESS_BOOK_BIN)
 	./$(STRESS_BOOK_BIN)
 
-# Online simulation end-to-end test (ITCH replay + OUCH connect/send/receive).
-# The market-data book is produced by the Python EventGenerator first.
-# Socket addresses/ports/transport and the dataset file live in
-# tests/config/test_online.ini, not hardcoded here -- override with
-# TEST_ONLINE_CONFIG=... to run against a different .ini.
-TEST_ONLINE_BIN    := tests/src/test_online
-TEST_ONLINE_SRCS   := tests/src/test_online.cpp $(CORE_SRCS)
-TEST_ONLINE_CONFIG ?= tests/config/test_online.ini
-GEN_LADDER         := tests/src/gen_market_ladder.py
-
-test-online: $(TEST_ONLINE_SRCS) $(GEN_LADDER)
-	$(PY) $(GEN_LADDER)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(TEST_ONLINE_SRCS) -o $(TEST_ONLINE_BIN) -lpthread
-	./$(TEST_ONLINE_BIN) $(TEST_ONLINE_CONFIG)
-
-# OUCH socket client vs a generated rising bid ladder. Config (see above):
-# tests/config/socket_test.ini, override with SOCKET_TEST_CONFIG=...
+# OUCH socket client vs a generated rising bid ladder -- one binary, three
+# scenarios selected entirely by which .ini it's pointed at (see the header
+# comment in tests/src/socket_test.cpp):
+#   make socket-test  -> tests/config/socket_test.ini (loopback smoke test)
+#   make test-online  -> tests/config/test_online.ini (adds ITCH-broadcast
+#                         verification + per-order expected-response checks)
+#   make flood-test   -> tests/config/flood_test.ini (below)
+# Override with SOCKET_TEST_CONFIG=.../TEST_ONLINE_CONFIG=... to run against
+# a different .ini.
 SOCKET_TEST_BIN    := tests/src/socket_test
 SOCKET_TEST_SRCS   := tests/src/socket_test.cpp $(CORE_SRCS)
 SOCKET_TEST_CONFIG ?= tests/config/socket_test.ini
+TEST_ONLINE_CONFIG ?= tests/config/test_online.ini
+GEN_LADDER         := tests/src/gen_market_ladder.py
 
 socket-test: $(SOCKET_TEST_SRCS) $(GEN_LADDER)
 	$(PY) $(GEN_LADDER)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SOCKET_TEST_SRCS) -o $(SOCKET_TEST_BIN) -lpthread
 	./$(SOCKET_TEST_BIN) $(SOCKET_TEST_CONFIG)
+
+test-online: $(SOCKET_TEST_SRCS) $(GEN_LADDER)
+	$(PY) $(GEN_LADDER)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SOCKET_TEST_SRCS) -o $(SOCKET_TEST_BIN) -lpthread
+	./$(SOCKET_TEST_BIN) $(TEST_ONLINE_CONFIG)
 
 # tests/src/gen_test_datasets.py produces smoke_book.bin (hw-smoke-test) and
 # flood_book.bin (flood-test) -- same price band/shape as market_ladder.bin,
@@ -195,4 +194,4 @@ run-fpga-test: $(FPGA_TEST_BIN)
 	./$(FPGA_TEST_BIN) $(FPGA_FILE) $(FPGA_SCALE)
 
 clean:
-	rm -f $(TARGET) $(ONLINE_TARGET) $(PY_MODULE)*.so $(STRESS_BOOK_BIN) $(TEST_ONLINE_BIN) $(SOCKET_TEST_BIN) $(FPGA_TEST_BIN)
+	rm -f $(TARGET) $(ONLINE_TARGET) $(PY_MODULE)*.so $(STRESS_BOOK_BIN) $(SOCKET_TEST_BIN) $(FPGA_TEST_BIN)
