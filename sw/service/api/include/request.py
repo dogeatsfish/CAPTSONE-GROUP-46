@@ -1,6 +1,6 @@
 """Request schemas for the HFT engine service."""
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -25,4 +25,13 @@ class SimulationRequest(BaseModel):
         default=None,
         ge=0,
         description="Cap the number of PnL snapshots returned. None = all.",
+    )
+    online_target: Literal["loopback", "hardware"] = Field(
+        default="loopback",
+        description=(
+            "Only meaningful for /simulate/online/stream. 'loopback' (default) "
+            "is a software-only live view -- fast, no board needed. 'hardware' "
+            "targets the real FPGA at the configured board address, paced in "
+            "real time to match it. Ignored by every other endpoint."
+        ),
     )
