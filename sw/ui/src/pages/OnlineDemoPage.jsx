@@ -5,16 +5,23 @@ import ResultsSummary from "../components/ResultsSummary";
 import PnLChart from "../components/PnLChart";
 import TradeRecordsTable from "../components/TradeRecordsTable";
 import TopOfBook from "../components/TopOfBook.jsx";
+import OuchPacketLog from "../components/OuchPacketLog.jsx";
 import ErrorBanner from "../components/ErrorBanner";
 import { useDatasets } from "../hooks/useDatasets";
 import { useSimulation } from "../hooks/useSimulation";
 import { useEventSourceRun } from "../lib/useEventSourceRun.js";
+
+// A chatty/misbehaving board could send a lot of packets; cap retained rows
+// so a single run can't grow the log unbounded (mirrors the compiler pages'
+// MAX_LOG_LINES).
+const MAX_OUCH_PACKETS = 500;
 
 export default function OnlineDemoPage() {
     const [mode, setMode] = useState("offline");
     const [selectedDataset, setSelectedDataset] = useState(null);
     const [topOfBook, setTopOfBook] = useState(null); // { bestBid, bestAsk } -- live, online mode only
     const [liveCurve, setLiveCurve] = useState([]); // pnl_curve built up live from "pnl" events
+    const [ouchPackets, setOuchPackets] = useState([]); // every inbound OUCH packet, live
     const [streamResult, setStreamResult] = useState(null); // set from the SSE "complete" event
     const [onlineTarget, setOnlineTarget] = useState("loopback"); // "loopback" | "hardware"
 
@@ -41,6 +48,11 @@ export default function OnlineDemoPage() {
                     position_size: evt.position_size,
                 },
             ]);
+        } else if (evt.type === "ouch") {
+            setOuchPackets((prev) => {
+                const next = [...prev, evt];
+                return next.length > MAX_OUCH_PACKETS ? next.slice(next.length - MAX_OUCH_PACKETS) : next;
+            });
         } else if (evt.type === "complete") {
             setStreamResult(evt);
         }
@@ -69,6 +81,7 @@ export default function OnlineDemoPage() {
         if (isOnline) {
             setTopOfBook(null);
             setLiveCurve([]);
+            setOuchPackets([]);
             setStreamResult(null);
             streaming.start({ data_file: selectedDataset || undefined, online_target: onlineTarget });
         } else {
@@ -85,6 +98,7 @@ export default function OnlineDemoPage() {
         streaming.reset();
         setTopOfBook(null);
         setLiveCurve([]);
+        setOuchPackets([]);
         setStreamResult(null);
     };
     // Deliberately excludes "running": the blocking (offline) fetch has no
@@ -127,6 +141,10 @@ export default function OnlineDemoPage() {
 
             {isOnline && (running || topOfBook) && (
                 <TopOfBook bestBid={topOfBook?.bestBid} bestAsk={topOfBook?.bestAsk} />
+            )}
+
+            {isOnline && (running || ouchPackets.length > 0) && (
+                <OuchPacketLog packets={ouchPackets} />
             )}
 
             <ResultsSummary metrics={result?.metrics} />

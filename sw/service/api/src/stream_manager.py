@@ -12,8 +12,11 @@ Two independent planes are involved:
     the C++ engine and never exposed here.
   * North-bound (server -> browser): the SSE stream produced here, carrying a
     copy of each per-second PnL sample (plus the current top-of-book, L1:
-    best_bid/best_ask) and a terminal event with the full run (same shape as
-    the blocking endpoints' SimulationResponse).
+    best_bid/best_ask), a copy of every inbound OUCH packet as it arrives
+    (see _on_ouch -- a hardware bring-up aid: proves the board is actually
+    sending something back, independent of whether it produces a fill), and
+    a terminal event with the full run (same shape as the blocking
+    endpoints' SimulationResponse).
 
 The blocking ``engine.run(callback)`` executes on a dedicated daemon thread
 (the C++ hot loop releases the GIL), so the asyncio event loop stays free. The
@@ -177,6 +180,36 @@ class StreamSession:
         except queue.Full:
             pass  # slow/absent client: drop this sample, never block the engine
 
+    def _on_ouch(
+        self,
+        msg_type: str,
+        order_id: int,
+        side: str,
+        price: float,
+        size: float,
+        raw: bytes,
+    ) -> None:
+        """Fires for every inbound OUCH message -- the real FPGA or a test
+        client -- so the UI can show packets actually arriving, independent
+        of whether they translate into a fill (the "did the board even send
+        anything" debugging view: OrderBook fills are the wrong signal here,
+        since a resting/rejected order never produces one)."""
+        try:
+            self.events.put_nowait(
+                {
+                    "type": "ouch",
+                    "timestamp_ns": time.time_ns(),
+                    "msg_type": msg_type,
+                    "order_id": order_id,
+                    "side": side,
+                    "price": price,
+                    "size": size,
+                    "raw_hex": raw.hex(" ").upper(),
+                }
+            )
+        except queue.Full:
+            pass  # slow/absent client: drop this packet, never block the engine
+
     def _log_run(self, started_at_ns: int, result: Any) -> None:
         """Persist a completed streaming run to the database (FS-15).
 
@@ -200,6 +233,11 @@ class StreamSession:
         started_at_ns = time.time_ns()
         try:
             self._engine = engine_sim.OnlineSimulation(self.data_file, self.cfg)
+            # getattr-guarded like stop() -- a stale engine_sim build predating
+            # this binding must degrade (no packet log), not crash the run.
+            set_observer = getattr(self._engine, "set_ouch_observer", None)
+            if set_observer is not None:
+                set_observer(self._on_ouch)
             result = self._engine.run(self._on_sample)
             self._log_run(started_at_ns, result)
             metrics = compute_summary_metrics(

@@ -137,6 +137,38 @@ PYBIND11_MODULE(engine_sim, m) {
              "thread (e.g. a Stop button). run() unwinds through its normal "
              "cleanup path and returns whatever telemetry was collected so "
              "far. Safe to call at any time, including before run() starts "
-             "or after it's already finished (no-op).");
+             "or after it's already finished (no-op).")
+        .def("set_ouch_observer",
+             [](OnlineSimulation& self, py::object callback) {
+                 if (callback.is_none()) {
+                     self.set_ouch_observer(nullptr);
+                     return;
+                 }
+                 // Capture BY VALUE (copies the py::object, incrementing its
+                 // refcount) -- unlike run()'s by-reference hook, this one
+                 // outlives the call that installs it: it's stored as a
+                 // member (ouch_observer_) and fires later, on the OUCH
+                 // thread, for as long as the engine runs. A by-reference
+                 // capture would dangle the moment set_ouch_observer()
+                 // returns.
+                 self.set_ouch_observer(
+                     [callback](const protocol::OuchMessage& msg, const uint8_t* raw, size_t len) {
+                         py::gil_scoped_acquire gil;
+                         try {
+                             callback(std::string(1, msg.msg_type ? msg.msg_type : '?'),
+                                      msg.order_id,
+                                      std::string(1, msg.side ? msg.side : '-'),
+                                      msg.price, msg.size,
+                                      py::bytes(reinterpret_cast<const char*>(raw), len));
+                         } catch (const py::error_already_set&) {
+                             PyErr_Clear();
+                         }
+                     });
+             },
+             py::arg("callback"),
+             "Set an observer invoked for every inbound OUCH message (real "
+             "FPGA or a test client), called as callback(msg_type, order_id, "
+             "side, price, size, raw_bytes). Must be set before run() -- it "
+             "fires on the engine's OUCH thread. Pass None to clear it.");
 #endif  // CT_NO_ONLINE_SIM
 }

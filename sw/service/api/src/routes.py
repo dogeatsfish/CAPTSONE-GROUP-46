@@ -191,6 +191,9 @@ async def online_stream(session_id: str, request: Request):
     Emits one JSON object per `data:` frame:
       {"type": "pnl", "timestamp_ns", "realized_pnl", "unrealized_pnl",
        "position_size", "best_bid", "best_ask"}
+      {"type": "ouch", "timestamp_ns", "msg_type", "order_id", "side",
+       "price", "size", "raw_hex"} -- every inbound OUCH packet (real FPGA
+       or a test client), independent of whether it produces a fill
       {"type": "complete", "data_file", "total_trades", "compute_time_us",
        "trades", "pnl_curve", "metrics"} -- same shape as SimulationResponse
       {"type": "error", "detail"}

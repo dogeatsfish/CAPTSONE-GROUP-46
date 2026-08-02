@@ -525,6 +525,15 @@ button.danger {
     background: var(--panel-raised);
 }
 
+.mono-cell {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--dim);
+    white-space: normal;
+    word-break: break-all;
+    min-width: 180px;
+}
+
 .side-badge {
     font-family: var(--font-display);
     font-size: 9.5px;
