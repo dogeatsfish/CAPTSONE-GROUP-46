@@ -21,6 +21,17 @@ Target: AMD Artix-7 XC7A200T (Alinx AX7A200B)
 **Do not commit Vivado project files.** The project is regenerated from the Tcl
 scripts in `vivado/`. Only sources, constraints, and build scripts are tracked.
 
+## Board Status LEDs
+
+The four carrier-board user LEDs (BANK15, 3.3V) indicate the following system statuses:
+
+| LED | Pin | Name | Description |
+|---|---|---|---|
+| **LED1** | `L13` | Heartbeat | Blinks at ~1Hz when the core clock is running and MMCM is locked. |
+| **LED2** | `M13` | Kill Switch | Lights up solid when the hardware kill switch (KEY1, `L19`) is pressed. |
+| **LED3** | `K14` | Order Dropped | Flashes for ~100ms whenever an order is dropped by the Pre-Trade Risk Gateway. |
+| **LED4** | `K13` | TX Overflow | Latches ON if the outbound TX FIFO overflows. Cleared only by a hard reset. |
+
 ## Getting Started
 
 ```bash

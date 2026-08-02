@@ -126,6 +126,12 @@ module commontrader_crv_tb
   logic        tx_fifo_overflow;
   logic        ts_wrapped;
 
+  logic       eth_phy_rst_n;
+  logic       led_heartbeat_n;
+  logic       led_kill_n;
+  logic       led_drop_n;
+  logic       led_overflow_n;
+
   commontrader_top dut (
     .sys_clk_p        (sys_clk_p),
     .sys_clk_n        (sys_clk_n),
@@ -136,7 +142,12 @@ module commontrader_crv_tb
     .rgmii_tx_clk     (rgmii_tx_clk),
     .rgmii_txd        (rgmii_txd),
     .rgmii_tx_ctl     (rgmii_tx_ctl),
-    .hw_kill_switch_n (hw_kill_switch_n)
+    .hw_kill_switch_n (hw_kill_switch_n),
+    .eth_phy_rst_n    (eth_phy_rst_n),
+    .led_heartbeat_n  (led_heartbeat_n),
+    .led_kill_n       (led_kill_n),
+    .led_drop_n       (led_drop_n),
+    .led_overflow_n   (led_overflow_n)
   );
 
   assign order_drop_count = dut.order_drop_count;
