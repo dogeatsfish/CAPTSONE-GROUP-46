@@ -20,6 +20,7 @@ import db
 from common import PnLPoint, Trade, apply_limit
 from compile import CompileRequest, CompileStartResponse
 from compile_manager import compile_manager
+from metrics import compute_summary_metrics
 from request import SimulationRequest
 from response import RunDetail, RunSummary, SimulationResponse, StreamStartResponse
 from stream_manager import stream_manager, build_online_config
@@ -69,8 +70,22 @@ def _log_run(data_file: Path, mode: str, started_at_ns: int, result) -> None:
 
 def _to_response(data_file: Path, result, req) -> SimulationResponse:
     """Map an engine SimulationResult into the API response schema."""
+    # Metrics are derived from the FULL pnl_curve, before trade_limit/pnl_limit
+    # truncation below -- otherwise capping the payload for display would
+    # silently skew drawdown/volatility/Sharpe.
+    full_pnl_curve = [
+        PnLPoint(
+            timestamp_ns=p.timestamp_ns,
+            realized_pnl=p.realized_pnl,
+            unrealized_pnl=p.unrealized_pnl,
+            position_size=p.position_size,
+        )
+        for p in result.pnl_curve
+    ]
+    metrics = compute_summary_metrics(full_pnl_curve, result.compute_time_us)
+
     trades = apply_limit(result.trades, req.trade_limit)
-    pnl_curve = apply_limit(result.pnl_curve, req.pnl_limit)
+    pnl_curve = apply_limit(full_pnl_curve, req.pnl_limit)
 
     return SimulationResponse(
         data_file=str(data_file),
@@ -80,15 +95,8 @@ def _to_response(data_file: Path, result, req) -> SimulationResponse:
             Trade(timestamp_ns=t.timestamp_ns, side=t.side, price=t.price, size=t.size)
             for t in trades
         ],
-        pnl_curve=[
-            PnLPoint(
-                timestamp_ns=p.timestamp_ns,
-                realized_pnl=p.realized_pnl,
-                unrealized_pnl=p.unrealized_pnl,
-                position_size=p.position_size,
-            )
-            for p in pnl_curve
-        ],
+        pnl_curve=pnl_curve,
+        metrics=metrics,
     )
 
 

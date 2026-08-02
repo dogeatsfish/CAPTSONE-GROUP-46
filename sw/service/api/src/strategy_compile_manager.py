@@ -54,6 +54,7 @@ from config import (
     STRATEGY_MAIN_JOB_SRC,
     STRATEGY_RUN_TIMEOUT_S,
 )
+from metrics import compute_summary_metrics
 from response import SimulationResponse
 
 # Sentinel enqueued after the job ends so the consumer knows to stop.
@@ -322,12 +323,16 @@ class StrategyCompileJob:
         except Exception:  # noqa: BLE001 - logging must never break the job
             self._log("[run] warning: failed to persist run to database")
 
+        compute_time_us = raw.get("compute_time_us", 0)
+        metrics = compute_summary_metrics(pnl_curve, compute_time_us)
+
         response = SimulationResponse(
             data_file=str(self.data_file),
             total_trades=raw.get("total_trades", 0),
-            compute_time_us=raw.get("compute_time_us", 0),
+            compute_time_us=compute_time_us,
             trades=apply_limit(trades, self.trade_limit),
             pnl_curve=apply_limit(pnl_curve, self.pnl_limit),
+            metrics=metrics,
         )
         self._emit_terminal(
             {"type": "complete", "job_id": self.job_id, "result": response.model_dump()}
