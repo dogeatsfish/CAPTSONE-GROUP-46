@@ -378,7 +378,10 @@ button.danger {
 
 .results-grid {
     display: grid;
-    grid-template-columns: minmax(220px, 1.1fr) repeat(4, minmax(120px, 1fr));
+    /* Hero column floor bumped up from 220px: at the hero value's 34px bold
+       size, a typical formatted PnL string (e.g. "-$12,345.67") needs more
+       room than that to avoid spilling past the card border. */
+    grid-template-columns: minmax(260px, 1.1fr) repeat(4, minmax(120px, 1fr));
     gap: 12px;
 }
 
@@ -388,6 +391,11 @@ button.danger {
     border: 1px solid var(--rule);
     border-radius: 3px;
     padding: 16px 18px;
+    /* Grid items default to min-width: auto, which floors their size at the
+       content's natural width -- without this, a long formatted value (e.g.
+       a large negative PnL) forces the card wider than its track and spills
+       past the border instead of shrinking to fit. */
+    min-width: 0;
 }
 
 .card .label {
@@ -404,6 +412,9 @@ button.danger {
     font-size: 19px;
     font-weight: 600;
     margin-top: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .value.pos {
