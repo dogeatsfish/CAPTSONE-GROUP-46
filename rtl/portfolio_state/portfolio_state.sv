@@ -61,68 +61,44 @@ module portfolio_state
   logic [63:0] div_rem   [NUM_ASSETS];
   logic [5:0]  div_count [NUM_ASSETS];
 
-  // Pipeline Registers
-  logic p1_valid;
-  trade_t p1_trade;
-  logic p1_is_buy;
-  logic [ASSET_IDX_W-1:0] p1_idx;
-  logic signed [63:0] p1_avg_cost;
+  // Pipeline control signals (4 cycle delay to match multiplier)
+  logic p_valid [1:4];
+  trade_t p_trade [1:4];
+  logic p_is_buy [1:4];
+  logic [ASSET_IDX_W-1:0] p_idx [1:4];
 
-  logic p2_valid;
-  trade_t p2_trade;
-  logic p2_is_buy;
-  logic [ASSET_IDX_W-1:0] p2_idx;
-  logic signed [63:0] p2_trade_val_lo_raw;
-  logic signed [63:0] p2_trade_val_hi_raw;
-  logic signed [63:0] p2_pnl_margin;
-  logic signed [63:0] p2_cost_basis_lo_raw;
-  logic signed [63:0] p2_cost_basis_hi_raw;
-
-  logic p3_valid;
-  trade_t p3_trade;
-  logic p3_is_buy;
-  logic [ASSET_IDX_W-1:0] p3_idx;
-  logic signed [63:0] p3_trade_val_lo;
-  logic signed [63:0] p3_trade_val_hi;
-  logic signed [63:0] p3_pnl_margin;
-  logic signed [63:0] p3_cost_basis_lo;
-  logic signed [63:0] p3_cost_basis_hi;
-
-  logic p4_valid;
-  trade_t p4_trade;
-  logic p4_is_buy;
-  logic [ASSET_IDX_W-1:0] p4_idx;
-  logic signed [63:0] p4_trade_val;
-  logic signed [63:0] p4_cost_basis;
-  logic signed [63:0] p4_pnl_val_lo_raw;
-  logic signed [63:0] p4_pnl_val_hi_raw;
-
-  logic p5_valid;
-  trade_t p5_trade;
-  logic p5_is_buy;
-  logic [ASSET_IDX_W-1:0] p5_idx;
   logic signed [63:0] p5_trade_val;
   logic signed [63:0] p5_cost_basis;
-  logic signed [63:0] p5_pnl_val_lo;
-  logic signed [63:0] p5_pnl_val_hi;
+  logic signed [63:0] p5_pnl_val;
 
-  logic p6_valid;
-  trade_t p6_trade;
-  logic p6_is_buy;
-  logic [ASSET_IDX_W-1:0] p6_idx;
-  logic signed [63:0] p6_trade_val;
-  logic signed [63:0] p6_cost_basis;
-  logic signed [63:0] p6_pnl_val;
+  logic signed [31:0] avg_cost_in;
+  assign avg_cost_in = assets[s_idx].avg_entry_price;
+
+  pipelined_mult_32x32 u_mult_trade_val (
+    .clk(core_clk),
+    .a(signed'(trade_in.price)),
+    .b(signed'(trade_in.quantity)),
+    .p(p5_trade_val)
+  );
+
+  pipelined_mult_32x32 u_mult_cost_basis (
+    .clk(core_clk),
+    .a(signed'(avg_cost_in)),
+    .b(signed'(trade_in.quantity)),
+    .p(p5_cost_basis)
+  );
+
+  pipelined_mult_32x32 u_mult_pnl (
+    .clk(core_clk),
+    .a(signed'(trade_in.price) - signed'(avg_cost_in)),
+    .b(signed'(trade_in.quantity)),
+    .p(p5_pnl_val)
+  );
 
   always_ff @(posedge core_clk or negedge rst_n) begin
     if (!rst_n) begin
       cash <= 64'd10_000_000; // Start with 10M cash
-      p1_valid <= 1'b0;
-      p2_valid <= 1'b0;
-      p3_valid <= 1'b0;
-      p4_valid <= 1'b0;
-      p5_valid <= 1'b0;
-      p6_valid <= 1'b0;
+      for (int i = 1; i <= 4; i++) p_valid[i] <= 1'b0;
       for (int i = 0; i < NUM_ASSETS; i++) begin
         assets[i].net_position <= '0;
         assets[i].total_position_value <= '0;
@@ -156,95 +132,92 @@ module portfolio_state
         end
       end
 
-      // Stage 1
-      p1_valid <= valid_trade;
-      p1_trade    <= trade_in;
-      p1_is_buy   <= is_buy;
-      p1_idx      <= s_idx;
-      p1_avg_cost <= assets[s_idx].avg_entry_price;
+      // Control Pipeline
+      p_valid[1] <= valid_trade;
+      p_trade[1] <= trade_in;
+      p_is_buy[1] <= is_buy;
+      p_idx[1]   <= s_idx;
 
-      // Stage 2
-      p2_valid <= p1_valid;
-      p2_trade      <= p1_trade;
-      p2_is_buy     <= p1_is_buy;
-      p2_idx        <= p1_idx;
-      p2_trade_val_lo_raw <= signed'({32'd0, p1_trade.price}) * signed'({33'd0, p1_trade.quantity[15:0]});
-      p2_trade_val_hi_raw <= signed'({32'd0, p1_trade.price}) * signed'({33'd0, p1_trade.quantity[31:16]});
-      p2_pnl_margin       <= signed'({32'd0, p1_trade.price}) - signed'(p1_avg_cost);
-      p2_cost_basis_lo_raw<= signed'(p1_avg_cost) * signed'({33'd0, p1_trade.quantity[15:0]});
-      p2_cost_basis_hi_raw<= signed'(p1_avg_cost) * signed'({33'd0, p1_trade.quantity[31:16]});
+      for (int i = 2; i <= 4; i++) begin
+        p_valid[i] <= p_valid[i-1];
+        p_trade[i] <= p_trade[i-1];
+        p_is_buy[i]<= p_is_buy[i-1];
+        p_idx[i]   <= p_idx[i-1];
+      end
 
-      // Stage 3
-      p3_valid <= p2_valid;
-      p3_trade      <= p2_trade;
-      p3_is_buy     <= p2_is_buy;
-      p3_idx        <= p2_idx;
-      p3_trade_val_lo <= p2_trade_val_lo_raw;
-      p3_trade_val_hi <= p2_trade_val_hi_raw;
-      p3_cost_basis_lo <= p2_cost_basis_lo_raw;
-      p3_cost_basis_hi <= p2_cost_basis_hi_raw;
-      p3_pnl_margin   <= p2_pnl_margin;
-
-      // Stage 4
-      p4_valid <= p3_valid;
-      p4_trade      <= p3_trade;
-      p4_is_buy     <= p3_is_buy;
-      p4_idx        <= p3_idx;
-      p4_trade_val  <= p3_trade_val_lo + (p3_trade_val_hi << 16);
-      p4_cost_basis <= p3_cost_basis_lo + (p3_cost_basis_hi << 16);
-      p4_pnl_val_lo_raw <= p3_pnl_margin * signed'({33'd0, p3_trade.quantity[15:0]});
-      p4_pnl_val_hi_raw <= p3_pnl_margin * signed'({33'd0, p3_trade.quantity[31:16]});
-
-      // Stage 5
-      p5_valid <= p4_valid;
-      p5_trade      <= p4_trade;
-      p5_is_buy     <= p4_is_buy;
-      p5_idx        <= p4_idx;
-      p5_trade_val  <= p4_trade_val;
-      p5_cost_basis <= p4_cost_basis;
-      p5_pnl_val_lo <= p4_pnl_val_lo_raw;
-      p5_pnl_val_hi <= p4_pnl_val_hi_raw;
-
-      // Stage 6
-      p6_valid <= p5_valid;
-      p6_trade      <= p5_trade;
-      p6_is_buy     <= p5_is_buy;
-      p6_idx        <= p5_idx;
-      p6_trade_val  <= p5_trade_val;
-      p6_cost_basis <= p5_cost_basis;
-      p6_pnl_val    <= p5_pnl_val_lo + (p5_pnl_val_hi << 16);
-
-      // Stage 7 (Write-back)
-      if (p6_valid) begin
-        assets[p6_idx].last_trade_timestamp <= p6_trade.timestamp;
+      // Stage 5 (Write-back)
+      if (p_valid[4]) begin
+        assets[p_idx[4]].last_trade_timestamp <= p_trade[4].timestamp;
         
-        if (p6_is_buy) begin
-          cash <= cash - p6_trade_val;
-          assets[p6_idx].net_position <= assets[p6_idx].net_position + signed'(p6_trade.quantity);
-          assets[p6_idx].total_position_value <= assets[p6_idx].total_position_value + p6_trade_val;
+        if (p_is_buy[4]) begin
+          cash <= cash - p5_trade_val;
+          assets[p_idx[4]].net_position <= assets[p_idx[4]].net_position + signed'(p_trade[4].quantity);
+          assets[p_idx[4]].total_position_value <= assets[p_idx[4]].total_position_value + p5_trade_val;
           
           // Trigger division for new average cost
-          div_state[p6_idx] <= DIVIDE;
-          div_num[p6_idx]   <= (assets[p6_idx].total_position_value + p6_trade_val);
-          div_den[p6_idx]   <= (assets[p6_idx].net_position + signed'(p6_trade.quantity));
-          div_quot[p6_idx]  <= '0;
-          div_rem[p6_idx]   <= '0;
-          div_count[p6_idx] <= 32;
+          div_state[p_idx[4]] <= DIVIDE;
+          div_num[p_idx[4]]   <= (assets[p_idx[4]].total_position_value + p5_trade_val);
+          div_den[p_idx[4]]   <= (assets[p_idx[4]].net_position + signed'(p_trade[4].quantity));
+          div_quot[p_idx[4]]  <= '0;
+          div_rem[p_idx[4]]   <= '0;
+          div_count[p_idx[4]] <= 32;
         end else begin // Sell
-          cash <= cash + p6_trade_val;
-          assets[p6_idx].realized_pnl <= assets[p6_idx].realized_pnl + p6_pnl_val;
-          assets[p6_idx].net_position <= assets[p6_idx].net_position - signed'(p6_trade.quantity);
-          assets[p6_idx].total_position_value <= assets[p6_idx].total_position_value - p6_cost_basis;
+          cash <= cash + p5_trade_val;
+          assets[p_idx[4]].realized_pnl <= assets[p_idx[4]].realized_pnl + p5_pnl_val;
+          assets[p_idx[4]].net_position <= assets[p_idx[4]].net_position - signed'(p_trade[4].quantity);
+          assets[p_idx[4]].total_position_value <= assets[p_idx[4]].total_position_value - p5_cost_basis;
           
           // If flat or short, reset tracking
-          if (assets[p6_idx].net_position <= signed'(p6_trade.quantity)) begin
-            assets[p6_idx].total_position_value <= '0;
-            assets[p6_idx].avg_entry_price <= '0;
-            div_state[p6_idx] <= IDLE; // cancel any running division
+          if (assets[p_idx[4]].net_position <= signed'(p_trade[4].quantity)) begin
+            assets[p_idx[4]].total_position_value <= '0;
+            assets[p_idx[4]].avg_entry_price <= '0;
+            div_state[p_idx[4]] <= IDLE; // cancel any running division
           end
         end
       end
     end
   end
 
+endmodule
+
+module pipelined_mult_32x32 (
+  input  logic clk,
+  input  logic signed [31:0] a,
+  input  logic signed [31:0] b,
+  output logic signed [63:0] p
+);
+  logic signed [17:0] a_lo_sgn;
+  logic signed [17:0] b_lo_sgn;
+  logic signed [17:0] a_hi_sgn;
+  logic signed [17:0] b_hi_sgn;
+  
+  always_ff @(posedge clk) begin
+      a_lo_sgn <= signed'({2'b00, a[15:0]}); // Zero extended to positive
+      b_lo_sgn <= signed'({2'b00, b[15:0]}); // Zero extended to positive
+      a_hi_sgn <= signed'(a[31:16]);         // Sign extended
+      b_hi_sgn <= signed'(b[31:16]);         // Sign extended
+  end
+  
+  // Explicitly force DSP48E1 mapping for these multipliers
+  (* use_dsp = "yes" *) logic signed [35:0] p0;
+  (* use_dsp = "yes" *) logic signed [35:0] p1;
+  (* use_dsp = "yes" *) logic signed [35:0] p2;
+  (* use_dsp = "yes" *) logic signed [35:0] p3;
+  
+  always_ff @(posedge clk) begin
+      p0 <= a_lo_sgn * b_lo_sgn;
+      p1 <= a_hi_sgn * b_lo_sgn;
+      p2 <= a_lo_sgn * b_hi_sgn;
+      p3 <= a_hi_sgn * b_hi_sgn;
+  end
+  
+  logic signed [63:0] res_stg1;
+  logic signed [63:0] res_stg2;
+  
+  always_ff @(posedge clk) begin
+      res_stg1 <= 64'(p0) + (64'(p1) <<< 16) + (64'(p2) <<< 16);
+      res_stg2 <= res_stg1 + (64'(p3) <<< 32);
+  end
+  
+  assign p = res_stg2;
 endmodule
