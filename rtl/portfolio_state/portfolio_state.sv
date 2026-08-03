@@ -61,9 +61,35 @@ module portfolio_state
   logic [63:0] div_rem   [NUM_ASSETS];
   logic [5:0]  div_count [NUM_ASSETS];
 
+  // Pipeline Registers
+  logic p1_valid;
+  trade_t p1_trade;
+  logic p1_is_buy;
+  logic [ASSET_IDX_W-1:0] p1_idx;
+  logic signed [31:0] p1_avg_cost;
+
+  logic p2_valid;
+  trade_t p2_trade;
+  logic p2_is_buy;
+  logic [ASSET_IDX_W-1:0] p2_idx;
+  logic signed [63:0] p2_trade_val;
+  logic signed [31:0] p2_pnl_margin;
+  logic signed [63:0] p2_cost_basis;
+
+  logic p3_valid;
+  trade_t p3_trade;
+  logic p3_is_buy;
+  logic [ASSET_IDX_W-1:0] p3_idx;
+  logic signed [63:0] p3_trade_val;
+  logic signed [63:0] p3_pnl_val;
+  logic signed [63:0] p3_cost_basis;
+
   always_ff @(posedge core_clk or negedge rst_n) begin
     if (!rst_n) begin
       cash <= 64'd10_000_000; // Start with 10M cash
+      p1_valid <= 1'b0;
+      p2_valid <= 1'b0;
+      p3_valid <= 1'b0;
       for (int i = 0; i < NUM_ASSETS; i++) begin
         assets[i].net_position <= '0;
         assets[i].total_position_value <= '0;
@@ -97,41 +123,64 @@ module portfolio_state
         end
       end
 
-      // Ingest valid trade
+      // Stage 1
+      p1_valid <= valid_trade;
       if (valid_trade) begin
-        automatic logic signed [63:0] trade_val;
-        automatic logic signed [31:0] avg_cost;
-        trade_val = signed'({32'd0, trade_in.price}) * signed'({32'd0, trade_in.quantity});
-        assets[s_idx].last_trade_timestamp <= trade_in.timestamp;
+        p1_trade    <= trade_in;
+        p1_is_buy   <= is_buy;
+        p1_idx      <= s_idx;
+        p1_avg_cost <= assets[s_idx].avg_entry_price;
+      end
+
+      // Stage 2
+      p2_valid <= p1_valid;
+      if (p1_valid) begin
+        p2_trade      <= p1_trade;
+        p2_is_buy     <= p1_is_buy;
+        p2_idx        <= p1_idx;
+        p2_trade_val  <= signed'({32'd0, p1_trade.price}) * signed'({32'd0, p1_trade.quantity});
+        p2_pnl_margin <= signed'({32'd0, p1_trade.price}) - signed'(p1_avg_cost);
+        p2_cost_basis <= signed'(p1_avg_cost) * signed'({32'd0, p1_trade.quantity});
+      end
+
+      // Stage 3
+      p3_valid <= p2_valid;
+      if (p2_valid) begin
+        p3_trade      <= p2_trade;
+        p3_is_buy     <= p2_is_buy;
+        p3_idx        <= p2_idx;
+        p3_trade_val  <= p2_trade_val;
+        p3_pnl_val    <= p2_pnl_margin * signed'({32'd0, p2_trade.quantity});
+        p3_cost_basis <= p2_cost_basis;
+      end
+
+      // Stage 4 (Write-back)
+      if (p3_valid) begin
+        assets[p3_idx].last_trade_timestamp <= p3_trade.timestamp;
         
-        if (is_buy) begin
-          cash <= cash - trade_val;
-          assets[s_idx].net_position <= assets[s_idx].net_position + signed'(trade_in.quantity);
-          assets[s_idx].total_position_value <= assets[s_idx].total_position_value + trade_val;
+        if (p3_is_buy) begin
+          cash <= cash - p3_trade_val;
+          assets[p3_idx].net_position <= assets[p3_idx].net_position + signed'(p3_trade.quantity);
+          assets[p3_idx].total_position_value <= assets[p3_idx].total_position_value + p3_trade_val;
           
           // Trigger division for new average cost
-          div_state[s_idx] <= DIVIDE;
-          div_num[s_idx] <= (assets[s_idx].total_position_value + trade_val);
-          div_den[s_idx] <= (assets[s_idx].net_position + signed'(trade_in.quantity));
-          div_quot[s_idx] <= '0;
-          div_rem[s_idx] <= '0;
-          div_count[s_idx] <= 32;
+          div_state[p3_idx] <= DIVIDE;
+          div_num[p3_idx]   <= (assets[p3_idx].total_position_value + p3_trade_val);
+          div_den[p3_idx]   <= (assets[p3_idx].net_position + signed'(p3_trade.quantity));
+          div_quot[p3_idx]  <= '0;
+          div_rem[p3_idx]   <= '0;
+          div_count[p3_idx] <= 32;
         end else begin // Sell
-          cash <= cash + trade_val;
-          // Calculate PnL based on existing average cost basis
-          avg_cost = assets[s_idx].avg_entry_price;
-          assets[s_idx].realized_pnl <= assets[s_idx].realized_pnl + 
-              (signed'({32'd0, trade_in.price}) - signed'(avg_cost)) * signed'({32'd0, trade_in.quantity});
-              
-          assets[s_idx].net_position <= assets[s_idx].net_position - signed'(trade_in.quantity);
-          assets[s_idx].total_position_value <= assets[s_idx].total_position_value - 
-              (signed'(avg_cost) * signed'({32'd0, trade_in.quantity}));
-              
+          cash <= cash + p3_trade_val;
+          assets[p3_idx].realized_pnl <= assets[p3_idx].realized_pnl + p3_pnl_val;
+          assets[p3_idx].net_position <= assets[p3_idx].net_position - signed'(p3_trade.quantity);
+          assets[p3_idx].total_position_value <= assets[p3_idx].total_position_value - p3_cost_basis;
+          
           // If flat or short, reset tracking
-          if (assets[s_idx].net_position <= signed'(trade_in.quantity)) begin
-            assets[s_idx].total_position_value <= '0;
-            assets[s_idx].avg_entry_price <= '0;
-            div_state[s_idx] <= IDLE; // cancel any running division
+          if (assets[p3_idx].net_position <= signed'(p3_trade.quantity)) begin
+            assets[p3_idx].total_position_value <= '0;
+            assets[p3_idx].avg_entry_price <= '0;
+            div_state[p3_idx] <= IDLE; // cancel any running division
           end
         end
       end
