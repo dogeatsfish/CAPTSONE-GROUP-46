@@ -50,6 +50,12 @@ module alpha_engine_core_tb
   logic [TIMESTAMP_W-1:0] tob_timestamp [NUM_ASSETS];
   logic [NUM_ASSETS-1:0]  tob_updated;
   logic [NUM_ASSETS-1:0]  book_busy;
+  
+  portfolio_state_t mock_portfolio_state;
+  initial begin
+    mock_portfolio_state = '0;
+    mock_portfolio_state.available_cash = 64'd1000000; // start with enough cash so tests pass
+  end
 
   initial core_clk = 1'b0;
   always #(CORE_PERIOD_NS/2.0) core_clk = ~core_clk;
@@ -70,6 +76,7 @@ module alpha_engine_core_tb
     .tob_ask_price(tob_ask_price), .tob_ask_qty(tob_ask_qty),
     .tob_timestamp(tob_timestamp), .tob_updated(tob_updated),
     .book_busy(book_busy),
+    .portfolio_state(mock_portfolio_state),
     .depth_rd_addr(e_rd_addr), .depth_rd_en(e_rd_en), .depth_rd_data(64'd0),
     .m_axis_order_tdata(e_tdata), .m_axis_order_tuser(e_tuser),
     .m_axis_order_tvalid(e_tvalid)
@@ -84,6 +91,7 @@ module alpha_engine_core_tb
     .tob_ask_price(tob_ask_price), .tob_ask_qty(tob_ask_qty),
     .tob_timestamp(tob_timestamp), .tob_updated(tob_updated),
     .book_busy(book_busy),
+    .portfolio_state(mock_portfolio_state),
     .depth_rd_addr(s_rd_addr), .depth_rd_en(s_rd_en), .depth_rd_data(64'd0),
     .m_axis_order_tdata(s_tdata), .m_axis_order_tuser(s_tuser),
     .m_axis_order_tvalid(s_tvalid)
