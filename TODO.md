@@ -112,6 +112,16 @@ L1, now pinned by a regression test).
       the marginal case of the bare CLI harnesses (`make test-online`/
       `make socket-test`) running natively on Windows outside the container.
       Independently confirmed by `docs/hw_sw_transport_gaps.md` #10/#11.
+      **Caveat found 2026-08-02:** this holds for loopback online-mode
+      testing (container talking to itself), but NOT for `online_target =
+      "hardware"` against the real board -- Docker Desktop's networking is
+      an isolated VM, so a Dockerized backend never reaches the host's
+      physical NIC/static-ARP setup, and the board's replies never reach the
+      container. `sw/dev-hardware.sh` works around it by running the service
+      natively on macOS/Linux/WSL2 instead, but that still leaves native
+      Windows with zero hardware-target path (`CT_NO_ONLINE_SIM` at compile
+      time, container or not). Worth revisiting if native-Windows
+      hardware-target support actually matters for the team.
 - [x] `engine_sim.cpython-314-darwin.so` was committed to git — resolved via
       PR #15 (merged), which removed it along with 3 other stray compiled
       test binaries (`socket_test`, `stress_orderbook`, `test_online`) that

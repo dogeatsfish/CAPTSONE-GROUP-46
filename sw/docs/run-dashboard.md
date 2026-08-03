@@ -7,6 +7,14 @@ the FastAPI service, and the React dashboard. Three pieces, two terminals.
 engine_sim (C++, via pybind11)  ->  FastAPI service (:8000)  ->  React UI (:5173)
 ```
 
+**Shortcut:** `sw/dev.sh` (macOS/Linux) / `sw/dev.ps1` (Windows) automate
+everything below (build, install, start both, health-check, and clean
+teardown on Ctrl-C) via a Docker-based backend -- fine for offline/loopback
+simulation. Read on if you want to run things natively instead (needed for
+real-hardware testing -- see `sw/dev-hardware.sh` and
+[`docs/connection-test.md`](../../docs/connection-test.md#running-the-backend-against-real-hardware)
+-- or if you just want to understand what the scripts are doing for you).
+
 ## Prerequisites
 
 | Tool | Needed for | Notes |
@@ -26,9 +34,10 @@ make pymodule
 ```
 
 This produces `engine_sim*.so` in `sw/engine/`, which the API imports directly
-(see `service/api/config/config.py`). On Linux, `make pymodule` needs the
-manual build command instead — see
-[build-and-test.md § Building the Python module](build-and-test.md#building-the-python-module--macos-vs-linux).
+(see `service/api/config/config.py`). Works as-is on macOS/Linux (full
+online/hardware support) and native Windows (offline-only) — see
+[build-and-test.md § Building the Python module](build-and-test.md#building-the-python-module--per-platform)
+for the per-platform breakdown.
 
 ## 2. Set up the API service
 

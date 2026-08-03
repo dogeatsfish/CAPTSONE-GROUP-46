@@ -10,8 +10,9 @@ cd sw/engine
 
 | Platform | C++ toolchain | Notes |
 |----------|---------------|-------|
-| **Linux / Dev Container** | `g++` (GCC 13 in the container) | Everything works out of the box. |
-| **macOS** | `g++` → Apple Clang via Xcode CLT | `xcode-select --install`. `g++` is a Clang alias here. |
+| **Linux / Dev Container** | `g++` (GCC 13 in the container) | Everything works out of the box, including online/hardware support. |
+| **macOS** | `g++` → Apple Clang via Xcode CLT | `xcode-select --install`. `g++` is a Clang alias here. Full online/hardware support. |
+| **Windows** | MSYS2/MinGW-w64 `g++`, or build inside the Dev Container/WSL2 | Offline simulation only — no online/hardware support natively (see below). |
 
 The Python module and the online tests additionally need Python 3 with
 `pybind11`. Inside the [Dev Container](README.md) these are preinstalled.
@@ -121,49 +122,32 @@ this is the quick/checked-in version of step 4's manual command.
 Same override pattern as `test-online`/`socket-test`: point it at a different
 `.ini` with `HW_SMOKE_CONFIG=...` instead of editing the Makefile.
 
-## Building the Python module — macOS vs Linux
+## Building the Python module — per platform
 
-This is the one target that differs by platform. The `pymodule` recipe uses the
-macOS/Clang linker flag `-undefined dynamic_lookup`, which lets undefined Python
-symbols resolve at load time:
-
-```make
-$(CXX) $(CXXFLAGS) -shared -fPIC -undefined dynamic_lookup \
-    $(INCLUDES) $(PY_INCLUDES) $(PY_SRCS) -o $(PY_TARGET)
-```
-
-### macOS
-
-Works as written:
+`make pymodule` works as-is on every platform -- the Makefile already
+branches on `uname -s`/`$(OS)` for you, so there's no manual command to run
+here anymore:
 
 ```bash
 make pymodule
-```
-
-### Linux
-
-`-undefined dynamic_lookup` is **not** a valid GCC/ld flag on Linux and the
-`make pymodule` target will fail there. Linux Python extensions don't need it,
-so build the module manually without that flag:
-
-```bash
-g++ -std=c++17 -O2 -Wall -Wextra -shared -fPIC \
-    -Ishared/include -Imatch/include -Isimulation/include \
-    $(python3 -m pybind11 --includes) \
-    bindings/src/bindings.cpp \
-    simulation/src/offline_simulation.cpp \
-    simulation/src/online_simulation.cpp \
-    simulation/src/protocol.cpp \
-    simulation/src/user_strategy.cpp \
-    match/src/orderbook.cpp \
-    -o engine_sim$(python3-config --extension-suffix)
-```
-
-Then import it:
-
-```bash
 python3 -c "import engine_sim; print(engine_sim.OuchTransport.UDP)"
 ```
+
+What that actually builds differs by platform:
+
+| Platform | Online/hardware support | Linker flag |
+|----------|--------------------------|-------------|
+| **macOS** | Full (`OnlineSimulation` compiled in) | `-undefined dynamic_lookup` (Clang/ld64-only; letting undefined Python symbols resolve at load time) |
+| **Linux / Dev Container** | Full | none needed (ELF tolerates unresolved symbols until import time) |
+| **Native Windows** | **None** — compiles with `-DCT_NO_ONLINE_SIM`, offline simulation only | links against `python3-config --ldflags` directly (no macOS-style deferred resolution on PE/COFF) |
+
+That Windows row is a real, currently-unsolved gap, not a build-script bug:
+`online_simulation.cpp` uses POSIX sockets with no Winsock2 port. For
+online/hardware work on a Windows machine, use the
+[Dev Container](README.md) or WSL2 instead of a native build — see
+`sw/dev-hardware.sh` and
+[`docs/connection-test.md`](../../docs/connection-test.md#running-the-backend-against-real-hardware)
+for the real-board case specifically.
 
 ## Cleaning up
 
