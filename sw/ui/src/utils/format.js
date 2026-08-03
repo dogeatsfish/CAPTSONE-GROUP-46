@@ -60,5 +60,9 @@ export function fmtCompactCurrency(n) {
     const abs = Math.abs(n);
     if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
     if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}k`;
-    return `${sign}$${abs.toFixed(0)}`;
+    // Sub-$1000 PnL is common early in a run or for small size -- rounding to
+    // a whole dollar collapses every tick on a small-magnitude axis to "$0".
+    if (abs >= 1) return `${sign}$${abs.toFixed(2)}`;
+    if (abs === 0) return "$0";
+    return `${sign}$${abs.toFixed(4)}`;
 }
