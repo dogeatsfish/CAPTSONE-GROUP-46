@@ -125,34 +125,28 @@ module portfolio_state
 
       // Stage 1
       p1_valid <= valid_trade;
-      if (valid_trade) begin
-        p1_trade    <= trade_in;
-        p1_is_buy   <= is_buy;
-        p1_idx      <= s_idx;
-        p1_avg_cost <= assets[s_idx].avg_entry_price;
-      end
+      p1_trade    <= trade_in;
+      p1_is_buy   <= is_buy;
+      p1_idx      <= s_idx;
+      p1_avg_cost <= assets[s_idx].avg_entry_price;
 
       // Stage 2
       p2_valid <= p1_valid;
-      if (p1_valid) begin
-        p2_trade      <= p1_trade;
-        p2_is_buy     <= p1_is_buy;
-        p2_idx        <= p1_idx;
-        p2_trade_val  <= signed'({32'd0, p1_trade.price}) * signed'({32'd0, p1_trade.quantity});
-        p2_pnl_margin <= signed'({32'd0, p1_trade.price}) - signed'(p1_avg_cost);
-        p2_cost_basis <= signed'(p1_avg_cost) * signed'({32'd0, p1_trade.quantity});
-      end
+      p2_trade      <= p1_trade;
+      p2_is_buy     <= p1_is_buy;
+      p2_idx        <= p1_idx;
+      p2_trade_val  <= signed'({32'd0, p1_trade.price}) * signed'({32'd0, p1_trade.quantity});
+      p2_pnl_margin <= signed'({32'd0, p1_trade.price}) - signed'(p1_avg_cost);
+      p2_cost_basis <= signed'(p1_avg_cost) * signed'({32'd0, p1_trade.quantity});
 
       // Stage 3
       p3_valid <= p2_valid;
-      if (p2_valid) begin
-        p3_trade      <= p2_trade;
-        p3_is_buy     <= p2_is_buy;
-        p3_idx        <= p2_idx;
-        p3_trade_val  <= p2_trade_val;
-        p3_pnl_val    <= p2_pnl_margin * signed'({32'd0, p2_trade.quantity});
-        p3_cost_basis <= p2_cost_basis;
-      end
+      p3_trade      <= p2_trade;
+      p3_is_buy     <= p2_is_buy;
+      p3_idx        <= p2_idx;
+      p3_trade_val  <= p2_trade_val;
+      p3_pnl_val    <= p2_pnl_margin * signed'({32'd0, p2_trade.quantity});
+      p3_cost_basis <= p2_cost_basis;
 
       // Stage 4 (Write-back)
       if (p3_valid) begin
