@@ -284,6 +284,7 @@ module commontrader_top
   //--------------------------------------------------------------------------
   logic [TRADE_W-1:0] order_tdata;
   logic               order_tuser, order_tvalid;
+  portfolio_state_t   p_state;
 
   alpha_engine_core u_alpha (
     .core_clk           (core_clk),
@@ -298,6 +299,7 @@ module commontrader_top
     .depth_rd_addr      (depth_rd_addr),
     .depth_rd_en        (depth_rd_en),
     .depth_rd_data      (depth_rd_data),
+    .portfolio_state    (p_state),
     .m_axis_order_tdata (order_tdata),
     .m_axis_order_tuser (order_tuser),
     .m_axis_order_tvalid(order_tvalid)
@@ -326,6 +328,18 @@ module commontrader_top
     .m_axis_tx_tdata     (tx_tdata),
     .m_axis_tx_tuser     (tx_tuser),
     .m_axis_tx_tvalid    (tx_tvalid)
+  );
+
+  //--------------------------------------------------------------------------
+  // Portfolio State Tracker
+  //--------------------------------------------------------------------------
+  portfolio_state u_portfolio (
+    .core_clk          (core_clk),
+    .rst_n             (core_rst_n),
+    .s_axis_tx_tdata   (tx_tdata),
+    .s_axis_tx_tuser   (tx_tuser),
+    .s_axis_tx_tvalid  (tx_tvalid),
+    .m_portfolio_state (p_state)
   );
 
   //--------------------------------------------------------------------------

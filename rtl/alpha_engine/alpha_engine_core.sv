@@ -76,6 +76,9 @@ module alpha_engine_core
   input  logic [LEVEL_W-1:0]      depth_rd_data,
   /* verilator lint_on UNUSEDSIGNAL */
 
+  // --- Portfolio State (0-cycle access) -------------------------------------
+  input  portfolio_state_t        portfolio_state,
+
   // --- AXI4-Stream master to Pre-Trade Risk Gateway -------------------------
   output logic [TRADE_W-1:0]      m_axis_order_tdata,   // trade_t, 144 bits
   output logic                    m_axis_order_tuser,   // 1 = Buy, 0 = Sell
