@@ -16,6 +16,12 @@ SimulationResult OfflineSimulation::run() {
     constexpr uint64_t SAMPLE_INTERVAL_NS = 1'000'000'000ULL;
     // Number of MBO records to pull off disk per fread call.
     constexpr size_t READ_CHUNK = 8192;
+    // Cap on how many samples a single gap-backfill can emit (~1 day at 1Hz,
+    // generously covering any real trading session). Without this, a
+    // corrupted or garbage record timestamp turns the backfill below into an
+    // effectively unbounded loop instead of just failing to sample a bogus
+    // span.
+    constexpr uint64_t MAX_BACKFILL_SAMPLES = 24ULL * 60 * 60;
 
     // Open the packed binary MBO stream.
     FILE* fp = std::fopen(mbo_file_path.c_str(), "rb");
@@ -41,12 +47,46 @@ SimulationResult OfflineSimulation::run() {
 
     std::vector<MBORecord> buffer(READ_CHUNK);
     uint64_t next_sample_ns = 0; // fires on the first record, then every second
+    bool have_prev_state = false;
+    L1State prev_l1_state{};
 
     size_t n;
     while ((n = std::fread(buffer.data(), sizeof(MBORecord), READ_CHUNK, fp)) > 0) {
         for (size_t i = 0; i < n; ++i) {
             const MBORecord& rec = buffer[i];
             const uint64_t tick_timestamp_ns = rec.timestamp_ns;
+
+            // --- 0. Backfill flat samples across any gap since the last record ---
+            // A stoppage/halt leaves a stretch with no MBO records at all, and
+            // sampling used to happen only inside this per-record loop -- so a
+            // gap produced zero samples and the chart just interpolated a
+            // straight line across it. Emit a real, held-PnL sample at every
+            // second boundary the gap crosses, using the book state as it was
+            // going into the gap, so the curve reflects the stoppage instead
+            // of silently skipping over it.
+            if (have_prev_state) {
+                const double mark = (prev_l1_state.best_bid > 0.0 && prev_l1_state.best_ask > 0.0)
+                                        ? 0.5 * (prev_l1_state.best_bid + prev_l1_state.best_ask)
+                                        : 0.0;
+                uint64_t backfilled = 0;
+                while (next_sample_ns < tick_timestamp_ns && backfilled < MAX_BACKFILL_SAMPLES) {
+                    result.pnl_curve.push_back(PnLSnapshot{
+                        next_sample_ns,
+                        strategy.get_realized_pnl(),
+                        strategy.get_unrealized_pnl(mark),
+                        strategy.get_position()});
+                    next_sample_ns += SAMPLE_INTERVAL_NS;
+                    ++backfilled;
+                }
+                // Gap bigger than the cap (e.g. a corrupted/garbage
+                // timestamp): stop backfilling and jump straight to this
+                // record's boundary instead of continuing to loop.
+                if (next_sample_ns < tick_timestamp_ns) {
+                    next_sample_ns = tick_timestamp_ns;
+                }
+            } else {
+                next_sample_ns = tick_timestamp_ns;
+            }
 
             // --- 1. Process the market stream event ---
             if (rec.message_type == 'A') {
@@ -58,6 +98,8 @@ SimulationResult OfflineSimulation::run() {
 
             // --- 2. Extract the updated L1 state ---
             const L1State current_l1 = matching_engine.get_l1_state();
+            prev_l1_state = current_l1;
+            have_prev_state = true;
 
             // --- 3. Inline strategy call (resolved directly, no vtable) ---
             std::optional<Order> user_order = strategy.on_market_update(current_l1);

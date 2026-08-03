@@ -10,7 +10,17 @@ T = TypeVar("T")
 def apply_limit(items: List[T], limit: Optional[int]) -> List[T]:
     """Cap a list to its first `limit` items, or return it unchanged if
     `limit` is None. Shared by every endpoint that trims trades/pnl_curve
-    for the response while persisting the untrimmed data to the DB."""
+    for the response while persisting the untrimmed data to the DB.
+
+    Note for pnl_curve callers: a stoppage/halt in the underlying MBO stream
+    now backfills a real (held-PnL) sample at every second boundary of the
+    gap (see OfflineSimulation::run), instead of contributing zero samples
+    the way it used to. A caller that sets pnl_limit on a run with an early
+    stoppage will have more of that budget spent on the gap, so the
+    truncated response can end mid-stoppage rather than reaching later,
+    possibly more interesting, data. No shipped UI path sets pnl_limit today
+    (always None/unlimited), but this is worth knowing before that changes.
+    """
     return items[:limit] if limit is not None else items
 
 
