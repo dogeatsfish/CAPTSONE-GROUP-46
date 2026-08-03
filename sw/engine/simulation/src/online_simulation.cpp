@@ -141,7 +141,26 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
 
         l1 = matching_engine.get_l1_state();
 
-        // 3. Sample the PnL curve once per simulated second.
+        // 3. Loopback-only: let the engine's own Strategy trade against this
+        // book, exactly like OfflineSimulation::run() does (same call, same
+        // order of operations -- process the resulting order against the L1
+        // state captured above, then sample below reflects the fill). Off by
+        // default (see Config::enable_local_strategy) so the hardware target
+        // still shows only the real board's own trading activity.
+        if (cfg.enable_local_strategy) {
+            std::optional<Order> user_order = strategy.on_market_update(l1);
+            if (user_order.has_value()) {
+                Order& uo = user_order.value();
+                const FillReport fill = matching_engine.process_add(uo, ts);
+                if (fill.filled_size > 0.0) {
+                    strategy.on_fill(uo.side, fill.avg_fill_price, fill.filled_size);
+                    active_result->trades.push_back(
+                        TradeRecord{ts, uo.side, fill.avg_fill_price, fill.filled_size});
+                }
+            }
+        }
+
+        // 4. Sample the PnL curve once per simulated second.
         if (ts >= next_sample_ns) {
             const double mark = (l1.best_bid > 0.0 && l1.best_ask > 0.0)
                                     ? 0.5 * (l1.best_bid + l1.best_ask)
@@ -157,7 +176,7 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
         }
     } // book_mutex released here
 
-    // 4. Stream the sample to any live-telemetry consumer (outside the lock).
+    // 5. Stream the sample to any live-telemetry consumer (outside the lock).
     if (sampled && on_sample_cb) {
         on_sample_cb(*sampled, l1);
     }
@@ -169,26 +188,60 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
 FillReport OnlineSimulation::apply_ouch_order(const protocol::OuchMessage& msg) {
     const uint64_t ts = last_market_ts_ns.load(std::memory_order_relaxed);
 
-    std::lock_guard<std::mutex> lock(book_mutex);
+    // Snapshot produced only if this order fills (if(sampled) below). Captured
+    // under the lock but the telemetry callback is invoked afterwards, without
+    // the lock held -- mirrors apply_market_event, so a slow SSE consumer can
+    // never stall the OUCH thread.
+    std::optional<PnLSnapshot> sampled;
+    L1State l1;
+    FillReport fill{};
 
-    if (msg.msg_type == protocol::OUCH_CANCEL) {
-        // msg.side is always 0 here -- the OUCH Cancel wire format carries no
-        // side (see protocol::from_ouch) -- so this must use the side-agnostic
-        // overload, not guess. Passing msg.side straight through used to
-        // silently no-op every bid-side cancel (process_cancel(id, side)'s
-        // side != 'B' branch always looked in the ask index).
-        matching_engine.process_cancel(msg.order_id);
-        return FillReport{};
+    {
+        std::lock_guard<std::mutex> lock(book_mutex);
+
+        if (msg.msg_type == protocol::OUCH_CANCEL) {
+            // msg.side is always 0 here -- the OUCH Cancel wire format carries no
+            // side (see protocol::from_ouch) -- so this must use the side-agnostic
+            // overload, not guess. Passing msg.side straight through used to
+            // silently no-op every bid-side cancel (process_cancel(id, side)'s
+            // side != 'B' branch always looked in the ask index).
+            matching_engine.process_cancel(msg.order_id);
+            return FillReport{};
+        }
+
+        // OUCH_ENTER: convert to an aggressive order and match it.
+        Order order = protocol::ouch_to_order(msg);
+        fill = matching_engine.process_add(order, ts);
+        if (fill.filled_size > 0.0) {
+            strategy.on_fill(order.side, fill.avg_fill_price, fill.filled_size);
+            active_result->trades.push_back(
+                TradeRecord{ts, order.side, fill.avg_fill_price, fill.filled_size});
+
+            // A fill is exactly the kind of event the once-per-second
+            // market-data sampler in apply_market_event can sit on for a
+            // while (up to max_sleep_ns under real-time hardware pacing):
+            // without pushing a sample here too, the live PnL/top-of-book
+            // stream only reflects a board fill whenever the next scheduled
+            // sample happens to land, which can make a genuinely active
+            // board look frozen in the UI.
+            l1 = matching_engine.get_l1_state();
+            const double mark = (l1.best_bid > 0.0 && l1.best_ask > 0.0)
+                                    ? 0.5 * (l1.best_bid + l1.best_ask)
+                                    : 0.0;
+            const PnLSnapshot snap{
+                ts,
+                strategy.get_realized_pnl(),
+                strategy.get_unrealized_pnl(mark),
+                strategy.get_position()};
+            active_result->pnl_curve.push_back(snap);
+            sampled = snap;
+        }
+    } // book_mutex released here
+
+    if (sampled && on_sample_cb) {
+        on_sample_cb(*sampled, l1);
     }
 
-    // OUCH_ENTER: convert to an aggressive order and match it.
-    Order order = protocol::ouch_to_order(msg);
-    const FillReport fill = matching_engine.process_add(order, ts);
-    if (fill.filled_size > 0.0) {
-        strategy.on_fill(order.side, fill.avg_fill_price, fill.filled_size);
-        active_result->trades.push_back(
-            TradeRecord{ts, order.side, fill.avg_fill_price, fill.filled_size});
-    }
     return fill;
 }
 

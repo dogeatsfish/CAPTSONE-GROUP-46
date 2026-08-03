@@ -44,6 +44,7 @@ from config import (
     ONLINE_OUCH_PORT,
     ONLINE_STREAM_ITCH_ADDRESS,
     ONLINE_STREAM_ITCH_PORT,
+    ONLINE_STREAM_MAX_SLEEP_NS,
     ONLINE_STREAM_OUCH_PORT,
     ONLINE_STREAM_TIME_SCALE,
     engine_sim,
@@ -87,11 +88,18 @@ def build_online_config(target: str = "loopback") -> Any:
         cfg.itch_port = ONLINE_ITCH_PORT
         cfg.ouch_port = ONLINE_OUCH_PORT
         cfg.time_scale = ONLINE_DEFAULT_TIME_SCALE
+        # False (the engine default): trades must reflect only the real
+        # board's own OUCH orders, not a second, independent local strategy.
     else:
         cfg.itch_address = ONLINE_STREAM_ITCH_ADDRESS
         cfg.itch_port = ONLINE_STREAM_ITCH_PORT
         cfg.ouch_port = ONLINE_STREAM_OUCH_PORT
         cfg.time_scale = ONLINE_STREAM_TIME_SCALE
+        cfg.max_sleep_ns = ONLINE_STREAM_MAX_SLEEP_NS
+        # No board is ever attached in loopback, so without this the demo
+        # would replay market data forever and never show a single trade
+        # (see engine_sim.OnlineConfig's enable_local_strategy docstring).
+        cfg.enable_local_strategy = True
     return cfg
 
 

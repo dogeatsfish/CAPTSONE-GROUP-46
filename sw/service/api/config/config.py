@@ -84,6 +84,16 @@ ONLINE_STREAM_OUCH_PORT = 26001
 # even that's more than you want to sit through.
 ONLINE_STREAM_TIME_SCALE = 0.001
 
+# Cap on any single inter-record sleep (OnlineSimulation::Config::max_sleep_ns),
+# in nanoseconds. The engine default (5 real seconds) is sized for the
+# hardware target's true real-time pacing; at loopback's 1000x speed it instead
+# makes real market data's quiet stretches show up as multi-second dead pauses
+# in the live UI, immediately followed by a burst of catch-up samples once
+# data resumes -- visibly "jumpy" rather than smooth. 150ms keeps the same
+# relative bursty/quiet shape (this is still a real-time-paced replay, not a
+# fixed-cadence tick) while making the worst-case pause barely noticeable.
+ONLINE_STREAM_MAX_SLEEP_NS = 150_000_000
+
 # Make the schema modules and the compiled engine importable.
 for _path in (INCLUDE_DIR, ENGINE_DIR):
     if str(_path) not in sys.path:
