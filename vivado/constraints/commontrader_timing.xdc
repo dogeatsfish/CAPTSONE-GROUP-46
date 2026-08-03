@@ -19,6 +19,7 @@
 #    (The pin LOC / IOSTANDARD for rgmii_rx_clk is set in commontrader_pins.xdc.)
 #------------------------------------------------------------------------------
 create_clock -name rgmii_rx_clk -period 8.000 [get_ports rgmii_rx_clk]
+create_clock -name board_clk -period 5.000 [get_ports sys_clk_p]
 
 # core_clk (225 MHz) is produced by the MMCM (CLKFBOUT_MULT_F=3.6, CLKOUT0_DIVIDE_F=2.0)
 # and is AUTO-DERIVED by Vivado from rgmii_rx_clk -- do NOT declare it by hand.
@@ -40,7 +41,8 @@ create_clock -name rgmii_rx_clk -period 8.000 [get_ports rgmii_rx_clk]
 #------------------------------------------------------------------------------
 set_clock_groups -name async_phy_core -asynchronous \
   -group [get_clocks -of_objects [get_ports rgmii_rx_clk]] \
-  -group [get_clocks -of_objects [get_pins -hierarchical -filter {NAME =~ *u_bufg_core/O}]]
+  -group [get_clocks -of_objects [get_pins -hierarchical -filter {NAME =~ *u_bufg_core/O}]] \
+  -group [get_clocks -of_objects [get_ports sys_clk_p]]
 
 #------------------------------------------------------------------------------
 # 3. ASYNC_REG on every synchroniser flop: keeps the two stages of each 2-flop

@@ -73,6 +73,12 @@ module commontrader_top_tb
   logic        tx_fifo_overflow;
   logic        ts_wrapped;
 
+  logic       eth_phy_rst_n;
+  logic       led_heartbeat_n;
+  logic       led_kill_n;
+  logic       led_drop_n;
+  logic       led_overflow_n;
+
   commontrader_top dut (
     .sys_clk_p        (sys_clk_p),
     .sys_clk_n        (sys_clk_n),
@@ -83,7 +89,12 @@ module commontrader_top_tb
     .rgmii_tx_clk     (rgmii_tx_clk),
     .rgmii_txd        (rgmii_txd),
     .rgmii_tx_ctl     (rgmii_tx_ctl),
-    .hw_kill_switch_n (hw_kill_switch_n)
+    .hw_kill_switch_n (hw_kill_switch_n),
+    .eth_phy_rst_n    (eth_phy_rst_n),
+    .led_heartbeat_n  (led_heartbeat_n),
+    .led_kill_n       (led_kill_n),
+    .led_drop_n       (led_drop_n),
+    .led_overflow_n   (led_overflow_n)
   );
 
   assign order_drop_count = dut.order_drop_count;
@@ -569,7 +580,12 @@ module commontrader_top_tb
     //------------------------------------------------------------------------
     // viol_kill_switch latches until reset, so this must run last.
     hw_kill_switch_n = 1'b0;   // active-low: drive low = press the key = assert kill
-    repeat (20) @(posedge rgmii_rx_clk);
+    
+    // The kill switch now has a 5ms debouncer, so we must hold it down for >5ms!
+    #6_000_000;
+    
+    // Check that the Kill Switch LED lit up (active-low = 0)
+    check_int("T10 kill switch LED lit up (led_kill_n == 0)", int'(led_kill_n), 0);
 
     frames_before = tx_frame_count;
     build_encap(16'd2);

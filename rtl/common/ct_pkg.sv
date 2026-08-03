@@ -122,6 +122,23 @@ package ct_pkg;
   parameter logic DIR_SELL = 1'b0;
   parameter logic DIR_BUY  = 1'b1;
 
+  //----------------------------------------------------------------------------
+  // Portfolio State Tracking
+  //----------------------------------------------------------------------------
+  typedef struct packed {
+    logic signed [31:0] net_position;         // + for long, - for short
+    logic signed [63:0] total_position_value; // Total cost basis of current position
+    logic signed [31:0] target_position;      // Hardcoded to 0 for now
+    logic signed [63:0] realized_pnl;
+    logic [31:0]        last_trade_timestamp; // From trade_t
+    logic [31:0]        avg_entry_price;      // Computed via multi-cycle divider
+  } asset_state_t;
+
+  typedef struct packed {
+    asset_state_t [NUM_ASSETS-1:0] assets;
+    logic signed [63:0]            available_cash;
+  } portfolio_state_t;
+
 endpackage : ct_pkg
 
 `endif // COMMONTRADER_INTERFACES_SVH

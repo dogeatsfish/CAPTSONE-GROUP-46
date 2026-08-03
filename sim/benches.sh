@@ -22,6 +22,7 @@ declare -A BENCH_TOP=(
   [order_book_crv]="order_book_crv_tb"
   [alpha_engine]="alpha_engine_core_tb"
   [risk_gateway]="tb_pre_trade_risk_gateway"
+  [portfolio_state]="portfolio_state_tb"
   [tx_gen]="outbound_tx_generator_tb"
   [integration]="commontrader_top_tb"
   [replay]="commontrader_replay_tb"
@@ -40,6 +41,7 @@ BENCH_ORDER=(
   order_book_crv
   alpha_engine
   risk_gateway
+  portfolio_state
   tx_gen
   integration
   replay
