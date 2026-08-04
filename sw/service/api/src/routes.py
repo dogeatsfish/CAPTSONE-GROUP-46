@@ -14,6 +14,7 @@ from config import (
     ONLINE_ITCH_PORT,
     ONLINE_OUCH_PORT,
     ONLINE_DEFAULT_TIME_SCALE,
+    ONLINE_AUTO_FILL,
     engine_sim,
 )
 import db
@@ -156,6 +157,7 @@ def run_online_simulation(req: SimulationRequest):
     cfg.ouch_port = ONLINE_OUCH_PORT
     cfg.ouch_transport = engine_sim.OuchTransport.UDP  # matches the FPGA
     cfg.time_scale = ONLINE_DEFAULT_TIME_SCALE
+    cfg.auto_fill = bool(ONLINE_AUTO_FILL)  # on for all online runs
 
     try:
         result = engine_sim.OnlineSimulation(str(data_file), cfg).run()
