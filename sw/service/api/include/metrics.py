@@ -25,6 +25,7 @@ TRADING_SECONDS_PER_YEAR = 252 * 23_400
 
 _ZERO_METRICS_KWARGS = dict(
     final_pnl=0.0,
+    final_realized_pnl=0.0,
     max_drawdown=0.0,
     max_drawdown_pct=0.0,
     volatility=0.0,
@@ -74,6 +75,7 @@ def compute_summary_metrics(
     # "Equity" = realized + unrealized PnL at each sampled instant.
     equity = [p.realized_pnl + p.unrealized_pnl for p in pnl_curve]
     final_pnl = equity[-1]
+    final_realized_pnl = pnl_curve[-1].realized_pnl
 
     # --- Max drawdown: largest peak-to-trough decline of the equity curve ---
     peak = equity[0]
@@ -105,6 +107,7 @@ def compute_summary_metrics(
 
     return SummaryMetrics(
         final_pnl=final_pnl,
+        final_realized_pnl=final_realized_pnl,
         max_drawdown=max_dd,
         max_drawdown_pct=max_dd_pct,
         volatility=volatility,
