@@ -179,6 +179,34 @@ PYBIND11_MODULE(engine_sim, m) {
              "side, price, size, ticker, raw_bytes) -- ticker is '' for "
              "OUCH Cancel (no symbol on that wire format) or if the sender "
              "left it blank. Must be set before run() -- it fires on the "
-             "engine's OUCH thread. Pass None to clear it.");
+             "engine's OUCH thread. Pass None to clear it.")
+        .def("set_trade_observer",
+             [](OnlineSimulation& self, py::object callback) {
+                 if (callback.is_none()) {
+                     self.set_trade_observer(nullptr);
+                     return;
+                 }
+                 // By value, same reasoning as set_ouch_observer above: this
+                 // outlives the call that installs it (stored as a member,
+                 // fires later on whichever thread produces a fill).
+                 self.set_trade_observer(
+                     [callback](const TradeRecord& t) {
+                         py::gil_scoped_acquire gil;
+                         try {
+                             callback(t.timestamp_ns, std::string(1, t.side),
+                                      t.price, t.size, t.decision_latency_ns);
+                         } catch (const py::error_already_set&) {
+                             PyErr_Clear();
+                         }
+                     });
+             },
+             py::arg("callback"),
+             "Set an observer invoked for every trade fill as it happens -- "
+             "the loopback local strategy or a real inbound OUCH order -- "
+             "called as callback(timestamp_ns, side, price, size, "
+             "decision_latency_ns). decision_latency_ns is 0 for "
+             "OUCH-originated fills (not measured; see TradeRecord). Must be "
+             "set before run() -- it fires on whichever thread produced the "
+             "fill. Pass None to clear it.");
 #endif  // CT_NO_ONLINE_SIM
 }

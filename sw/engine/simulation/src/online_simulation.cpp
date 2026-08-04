@@ -125,6 +125,7 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
     // under the lock but the telemetry callback is invoked afterwards, without
     // the lock held, so a slow consumer can never stall the OUCH thread.
     std::optional<PnLSnapshot> sampled;
+    std::optional<TradeRecord> new_trade; // set below if the local strategy fills
     L1State l1; // read under the lock below, used for the callback outside it
 
     {
@@ -169,8 +170,10 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
                     const uint64_t decision_latency_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                         std::chrono::steady_clock::now() - decision_start).count();
                     strategy.on_fill(uo.side, fill.avg_fill_price, fill.filled_size);
-                    active_result->trades.push_back(TradeRecord{
-                        ts, uo.side, fill.avg_fill_price, fill.filled_size, decision_latency_ns});
+                    const TradeRecord tr{
+                        ts, uo.side, fill.avg_fill_price, fill.filled_size, decision_latency_ns};
+                    active_result->trades.push_back(tr);
+                    new_trade = tr;
                 }
             }
         }
@@ -190,9 +193,13 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
         }
     } // book_mutex released here
 
-    // 5. Stream the sample to any live-telemetry consumer (outside the lock).
+    // 5. Stream the sample (and any new fill) to live-telemetry consumers,
+    // outside the lock.
     if (sampled && on_sample_cb) {
         on_sample_cb(*sampled, l1);
+    }
+    if (new_trade && trade_observer_) {
+        trade_observer_(*new_trade);
     }
 }
 
@@ -258,6 +265,7 @@ FillReport OnlineSimulation::apply_ouch_order(const protocol::OuchMessage& msg) 
     // the lock held -- mirrors apply_market_event, so a slow SSE consumer can
     // never stall the OUCH thread.
     std::optional<PnLSnapshot> sampled;
+    std::optional<TradeRecord> new_trade; // set below if this order fills
     L1State l1;
     FillReport fill{};
 
@@ -280,8 +288,9 @@ FillReport OnlineSimulation::apply_ouch_order(const protocol::OuchMessage& msg) 
         finalize_auto_fill(order, fill); // no-op unless cfg.auto_fill
         if (fill.filled_size > 0.0) {
             strategy.on_fill(order.side, fill.avg_fill_price, fill.filled_size);
-            active_result->trades.push_back(
-                TradeRecord{ts, order.side, fill.avg_fill_price, fill.filled_size});
+            const TradeRecord tr{ts, order.side, fill.avg_fill_price, fill.filled_size};
+            active_result->trades.push_back(tr);
+            new_trade = tr;
 
             // A fill is exactly the kind of event the once-per-second
             // market-data sampler in apply_market_event can sit on for a
@@ -305,6 +314,9 @@ FillReport OnlineSimulation::apply_ouch_order(const protocol::OuchMessage& msg) 
 
     if (sampled && on_sample_cb) {
         on_sample_cb(*sampled, l1);
+    }
+    if (new_trade && trade_observer_) {
+        trade_observer_(*new_trade);
     }
 
     return fill;
