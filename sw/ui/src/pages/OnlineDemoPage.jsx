@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Header from "../components/Header";
 import ControlPanel from "../components/ControlPanel";
 import ResultsSummary from "../components/ResultsSummary";
@@ -10,6 +10,8 @@ import ErrorBanner from "../components/ErrorBanner";
 import { useDatasets } from "../hooks/useDatasets";
 import { useSimulation } from "../hooks/useSimulation";
 import { useEventSourceRun } from "../lib/useEventSourceRun.js";
+import { computeLiveMetrics } from "../utils/metrics.js";
+import { elapsedSeconds, pickElapsedUnit } from "../utils/format";
 
 // A chatty/misbehaving board could send a lot of packets; cap retained rows
 // so a single run can't grow the log unbounded (mirrors the compiler pages'
@@ -21,6 +23,7 @@ export default function OnlineDemoPage() {
     const [selectedDataset, setSelectedDataset] = useState(null);
     const [topOfBook, setTopOfBook] = useState(null); // { bestBid, bestAsk } -- live, online mode only
     const [liveCurve, setLiveCurve] = useState([]); // pnl_curve built up live from "pnl" events
+    const [liveTrades, setLiveTrades] = useState([]); // trades built up live from "trade" events
     const [ouchPackets, setOuchPackets] = useState([]); // every inbound OUCH packet, live
     const [streamResult, setStreamResult] = useState(null); // set from the SSE "complete" event
     const [onlineTarget, setOnlineTarget] = useState("loopback"); // "loopback" | "hardware"
@@ -33,9 +36,9 @@ export default function OnlineDemoPage() {
     // Online mode: live via SSE (/simulate/online/stream). Each "pnl" event
     // updates both the top-of-book card and the running PnL curve so the
     // chart actually animates during the run instead of sitting empty until
-    // "complete" arrives. Trades don't stream per-fill today (the engine's
-    // live callback only carries PnL samples, not fill events), so the Order
-    // Blotter still only populates once the full result lands.
+    // "complete" arrives. Each "trade" event (one per fill, loopback local
+    // strategy or a real inbound OUCH order -- see set_trade_observer in
+    // online_simulation.h) does the same for the Order Blotter.
     const onStreamEvent = useCallback((evt) => {
         if (evt.type === "pnl") {
             // Hold each side's last known value instead of overwriting both
@@ -56,6 +59,17 @@ export default function OnlineDemoPage() {
                     realized_pnl: evt.realized_pnl,
                     unrealized_pnl: evt.unrealized_pnl,
                     position_size: evt.position_size,
+                },
+            ]);
+        } else if (evt.type === "trade") {
+            setLiveTrades((prev) => [
+                ...prev,
+                {
+                    timestamp_ns: evt.timestamp_ns,
+                    side: evt.side,
+                    price: evt.price,
+                    size: evt.size,
+                    decision_latency_ns: evt.decision_latency_ns,
                 },
             ]);
         } else if (evt.type === "ouch") {
@@ -91,6 +105,7 @@ export default function OnlineDemoPage() {
         if (isOnline) {
             setTopOfBook(null);
             setLiveCurve([]);
+            setLiveTrades([]);
             setOuchPackets([]);
             setStreamResult(null);
             streaming.start({ data_file: selectedDataset || undefined, online_target: onlineTarget });
@@ -108,6 +123,7 @@ export default function OnlineDemoPage() {
         streaming.reset();
         setTopOfBook(null);
         setLiveCurve([]);
+        setLiveTrades([]);
         setOuchPackets([]);
         setStreamResult(null);
     };
@@ -125,35 +141,44 @@ export default function OnlineDemoPage() {
     // then, show what's streamed in live.
     const pnlCurve = isOnline ? streamResult?.pnl_curve ?? liveCurve : blocking.result?.pnl_curve ?? [];
 
+    // Same idea as pnlCurve above: once "complete" lands, its trades array
+    // is authoritative; until then, show what's streamed in live.
+    const trades = isOnline ? streamResult?.trades ?? liveTrades : blocking.result?.trades ?? [];
+
+    // Shared elapsed-time origin/unit for both PnLChart and TradeRecordsTable
+    // -- computed once, here, from pnlCurve alone (never from `trades`), so a
+    // fill's "Sim Time" in the blotter always lines up with the same instant
+    // on the graph's x-axis. Previously each component computed its own
+    // origin from its own first row (first trade vs. first PnL sample), which
+    // don't land at the same instant, so the two "elapsed" numbers disagreed.
+    const firstTimestampNs = pnlCurve.length > 0 ? pnlCurve[0].timestamp_ns : 0;
+    const totalElapsedSeconds =
+        pnlCurve.length > 0
+            ? elapsedSeconds(pnlCurve[pnlCurve.length - 1].timestamp_ns, firstTimestampNs)
+            : 0;
+    const elapsedUnit = pickElapsedUnit(totalElapsedSeconds);
+
     // A hardware run can go for minutes (or, at real-time pacing, hours)
     // before "complete" ever arrives, so Final Results would otherwise sit
-    // on "--" the whole time even though real PnL is accruing. Derive a
-    // live approximation of just final_pnl from the latest streamed sample
-    // -- the rest (drawdown/Sharpe/volatility/throughput) genuinely need the
-    // full curve to mean anything, so those stay blank until the real
-    // server-computed metrics land; fmtCurrency/fmtNumber already render
-    // undefined as "--", so a partial object here is safe to pass through.
-    // Deliberately not gated on `running`: Stop moves status to "idle"
-    // without ever delivering a "complete" event, so a `running` check here
-    // blanked Final Results back to "--" the instant you stopped a run,
-    // discarding the last-known PnL instead of holding it (liveCurve itself
-    // isn't cleared by stop -- only by Reset/a new run -- so lastLiveSample
-    // is already the right guard on its own).
-    const lastLiveSample = liveCurve.length > 0 ? liveCurve[liveCurve.length - 1] : null;
-    // Only final_pnl -- Time / Trade now means real measured decision
-    // latency (see ResultsSummary/metrics.py), and there's no live
-    // equivalent of that: trades only stream in on "complete", not
-    // per-fill, so there's nothing to average yet while a run is still
-    // running. Deliberately no trades_per_second field here anymore (it used
-    // to hold a simulated-time-based approximation) -- ResultsSummary
-    // renders "--" for Time / Trade when that's undefined, which is more
-    // honest than showing a number like "80 s/trade" that reads as broken
-    // this early in a run, when trades are naturally still sparse relative
-    // to simulated time elapsed.
-    const liveMetrics =
-        isOnline && lastLiveSample
-            ? { final_pnl: lastLiveSample.realized_pnl + lastLiveSample.unrealized_pnl }
-            : null;
+    // on "--" the whole time even though real PnL is accruing. Recompute the
+    // full metrics set (drawdown/Sharpe/volatility/Time-per-Trade, not just
+    // final_pnl) from whatever's streamed in so far -- same math as
+    // metrics.py, ported to utils/metrics.js -- the same tradeoff the PnL
+    // number/graph already accept: early in a run this is naturally noisy
+    // (e.g. Sharpe off 2-3 samples), but that's more useful than "--" for a
+    // run that might not finish for hours. useMemo since liveCurve can grow
+    // into the thousands over a long real-time-paced run, and this would
+    // otherwise recompute on every unrelated re-render (e.g. top-of-book
+    // ticks). Deliberately gated on liveCurve.length > 0, not `running`:
+    // Stop moves status to "idle" without ever delivering a "complete"
+    // event, so a `running` check here would blank Final Results back to
+    // "--" the instant you stopped a run, discarding the last-known figures
+    // instead of holding them (liveCurve/liveTrades aren't cleared by stop
+    // -- only by Reset/a new run).
+    const liveMetrics = useMemo(
+        () => (isOnline && liveCurve.length > 0 ? computeLiveMetrics(liveCurve, liveTrades) : null),
+        [isOnline, liveCurve, liveTrades]
+    );
     const metrics = result?.metrics ?? liveMetrics;
 
     return (
@@ -191,8 +216,8 @@ export default function OnlineDemoPage() {
             <ResultsSummary metrics={metrics} />
 
             <div className="market-grid">
-                <PnLChart pnlCurve={pnlCurve} />
-                <TradeRecordsTable trades={result?.trades ?? []} />
+                <PnLChart pnlCurve={pnlCurve} firstTimestampNs={firstTimestampNs} unit={elapsedUnit} />
+                <TradeRecordsTable trades={trades} firstTimestampNs={firstTimestampNs} unit={elapsedUnit} />
             </div>
         </div>
     );

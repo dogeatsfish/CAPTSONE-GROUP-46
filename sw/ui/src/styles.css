@@ -381,7 +381,7 @@ button.danger {
     /* Hero column floor bumped up from 220px: at the hero value's 38px bold
        size, a typical formatted PnL string (e.g. "-$12,345.67") needs more
        room than that to avoid spilling past the card border. */
-    grid-template-columns: minmax(260px, 1.1fr) repeat(4, minmax(120px, 1fr));
+    grid-template-columns: minmax(260px, 1.1fr) repeat(3, minmax(120px, 1fr));
     gap: 12px;
 }
 

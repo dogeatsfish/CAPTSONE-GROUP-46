@@ -1,9 +1,12 @@
-import { elapsedSeconds, fmtCurrency, fmtNumber } from "../utils/format";
+import { elapsedSeconds, fmtCurrency, fmtNumber, pickElapsedUnit } from "../utils/format";
 
 // trades: SimulationResponse.trades, i.e. [{ timestamp_ns, side, price, size }, ...]
-export default function TradeRecordsTable({ trades }) {
+// firstTimestampNs/unit: same shared elapsed-time origin/unit PnLChart uses
+// (see its doc comment) -- keeps a trade's "Sim Time" directly comparable to
+// where it lands on the PnL graph's x-axis, instead of this table computing
+// its own origin from its own first row.
+export default function TradeRecordsTable({ trades, firstTimestampNs = 0, unit = pickElapsedUnit(0) }) {
     const rows = trades ?? [];
-    const firstTs = rows.length ? rows[0].timestamp_ns : 0;
 
     return (
         <div className="panel">
@@ -16,7 +19,7 @@ export default function TradeRecordsTable({ trades }) {
                     <table className="trade-table">
                         <thead>
                             <tr>
-                                <th>Sim Time (s)</th>
+                                <th>Sim Time ({unit.suffix})</th>
                                 <th>Side</th>
                                 <th>Price ($)</th>
                                 <th>Size (shares)</th>
@@ -25,7 +28,7 @@ export default function TradeRecordsTable({ trades }) {
                         <tbody>
                             {rows.map((t, i) => (
                                 <tr key={`${t.timestamp_ns}-${i}`}>
-                                    <td>{elapsedSeconds(t.timestamp_ns, firstTs).toFixed(2)}</td>
+                                    <td>{(elapsedSeconds(t.timestamp_ns, firstTimestampNs) / unit.divisor).toFixed(2)}</td>
                                     <td>
                                         <span className={`side-badge ${t.side === "B" ? "buy" : "sell"}`}>
                                             {t.side === "B" ? "BUY" : "SELL"}

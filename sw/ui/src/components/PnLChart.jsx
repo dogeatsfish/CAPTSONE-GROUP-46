@@ -9,12 +9,19 @@ import {
     ReferenceLine,
     Legend,
 } from "recharts";
-import { elapsedSeconds, fmtCompactCurrency, fmtCurrency, pickElapsedUnit } from "../utils/format";
+import { elapsedSeconds, fmtCompactCurrency, fmtCurrency } from "../utils/format";
 
 // pnlCurve: SimulationResponse.pnl_curve, i.e.
 // [{ timestamp_ns, realized_pnl, unrealized_pnl, position_size }, ...]
-export default function PnLChart({ pnlCurve }) {
-    const { points, unit } = toChartPoints(pnlCurve);
+// firstTimestampNs/unit: shared elapsed-time origin and display unit, computed
+// once by the parent (OnlineDemoPage) from this same pnlCurve and also handed
+// to TradeRecordsTable -- so a trade plotted at "3.92 min" here shows the same
+// "3.92" in the Order Blotter, instead of each component picking its own
+// origin from its own first row (a trade's first row and the curve's first
+// sample don't land at the same instant, so those independently-zeroed clocks
+// used to disagree).
+export default function PnLChart({ pnlCurve, firstTimestampNs, unit }) {
+    const points = toChartPoints(pnlCurve, firstTimestampNs, unit);
 
     return (
         <div className="panel">
@@ -100,19 +107,12 @@ export default function PnLChart({ pnlCurve }) {
     );
 }
 
-function toChartPoints(pnlCurve) {
-    if (!pnlCurve || pnlCurve.length === 0) {
-        return { points: [], unit: pickElapsedUnit(0) };
-    }
-    const firstTs = pnlCurve[0].timestamp_ns;
-    const lastTs = pnlCurve[pnlCurve.length - 1].timestamp_ns;
-    const unit = pickElapsedUnit(elapsedSeconds(lastTs, firstTs));
-
-    const points = pnlCurve.map((p) => ({
-        t: Number((elapsedSeconds(p.timestamp_ns, firstTs) / unit.divisor).toFixed(2)),
+function toChartPoints(pnlCurve, firstTimestampNs, unit) {
+    if (!pnlCurve || pnlCurve.length === 0) return [];
+    return pnlCurve.map((p) => ({
+        t: Number((elapsedSeconds(p.timestamp_ns, firstTimestampNs) / unit.divisor).toFixed(2)),
         realized: p.realized_pnl,
         unrealized: p.unrealized_pnl,
         total: p.realized_pnl + p.unrealized_pnl,
     }));
-    return { points, unit };
 }
