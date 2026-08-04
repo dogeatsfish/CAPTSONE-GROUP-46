@@ -22,6 +22,14 @@
 
 module commontrader_top
   import ct_pkg::*;
+#(
+  parameter int ENGINE_THRESHOLD  = 100,
+  parameter int ENGINE_SKEW_SHIFT = 0,
+  parameter int ENGINE_RATE_LIMIT = 25_000,
+  parameter int RISK_RATE_TOKENS  = 16,
+  parameter int RISK_RATE_PERIOD  = 225_000,
+  parameter logic [63:0] TOP_INITIAL_CASH = INITIAL_CASH
+)
 (
   // --- Board clocks / reset -------------------------------------------------
   // 200 MHz differential system clock from the board
@@ -286,7 +294,11 @@ module commontrader_top
   logic               order_tuser, order_tvalid;
   portfolio_state_t   p_state;
 
-  alpha_engine_core u_alpha (
+  alpha_engine_core #(
+    .THRESHOLD(ENGINE_THRESHOLD),
+    .SKEW_SHIFT(ENGINE_SKEW_SHIFT),
+    .RATE_LIMIT(ENGINE_RATE_LIMIT)
+  ) u_alpha (
     .core_clk           (core_clk),
     .core_rst_n         (core_rst_n),
     .tob_bid_price      (tob_bid_price),
@@ -317,7 +329,10 @@ module commontrader_top
   logic [TRADE_W-1:0] tx_tdata;
   logic               tx_tuser, tx_tvalid;
 
-  pre_trade_risk_gateway u_risk (
+  pre_trade_risk_gateway #(
+    .RATE_TOKENS(RISK_RATE_TOKENS),
+    .RATE_PERIOD(RISK_RATE_PERIOD)
+  ) u_risk (
     .core_clk            (core_clk),
     .rst_n               (core_rst_n),
     .s_axis_order_tdata  (order_tdata),
@@ -333,7 +348,9 @@ module commontrader_top
   //--------------------------------------------------------------------------
   // Portfolio State Tracker
   //--------------------------------------------------------------------------
-  portfolio_state u_portfolio (
+  portfolio_state #(
+    .PORTFOLIO_INITIAL_CASH(TOP_INITIAL_CASH)
+  ) u_portfolio (
     .core_clk          (core_clk),
     .rst_n             (core_rst_n),
     .s_axis_tx_tdata   (tx_tdata),

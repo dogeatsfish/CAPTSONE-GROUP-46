@@ -47,12 +47,13 @@ module alpha_engine_core
   import ct_pkg::*;
 #(
   parameter int EMA_SHIFT    = 4,          // k: smoothing factor, avg += (mid-avg) >> k
-  parameter int THRESHOLD    = 32'd100,    // X: mean-reversion trigger threshold
+  parameter int THRESHOLD    = 100,        // X: mean-reversion trigger threshold
   parameter int STRATEGY_SEL = 0,          // 0 = EMA mean reversion, 1 = pairs spread
   parameter int PAIR_A       = 0,          // strategy 1: traded leg
   parameter int PAIR_B       = 1,          // strategy 1: reference leg
   parameter int LOT_SIZE     = 32'd100,    // order size cap (also capped by ToB qty)
-  parameter int SKEW_SHIFT   = 2           // inventory penalty shift
+  parameter int SKEW_SHIFT   = 0,          // inventory penalty shift
+  parameter int RATE_LIMIT   = 32'd25_000  // minimum cycles between trades per asset
 )
 (
   input  logic                    core_clk,     // 250 MHz
@@ -181,6 +182,7 @@ module alpha_engine_core
   
   logic signed [31:0]      s0_inventory;
   logic signed [63:0]      s0_cash;
+  logic [TIMESTAMP_W-1:0]  s0_last_trade_ts;
 
   always_ff @(posedge core_clk or negedge core_rst_n) begin
     if (!core_rst_n) begin
@@ -193,6 +195,7 @@ module alpha_engine_core
       s0_mid_a      <= '0;        s0_mid_b      <= '0;
       s0_spread_avg <= '0;        s0_spread_primed <= 1'b0;
       s0_inventory  <= '0;        s0_cash       <= '0;
+      s0_last_trade_ts <= '0;
     end else begin
       s0_valid <= sel_valid;
       if (sel_valid) begin
@@ -217,6 +220,7 @@ module alpha_engine_core
         s0_spread_primed <= spread_primed;
         s0_inventory  <= portfolio_state.assets[tgt_idx].net_position;
         s0_cash       <= portfolio_state.available_cash;
+        s0_last_trade_ts <= portfolio_state.assets[tgt_idx].last_trade_timestamp;
       end
     end
   end
@@ -250,6 +254,7 @@ module alpha_engine_core
   
   logic signed [31:0]      s1_inventory;
   logic signed [63:0]      s1_cash;
+  logic [TIMESTAMP_W-1:0]  s1_last_trade_ts;
 
   // px_sum is carried at the full working width so every operand of the add
   // and the shift already matches (older Verilator flags the implicit widen).
@@ -277,6 +282,7 @@ module alpha_engine_core
       s1_bid_price <= '0;    s1_ask_price <= '0;
       s1_bid_qty   <= '0;    s1_ask_qty   <= '0;  s1_ts <= '0;
       s1_inventory <= '0;    s1_cash      <= '0;
+      s1_last_trade_ts <= '0;
       for (int i = 0; i < NUM_ASSETS; i++) mid_reg[i] <= '0;
     end else begin
       s1_valid <= s0_valid;
@@ -284,7 +290,7 @@ module alpha_engine_core
         s1_mid_c         <= mid_c;
         // Inventory penalty: (inventory >>> SKEW_SHIFT). Positive inventory adds to the delta,
         // making it harder to buy (drop below -THR) and easier to sell (exceed +THR).
-        s1_ema_delta_raw <= signed'(delta_sum3 >>> 1) + signed'(MW'(s0_inventory >>> SKEW_SHIFT));
+        s1_ema_delta_raw <= signed'(delta_sum3 >>> 1) + (s0_inventory >>> SKEW_SHIFT);
         s1_pre_a         <= s0_mid_a - s0_spread_avg;     // parallel single adds
         s1_pre_b         <= s0_mid_b + s0_spread_avg;
         mid_reg[s0_sel]  <= mid_c;
@@ -299,6 +305,7 @@ module alpha_engine_core
         s1_ts        <= s0_ts;
         s1_inventory <= s0_inventory;
         s1_cash      <= s0_cash;
+        s1_last_trade_ts <= s0_last_trade_ts;
       end
     end
   end
@@ -320,6 +327,7 @@ module alpha_engine_core
   logic [QTY_W-1:0]        s2_bid_qty,   s2_ask_qty;
   logic [TIMESTAMP_W-1:0]  s2_ts;
   logic signed [63:0]      s2_cash;
+  logic [TIMESTAMP_W-1:0]  s2_last_trade_ts;
 
   // Registered "this side has liquidity" flags (TIMING -- ROUND 18).
   //
@@ -369,6 +377,7 @@ module alpha_engine_core
       s2_bid_qty   <= '0;  s2_ask_qty   <= '0;  s2_ts <= '0;
       s2_ask_nz    <= 1'b0;  s2_bid_nz  <= 1'b0;
       s2_cash      <= '0;
+      s2_last_trade_ts <= '0;
       for (int i = 0; i < NUM_ASSETS; i++) begin
         ema_avg[i]    <= '0;
         ema_primed[i] <= 1'b0;
@@ -401,6 +410,7 @@ module alpha_engine_core
         s2_bid_qty   <= s1_bid_qty;    s2_ask_qty   <= s1_ask_qty;
         s2_ts        <= s1_ts;
         s2_cash      <= s1_cash;
+        s2_last_trade_ts <= s1_last_trade_ts;
 
         //-- Liquidity flags for S3's issue decision (TIMING -- ROUND 18).
         //   Registered here so the trade clock-enables see a register, not the
@@ -432,7 +442,7 @@ module alpha_engine_core
       m_axis_order_tvalid <= 1'b0;          // single-cycle strobe
 
       if (s2_valid) begin
-        automatic logic        do_buy, do_sell, issue;
+        automatic logic        do_buy, do_sell, issue, rate_ok;
         automatic logic [QTY_W-1:0] avail, qty;
 
         //-- Strategy 1 accumulator write-back (single add, registered ops) ---
@@ -463,7 +473,9 @@ module alpha_engine_core
         //   neither           -> no order
         // 
         //   For buys, we also require available_cash > 0.
-        issue = do_buy ? (s2_ask_nz && (s2_cash > 0)) : (do_sell && s2_bid_nz);
+        //   For all orders, we require the time since the last trade to exceed RATE_LIMIT.
+        rate_ok = (s2_ts - s2_last_trade_ts) > TIMESTAMP_W'(RATE_LIMIT);
+        issue = do_buy ? (s2_ask_nz && (s2_cash > 0) && rate_ok) : (do_sell && s2_bid_nz && rate_ok);
 
         if (issue) begin
           trade.price     <= do_buy ? s2_ask_price : s2_bid_price;

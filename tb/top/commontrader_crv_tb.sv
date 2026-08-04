@@ -132,7 +132,9 @@ module commontrader_crv_tb
   logic       led_drop_n;
   logic       led_overflow_n;
 
-  commontrader_top dut (
+  commontrader_top #(
+    .ENGINE_RATE_LIMIT(0)
+  ) dut (
     .sys_clk_p        (sys_clk_p),
     .sys_clk_n        (sys_clk_n),
     .sys_rst_n        (sys_rst_n),
