@@ -378,7 +378,7 @@ button.danger {
 
 .results-grid {
     display: grid;
-    /* Hero column floor bumped up from 220px: at the hero value's 34px bold
+    /* Hero column floor bumped up from 220px: at the hero value's 38px bold
        size, a typical formatted PnL string (e.g. "-$12,345.67") needs more
        room than that to avoid spilling past the card border. */
     grid-template-columns: minmax(260px, 1.1fr) repeat(4, minmax(120px, 1fr));
@@ -396,6 +396,15 @@ button.danger {
        a large negative PnL) forces the card wider than its track and spills
        past the border instead of shrinking to fit. */
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    /* Deliberately not align-items: center -- that would shrink-wrap each
+       flex child (the label/value divs) to its own content width instead of
+       the card's full width, which breaks useFitFontSize's overflow check
+       (it measures scrollWidth against clientWidth, both of which just
+       track the content when the box is shrink-wrapped). Default stretch
+       keeps children full-width; text-align does the actual centering. */
+    text-align: center;
 }
 
 .card .label {
@@ -409,12 +418,31 @@ button.danger {
 
 .card .value {
     font-variant-numeric: tabular-nums;
-    font-size: 19px;
+    /* Base/max size -- useFitFontSize (see AutoFitValue) sets the real
+       per-card size inline, shrinking below this only when a single
+       unbreakable token doesn't fit. Multi-word values wrap onto a second
+       line via white-space: normal instead of shrinking.
+       Deliberately no overflow-wrap: break-word -- that would let the
+       browser resolve an oversized single token by breaking it mid-word,
+       which keeps scrollWidth within clientWidth and hides the overflow
+       useFitFontSize needs to see in order to shrink it instead. */
+    font-size: 24px;
     font-weight: 600;
     margin-top: 8px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    /* Narrows the box useFitFontSize actually measures against, so fitted
+       text lands with real breathing room on either side instead of flush
+       against the card's own padding. Deliberately `width`, not
+       `max-width` -- a flex item's cross-axis margin: auto disables
+       align-items: stretch (per spec, stretch only applies when neither
+       cross-axis margin is auto), so max-width + auto margins would make
+       this box collapse to its own content size (correct for long values,
+       wrong -- tiny -- for short ones like "-0.00") instead of a width
+       that's uniform across every card regardless of content. A definite
+       `width` sidesteps that: it doesn't need stretch to size the box. */
+    width: 95%;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 .value.pos {
@@ -438,7 +466,7 @@ button.danger {
 }
 
 .card-hero .value {
-    font-size: 34px;
+    font-size: 38px;
     font-weight: 700;
     margin-top: 10px;
 }
