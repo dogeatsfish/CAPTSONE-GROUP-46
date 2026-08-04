@@ -4,6 +4,10 @@ This guide explains how to wire the host PC directly to the FPGA over Ethernet,
 configure the host so packets actually reach the board, and verify the link
 step by step. The helper scripts referenced here live in [`setup/`](../setup).
 
+Looking for the full cold-start sequence instead (bitstream → link → board →
+software)? See [`docs/board-test-checklist.md`](board-test-checklist.md),
+which links back into this doc at the relevant steps.
+
 ## Background: why this needs special setup
 
 The FPGA is **not** a general-purpose networked host. Its receive path only
@@ -133,6 +137,26 @@ while the activity LED blinks under load, the issue is inside the FPGA:
    points to the RGMII RX clock-delay issue noted in `tx_mac_core.sv`.
 3. Confirm the replayed data actually triggers the strategy (the offline sim
    should report `total_trades > 0` on the same file).
+
+## Running the backend against real hardware
+
+**Don't use Docker for the backend when testing against the real board.**
+`sw/Dockerfile`'s container compiles `OnlineSimulation` in fine (real Linux,
+real POSIX sockets), but Docker Desktop runs it inside its own virtual
+network -- the container never reaches the host's physical NIC or the static
+ARP entry `net_setup` just added, and the board's replies never reach the
+container either. It looks like it "works" for loopback online-mode testing
+(the container talking to itself) and then silently gets no traffic against
+real hardware.
+
+Use `sw/dev-hardware.sh` instead -- it runs the FastAPI service natively so
+it shares the host's real network stack. It needs macOS, Linux, or WSL2
+(with `networkingMode=mirrored` in `.wslconfig`, so WSL shares the host's NIC
+instead of NATing through its own virtual adapter); native Windows can't do
+hardware-target testing at all, container or not, since
+`engine/Makefile` only compiles online support when the build isn't running
+on `Windows_NT`. Run `setup/net_setup.sh` first either way -- `dev-hardware.sh`
+doesn't do that step for you.
 
 ## Important caveats
 

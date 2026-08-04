@@ -26,6 +26,21 @@ export function fmtDuration(us) {
     return `${fmtNumber(us / 1_000_000, 2)} s`;
 }
 
+// Average time per trade, derived by inverting a trades/s rate (whichever
+// kind -- see ResultsSummary's liveThroughput doc: compute-time-based post
+// -run, or simulated-time-based live). Needs its own ns tier that
+// fmtDuration doesn't have: the post-run figure is routinely sub-microsecond
+// (the engine processes way faster than 1 trade/µs), where fmtDuration's
+// whole-microsecond rounding would just show "1 µs" or "0 µs" for
+// everything.
+export function fmtDurationPerTrade(us) {
+    if (us === null || us === undefined || Number.isNaN(us)) return "—";
+    if (us < 1) return `${fmtNumber(us * 1000, 0)} ns`;
+    if (us < 1_000) return `${fmtNumber(us, 2)} µs`;
+    if (us < 1_000_000) return `${fmtNumber(us / 1_000, 2)} ms`;
+    return `${fmtNumber(us / 1_000_000, 2)} s`;
+}
+
 // Nanosecond engine timestamp -> elapsed seconds since the first sample.
 export function elapsedSeconds(timestampNs, firstTimestampNs) {
     return Number((timestampNs - firstTimestampNs) / 1e9);
@@ -60,5 +75,22 @@ export function fmtCompactCurrency(n) {
     const abs = Math.abs(n);
     if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
     if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}k`;
-    return `${sign}$${abs.toFixed(0)}`;
+    // Sub-$1000 PnL is common early in a run or for small size -- rounding to
+    // a whole dollar collapses every tick on a small-magnitude axis to "$0".
+    if (abs >= 1) return `${sign}$${abs.toFixed(2)}`;
+    if (abs === 0) return "$0";
+    return `${sign}$${abs.toFixed(4)}`;
+}
+
+// Same idea as fmtCompactCurrency, for percentages -- a sane drawdown pct
+// (e.g. -72.3%) is untouched, this only kicks in for values large enough
+// that something upstream is almost certainly wrong (e.g. a mis-scaled
+// denominator), so the UI doesn't have to force-fit a 10+ digit number.
+export function fmtCompactPercent(n) {
+    if (n === null || n === undefined || Number.isNaN(n)) return "—";
+    const sign = n < 0 ? "-" : "";
+    const abs = Math.abs(n);
+    if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(2)}M%`;
+    if (abs >= 1_000) return `${sign}${(abs / 1_000).toFixed(1)}k%`;
+    return `${sign}${abs.toFixed(1)}%`;
 }

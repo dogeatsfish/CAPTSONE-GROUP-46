@@ -61,12 +61,14 @@ ONLINE_OUCH_PORT = 50001
 ONLINE_DEFAULT_TIME_SCALE = 1.0
 
 # --- Live streaming demo (UI "Online mode", /simulate/online/stream) ---
-# This is a software-only live view for the browser -- it never talks to real
-# hardware -- so it deliberately does NOT use the FPGA addressing above.
-# Sending UDP to a real device's unicast IP (192.168.0.1) with no such host
-# actually reachable can stall per-packet on ARP resolution depending on the
-# host's network config (observed under WSL2), which made the "live" demo
-# look hung rather than just slow. Loopback avoids that entirely.
+# This is the LOOPBACK half of that endpoint's config (SimulationRequest.
+# online_target picks between this and the FPGA addressing above; see
+# stream_manager.build_online_config). Deliberately separate from the FPGA
+# addressing: sending UDP to a real device's unicast IP (192.168.0.1) with no
+# such host actually reachable can stall per-packet on ARP resolution
+# depending on the host's network config (observed under WSL2), which made
+# the "live" demo look hung rather than just slow whenever nothing was
+# plugged in. Loopback avoids that entirely, and is the default.
 ONLINE_STREAM_ITCH_ADDRESS = "127.0.0.1"
 ONLINE_STREAM_ITCH_PORT = 26000
 ONLINE_STREAM_OUCH_PORT = 26001
@@ -81,6 +83,16 @@ ONLINE_STREAM_OUCH_PORT = 26001
 # jumping straight to the end -- use the new stop endpoint (see routes.py) if
 # even that's more than you want to sit through.
 ONLINE_STREAM_TIME_SCALE = 0.001
+
+# Cap on any single inter-record sleep (OnlineSimulation::Config::max_sleep_ns),
+# in nanoseconds. The engine default (5 real seconds) is sized for the
+# hardware target's true real-time pacing; at loopback's 1000x speed it instead
+# makes real market data's quiet stretches show up as multi-second dead pauses
+# in the live UI, immediately followed by a burst of catch-up samples once
+# data resumes -- visibly "jumpy" rather than smooth. 150ms keeps the same
+# relative bursty/quiet shape (this is still a real-time-paced replay, not a
+# fixed-cadence tick) while making the worst-case pause barely noticeable.
+ONLINE_STREAM_MAX_SLEEP_NS = 150_000_000
 
 # Make the schema modules and the compiled engine importable.
 for _path in (INCLUDE_DIR, ENGINE_DIR):

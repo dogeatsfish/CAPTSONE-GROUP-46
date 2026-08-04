@@ -1,5 +1,6 @@
 import React from "react";
 import { sign } from "../lib/format.js";
+import AutoFitValue from "./AutoFitValue";
 
 // The 4-card summary grid (Total PnL / Position / one run-specific stat /
 // Total Trades), shared between the online demo and the strategy compiler.
@@ -13,7 +14,7 @@ export default function StatCards({ items }) {
             {items.map(({ label, display, raw }) => (
                 <div className="card" key={label}>
                     <div className="label">{label}</div>
-                    <div className={`value ${raw !== undefined ? sign(raw) : ""}`}>{display}</div>
+                    <AutoFitValue max={24} className={`value ${raw !== undefined ? sign(raw) : ""}`} text={display} />
                 </div>
             ))}
         </div>

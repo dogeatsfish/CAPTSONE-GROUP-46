@@ -47,6 +47,16 @@ public:
         // (2-byte field right after the message type). Defaults to ticker 1.
         uint16_t    stock_locate = protocol::DEFAULT_STOCK_LOCATE;
 
+        // If true, the engine's own Strategy (the same one OfflineSimulation
+        // runs) trades directly against the locally-replayed book, exactly
+        // like the offline path -- see apply_market_event(). Off by default:
+        // must stay false for the hardware target, where trades are meant to
+        // reflect only the real board's own OUCH orders, not a second,
+        // independent phantom strategy running in software. The loopback
+        // demo (no board attached) turns this on so it actually shows live
+        // trading activity instead of always being flat.
+        bool        enable_local_strategy = false;
+
         // MoldUDP64 session id (ASCII, up to protocol::MOLD_SESSION_LEN bytes,
         // zero-padded). Stamped on every market-data datagram.
         std::string session = "";

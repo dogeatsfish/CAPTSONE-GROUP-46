@@ -11,7 +11,7 @@ plain lists of PnLPoint.
 """
 
 import math
-from typing import Sequence
+from typing import Any, Sequence
 
 from common import PnLPoint, SummaryMetrics
 
@@ -36,20 +36,38 @@ def _trades_per_second(total_trades: int, compute_time_us: int) -> float:
     return total_trades / (compute_time_us / 1_000_000) if compute_time_us > 0 else 0.0
 
 
+def _avg_decision_latency_ns(trades: Sequence[Any]) -> float:
+    """Mean of each trade's own decision_latency_ns, ignoring unmeasured
+    (0) ones -- averaging in the unmeasured trades would silently drag a
+    real average toward zero rather than reflecting only what was actually
+    timed. Works against either the engine's raw pybind11 TradeRecord
+    objects or Trade pydantic models (routes.py/stream_manager.py pass
+    different ones) -- both expose .decision_latency_ns the same way.
+    """
+    measured = [t.decision_latency_ns for t in trades if t.decision_latency_ns > 0]
+    return (sum(measured) / len(measured)) if measured else 0.0
+
+
 def compute_summary_metrics(
-    pnl_curve: Sequence[PnLPoint], compute_time_us: int, total_trades: int
+    pnl_curve: Sequence[PnLPoint],
+    compute_time_us: int,
+    total_trades: int,
+    trades: Sequence[Any] = (),
 ) -> SummaryMetrics:
     """Derive final PnL, max drawdown, volatility, Sharpe ratio, and throughput.
 
-    Pass the *full* pnl_curve (before any trade_limit/pnl_limit truncation
-    applied for the response payload) so the metrics reflect the whole run.
+    Pass the *full* pnl_curve and trades (before any trade_limit/pnl_limit
+    truncation applied for the response payload) so the metrics reflect the
+    whole run.
     """
     trades_per_second = _trades_per_second(total_trades, compute_time_us)
+    avg_decision_latency_ns = _avg_decision_latency_ns(trades)
 
     if not pnl_curve:
         return SummaryMetrics(
             compute_time_us=compute_time_us,
             trades_per_second=trades_per_second,
+            avg_decision_latency_ns=avg_decision_latency_ns,
             **_ZERO_METRICS_KWARGS,
         )
 
@@ -93,4 +111,5 @@ def compute_summary_metrics(
         sharpe_ratio=sharpe_ratio,
         compute_time_us=compute_time_us,
         trades_per_second=trades_per_second,
+        avg_decision_latency_ns=avg_decision_latency_ns,
     )

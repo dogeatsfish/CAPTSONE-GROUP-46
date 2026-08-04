@@ -70,6 +70,25 @@ The API is then at `http://127.0.0.1:8000`, which is exactly what
 synthesis endpoint) won't work inside the container -- run the service
 natively via `uvicorn` if you need that endpoint.
 
+Or skip doing both by hand: `sw/dev.sh` (macOS/Linux) / `sw/dev.ps1`
+(Windows) build + start the backend, wait for it to actually answer, then
+start the UI dev server -- with a clear error message (and the backend's
+logs) if any step fails instead of a silent hang. Stopping it (Ctrl-C) tears
+the backend back down too. Software side only -- it doesn't touch the board.
+
+```bash
+cd sw && ./dev.sh          # macOS/Linux
+```
+```powershell
+cd sw; .\dev.ps1           # Windows
+```
+
+**Testing against the real board?** Don't use the scripts above -- Docker's
+networking can't reach the board. Use `sw/dev-hardware.sh` instead (macOS,
+Linux, or WSL2 only; see [`docs/connection-test.md`](docs/connection-test.md#running-the-backend-against-real-hardware)).
+For the full cold-start sequence (bitstream → link → board → software),
+see [`docs/board-test-checklist.md`](docs/board-test-checklist.md).
+
 ## Subsystem Owners
 
 | Subsystem | Owner |

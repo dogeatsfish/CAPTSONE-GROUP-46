@@ -92,7 +92,9 @@ def _to_response(data_file: Path, result, req) -> SimulationResponse:
         )
         for p in result.pnl_curve
     ]
-    metrics = compute_summary_metrics(full_pnl_curve, result.compute_time_us, result.total_trades)
+    metrics = compute_summary_metrics(
+        full_pnl_curve, result.compute_time_us, result.total_trades, result.trades
+    )
 
     trades = apply_limit(result.trades, req.trade_limit)
     pnl_curve = apply_limit(full_pnl_curve, req.pnl_limit)
@@ -102,7 +104,13 @@ def _to_response(data_file: Path, result, req) -> SimulationResponse:
         total_trades=result.total_trades,
         compute_time_us=result.compute_time_us,
         trades=[
-            Trade(timestamp_ns=t.timestamp_ns, side=t.side, price=t.price, size=t.size)
+            Trade(
+                timestamp_ns=t.timestamp_ns,
+                side=t.side,
+                price=t.price,
+                size=t.size,
+                decision_latency_ns=t.decision_latency_ns,
+            )
             for t in trades
         ],
         pnl_curve=pnl_curve,
@@ -190,7 +198,12 @@ async def online_stream(session_id: str, request: Request):
 
     Emits one JSON object per `data:` frame:
       {"type": "pnl", "timestamp_ns", "realized_pnl", "unrealized_pnl",
-       "position_size", "best_bid", "best_ask"}
+       "position_size", "best_bid", "best_ask", "trade_count"} -- trade_count
+       is the cumulative fill count as of this sample, letting a client derive
+       a running trades/s without waiting for "complete"
+      {"type": "ouch", "timestamp_ns", "msg_type", "order_id", "side",
+       "price", "size", "raw_hex"} -- every inbound OUCH packet (real FPGA
+       or a test client), independent of whether it produces a fill
       {"type": "complete", "data_file", "total_trades", "compute_time_us",
        "trades", "pnl_curve", "metrics"} -- same shape as SimulationResponse
       {"type": "error", "detail"}

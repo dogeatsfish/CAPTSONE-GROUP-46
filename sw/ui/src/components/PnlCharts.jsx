@@ -20,10 +20,9 @@ const TOOLTIP_BG = "var(--panel)";
 const ZERO_LINE = "var(--faint)";
 
 // Shared PnL/position chart pair. `points` is an array of
-// { t, realized, unrealized, total, position } -- see App.jsx's runOnline
-// (streamed one point at a time) and StrategyCompiler.jsx's onComplete
-// (built all at once from a returned pnl_curve) for the two ways callers
-// produce this shape.
+// { t, realized, unrealized, total, position } -- see pnl.js's
+// pnlCurveToPoints for how callers (StrategyCompilerPage,
+// AlphaEngineCompilerPage) produce this shape from a returned pnl_curve.
 export default function PnlCharts({ points }) {
     return (
         <>

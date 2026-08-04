@@ -10,7 +10,17 @@ T = TypeVar("T")
 def apply_limit(items: List[T], limit: Optional[int]) -> List[T]:
     """Cap a list to its first `limit` items, or return it unchanged if
     `limit` is None. Shared by every endpoint that trims trades/pnl_curve
-    for the response while persisting the untrimmed data to the DB."""
+    for the response while persisting the untrimmed data to the DB.
+
+    Note for pnl_curve callers: a stoppage/halt in the underlying MBO stream
+    now backfills a real (held-PnL) sample at every second boundary of the
+    gap (see OfflineSimulation::run), instead of contributing zero samples
+    the way it used to. A caller that sets pnl_limit on a run with an early
+    stoppage will have more of that budget spent on the gap, so the
+    truncated response can end mid-stoppage rather than reaching later,
+    possibly more interesting, data. No shipped UI path sets pnl_limit today
+    (always None/unlimited), but this is worth knowing before that changes.
+    """
     return items[:limit] if limit is not None else items
 
 
@@ -19,6 +29,10 @@ class Trade(BaseModel):
     side: str
     price: float
     size: float
+    # Real wall-clock decision-to-fill latency in nanoseconds. 0 = not
+    # measured -- see TradeRecord::decision_latency_ns in offline_simulation.h;
+    # today only online-loopback local-strategy trades populate this.
+    decision_latency_ns: int = 0
 
 
 class PnLPoint(BaseModel):
@@ -39,6 +53,14 @@ class SummaryMetrics(BaseModel):
     engine's own wall-clock measurement of the run. trades_per_second is
     total_trades divided by compute_time_us (converted to seconds) -- engine
     throughput, not a market-timing or latency figure.
+
+    avg_decision_latency_ns is the mean of each trade's own real wall-clock
+    decision-to-fill latency (Trade.decision_latency_ns), i.e. the actual
+    "how fast did this software execute a trade" figure -- distinct from
+    trades_per_second above, which measures batch replay throughput, not
+    per-trade decision speed. 0.0 means no trade in this run had a nonzero
+    decision_latency_ns (offline runs and hardware-target runs don't
+    instrument this yet -- see the field's docstring).
     """
 
     final_pnl: float
@@ -48,3 +70,4 @@ class SummaryMetrics(BaseModel):
     sharpe_ratio: float
     compute_time_us: int
     trades_per_second: float
+    avg_decision_latency_ns: float = 0.0

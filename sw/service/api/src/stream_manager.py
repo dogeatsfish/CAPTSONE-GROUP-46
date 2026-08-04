@@ -12,8 +12,11 @@ Two independent planes are involved:
     the C++ engine and never exposed here.
   * North-bound (server -> browser): the SSE stream produced here, carrying a
     copy of each per-second PnL sample (plus the current top-of-book, L1:
-    best_bid/best_ask) and a terminal event with the full run (same shape as
-    the blocking endpoints' SimulationResponse).
+    best_bid/best_ask), a copy of every inbound OUCH packet as it arrives
+    (see _on_ouch -- a hardware bring-up aid: proves the board is actually
+    sending something back, independent of whether it produces a fill), and
+    a terminal event with the full run (same shape as the blocking
+    endpoints' SimulationResponse).
 
 The blocking ``engine.run(callback)`` executes on a dedicated daemon thread
 (the C++ hot loop releases the GIL), so the asyncio event loop stays free. The
@@ -41,6 +44,7 @@ from config import (
     ONLINE_OUCH_PORT,
     ONLINE_STREAM_ITCH_ADDRESS,
     ONLINE_STREAM_ITCH_PORT,
+    ONLINE_STREAM_MAX_SLEEP_NS,
     ONLINE_STREAM_OUCH_PORT,
     ONLINE_STREAM_TIME_SCALE,
     engine_sim,
@@ -84,11 +88,18 @@ def build_online_config(target: str = "loopback") -> Any:
         cfg.itch_port = ONLINE_ITCH_PORT
         cfg.ouch_port = ONLINE_OUCH_PORT
         cfg.time_scale = ONLINE_DEFAULT_TIME_SCALE
+        # False (the engine default): trades must reflect only the real
+        # board's own OUCH orders, not a second, independent local strategy.
     else:
         cfg.itch_address = ONLINE_STREAM_ITCH_ADDRESS
         cfg.itch_port = ONLINE_STREAM_ITCH_PORT
         cfg.ouch_port = ONLINE_STREAM_OUCH_PORT
         cfg.time_scale = ONLINE_STREAM_TIME_SCALE
+        cfg.max_sleep_ns = ONLINE_STREAM_MAX_SLEEP_NS
+        # No board is ever attached in loopback, so without this the demo
+        # would replay market data forever and never show a single trade
+        # (see engine_sim.OnlineConfig's enable_local_strategy docstring).
+        cfg.enable_local_strategy = True
     return cfg
 
 
@@ -161,6 +172,7 @@ class StreamSession:
         position: float,
         best_bid: float,
         best_ask: float,
+        trade_count: int,
     ) -> None:
         try:
             self.events.put_nowait(
@@ -172,10 +184,43 @@ class StreamSession:
                     "position_size": position,
                     "best_bid": best_bid,
                     "best_ask": best_ask,
+                    "trade_count": trade_count,
                 }
             )
         except queue.Full:
             pass  # slow/absent client: drop this sample, never block the engine
+
+    def _on_ouch(
+        self,
+        msg_type: str,
+        order_id: int,
+        side: str,
+        price: float,
+        size: float,
+        ticker: str,
+        raw: bytes,
+    ) -> None:
+        """Fires for every inbound OUCH message -- the real FPGA or a test
+        client -- so the UI can show packets actually arriving, independent
+        of whether they translate into a fill (the "did the board even send
+        anything" debugging view: OrderBook fills are the wrong signal here,
+        since a resting/rejected order never produces one)."""
+        try:
+            self.events.put_nowait(
+                {
+                    "type": "ouch",
+                    "timestamp_ns": time.time_ns(),
+                    "msg_type": msg_type,
+                    "order_id": order_id,
+                    "side": side,
+                    "price": price,
+                    "size": size,
+                    "ticker": ticker,
+                    "raw_hex": raw.hex(" ").upper(),
+                }
+            )
+        except queue.Full:
+            pass  # slow/absent client: drop this packet, never block the engine
 
     def _log_run(self, started_at_ns: int, result: Any) -> None:
         """Persist a completed streaming run to the database (FS-15).
@@ -200,10 +245,15 @@ class StreamSession:
         started_at_ns = time.time_ns()
         try:
             self._engine = engine_sim.OnlineSimulation(self.data_file, self.cfg)
+            # getattr-guarded like stop() -- a stale engine_sim build predating
+            # this binding must degrade (no packet log), not crash the run.
+            set_observer = getattr(self._engine, "set_ouch_observer", None)
+            if set_observer is not None:
+                set_observer(self._on_ouch)
             result = self._engine.run(self._on_sample)
             self._log_run(started_at_ns, result)
             metrics = compute_summary_metrics(
-                result.pnl_curve, result.compute_time_us, result.total_trades
+                result.pnl_curve, result.compute_time_us, result.total_trades, result.trades
             )
             self.events.put(
                 {
@@ -217,6 +267,7 @@ class StreamSession:
                             "side": t.side,
                             "price": t.price,
                             "size": t.size,
+                            "decision_latency_ns": t.decision_latency_ns,
                         }
                         for t in result.trades
                     ],

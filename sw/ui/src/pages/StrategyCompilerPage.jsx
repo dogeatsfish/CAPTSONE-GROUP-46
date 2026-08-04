@@ -104,7 +104,11 @@ export default function StrategyCompilerPage() {
         } else if (evt.type === "complete") {
             const result = evt.result;
             setPoints(pnlCurveToPoints(result.pnl_curve));
-            setSummary({ total_trades: result.total_trades, compute_time_us: result.compute_time_us });
+            setSummary({
+                total_trades: result.total_trades,
+                compute_time_us: result.compute_time_us,
+                ...result.metrics,
+            });
         }
     }, []);
 
@@ -205,6 +209,26 @@ export default function StrategyCompilerPage() {
                             {
                                 label: "Total Trades",
                                 display: summary ? summary.total_trades.toLocaleString() : "—",
+                            },
+                            {
+                                label: "Max Drawdown",
+                                display: summary
+                                    ? `$${fmt(summary.max_drawdown)} (${fmt(summary.max_drawdown_pct, 1)}%)`
+                                    : "—",
+                                raw: summary ? -Math.abs(summary.max_drawdown) : undefined,
+                            },
+                            {
+                                label: "Sharpe Ratio (ann.)",
+                                display: summary ? fmt(summary.sharpe_ratio) : "—",
+                                raw: summary?.sharpe_ratio,
+                            },
+                            {
+                                label: "Volatility ($/s)",
+                                display: summary ? `$${fmt(summary.volatility)}` : "—",
+                            },
+                            {
+                                label: "Trade Throughput",
+                                display: summary ? `${fmt(summary.trades_per_second, 1)} trades/s` : "—",
                             },
                         ]}
                     />

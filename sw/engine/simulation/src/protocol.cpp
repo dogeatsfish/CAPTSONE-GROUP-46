@@ -73,6 +73,15 @@ double get_double(const uint8_t* p) {
     return v;
 }
 
+// OUCH's ticker field is fixed-width, space-padded ASCII (matches
+// alpha_engine_core's ticker_of()); trim the padding for display rather than
+// carrying "AAPL    " around everywhere a decoded message is shown.
+std::string trim_ticker(const uint8_t* p, size_t len) {
+    size_t end = len;
+    while (end > 0 && (p[end - 1] == ' ' || p[end - 1] == '\0')) --end;
+    return std::string(reinterpret_cast<const char*>(p), end);
+}
+
 } // namespace
 
 // ---------------------------------------------------------
@@ -207,7 +216,9 @@ bool from_ouch(const uint8_t* buf, size_t len, OuchMessage& out) {
         out.order_id = get_u32(buf + 1);                       // userref
         out.side     = static_cast<char>(buf[5]);              // side
         out.size     = static_cast<double>(get_u32(buf + 6));  // qty
-        // symbol at [10..17] is ignored (the engine is keyed by order id)
+        // symbol at [10..17] -- not used for matching (the engine is keyed
+        // by order id), but decoded for display/telemetry.
+        out.ticker   = trim_ticker(buf + 10, 8);
         out.price    = static_cast<double>(get_u64(buf + 18)) / PRICE_SCALE;
         return true;
     }
@@ -215,9 +226,10 @@ bool from_ouch(const uint8_t* buf, size_t len, OuchMessage& out) {
         out.msg_type = OUCH_CANCEL;
         out.order_id = get_u32(buf + 1);                       // userref
         out.size     = static_cast<double>(get_u32(buf + 5));  // cancel qty
-        // The OUCH Cancel wire format carries no side (see tx_gen); the
-        // matching engine must resolve the resting side from the order id.
+        // The OUCH Cancel wire format carries no side or symbol (see tx_gen);
+        // the matching engine must resolve the resting side from the order id.
         out.side     = 0;
+        out.ticker.clear();
         out.price    = 0.0;
         return true;
     }

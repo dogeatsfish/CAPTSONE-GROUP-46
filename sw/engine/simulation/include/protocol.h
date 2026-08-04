@@ -120,12 +120,18 @@ std::vector<uint8_t> to_moldudp64(
 // ---------------------------------------------------------
 // A decoded OUCH order-entry message.
 struct OuchMessage {
-    char     msg_type = 0;    // OUCH_ENTER / OUCH_CANCEL
-    uint64_t order_id = 0;    // from the 4-byte UserRefNum
-    char     side     = 0;    // 'B' / 'S' (OUCH_ENTER only; not on the wire for
-                              //            OUCH_CANCEL -- see from_ouch note)
-    double   price    = 0.0;  // valid for OUCH_ENTER
-    double   size     = 0.0;  // OUCH_ENTER: order qty, OUCH_CANCEL: cancel qty
+    char        msg_type = 0;  // OUCH_ENTER / OUCH_CANCEL
+    uint64_t    order_id = 0;  // from the 4-byte UserRefNum
+    char        side     = 0;  // 'B' / 'S' (OUCH_ENTER only; not on the wire for
+                               //            OUCH_CANCEL -- see from_ouch note)
+    double      price    = 0.0; // valid for OUCH_ENTER
+    double      size     = 0.0; // OUCH_ENTER: order qty, OUCH_CANCEL: cancel qty
+    std::string ticker;         // OUCH_ENTER only, trailing spaces trimmed;
+                                 // empty for OUCH_CANCEL (no symbol on that wire
+                                 // format) or if the sender left it blank (the
+                                 // software test harness does; the RTL fills in
+                                 // a real ticker via alpha_engine_core's
+                                 // ticker_of()).
 };
 
 // Encode a client -> server OUCH ENTER order (OUCH_ENTER_LEN bytes) in the

@@ -5,16 +5,23 @@ import ResultsSummary from "../components/ResultsSummary";
 import PnLChart from "../components/PnLChart";
 import TradeRecordsTable from "../components/TradeRecordsTable";
 import TopOfBook from "../components/TopOfBook.jsx";
+import OuchPacketLog from "../components/OuchPacketLog.jsx";
 import ErrorBanner from "../components/ErrorBanner";
 import { useDatasets } from "../hooks/useDatasets";
 import { useSimulation } from "../hooks/useSimulation";
 import { useEventSourceRun } from "../lib/useEventSourceRun.js";
+
+// A chatty/misbehaving board could send a lot of packets; cap retained rows
+// so a single run can't grow the log unbounded (mirrors the compiler pages'
+// MAX_LOG_LINES).
+const MAX_OUCH_PACKETS = 500;
 
 export default function OnlineDemoPage() {
     const [mode, setMode] = useState("offline");
     const [selectedDataset, setSelectedDataset] = useState(null);
     const [topOfBook, setTopOfBook] = useState(null); // { bestBid, bestAsk } -- live, online mode only
     const [liveCurve, setLiveCurve] = useState([]); // pnl_curve built up live from "pnl" events
+    const [ouchPackets, setOuchPackets] = useState([]); // every inbound OUCH packet, live
     const [streamResult, setStreamResult] = useState(null); // set from the SSE "complete" event
     const [onlineTarget, setOnlineTarget] = useState("loopback"); // "loopback" | "hardware"
 
@@ -31,7 +38,17 @@ export default function OnlineDemoPage() {
     // Blotter still only populates once the full result lands.
     const onStreamEvent = useCallback((evt) => {
         if (evt.type === "pnl") {
-            setTopOfBook({ bestBid: evt.best_bid, bestAsk: evt.best_ask });
+            // Hold each side's last known value instead of overwriting both
+            // on every sample: this dataset's book is thin and routinely
+            // one-sided at any given instant (best_bid/best_ask legitimately
+            // read 0 when nothing rests on that side right then), so blindly
+            // replacing both fields every time made a real, still-resting
+            // quote flash briefly then blank out the moment the *other*
+            // side's momentary zero came through.
+            setTopOfBook((prev) => ({
+                bestBid: evt.best_bid > 0 ? evt.best_bid : prev?.bestBid,
+                bestAsk: evt.best_ask > 0 ? evt.best_ask : prev?.bestAsk,
+            }));
             setLiveCurve((prev) => [
                 ...prev,
                 {
@@ -41,6 +58,11 @@ export default function OnlineDemoPage() {
                     position_size: evt.position_size,
                 },
             ]);
+        } else if (evt.type === "ouch") {
+            setOuchPackets((prev) => {
+                const next = [...prev, evt];
+                return next.length > MAX_OUCH_PACKETS ? next.slice(next.length - MAX_OUCH_PACKETS) : next;
+            });
         } else if (evt.type === "complete") {
             setStreamResult(evt);
         }
@@ -69,6 +91,7 @@ export default function OnlineDemoPage() {
         if (isOnline) {
             setTopOfBook(null);
             setLiveCurve([]);
+            setOuchPackets([]);
             setStreamResult(null);
             streaming.start({ data_file: selectedDataset || undefined, online_target: onlineTarget });
         } else {
@@ -85,6 +108,7 @@ export default function OnlineDemoPage() {
         streaming.reset();
         setTopOfBook(null);
         setLiveCurve([]);
+        setOuchPackets([]);
         setStreamResult(null);
     };
     // Deliberately excludes "running": the blocking (offline) fetch has no
@@ -100,6 +124,37 @@ export default function OnlineDemoPage() {
     // between the last "pnl" event and the run actually finishing); until
     // then, show what's streamed in live.
     const pnlCurve = isOnline ? streamResult?.pnl_curve ?? liveCurve : blocking.result?.pnl_curve ?? [];
+
+    // A hardware run can go for minutes (or, at real-time pacing, hours)
+    // before "complete" ever arrives, so Final Results would otherwise sit
+    // on "--" the whole time even though real PnL is accruing. Derive a
+    // live approximation of just final_pnl from the latest streamed sample
+    // -- the rest (drawdown/Sharpe/volatility/throughput) genuinely need the
+    // full curve to mean anything, so those stay blank until the real
+    // server-computed metrics land; fmtCurrency/fmtNumber already render
+    // undefined as "--", so a partial object here is safe to pass through.
+    // Deliberately not gated on `running`: Stop moves status to "idle"
+    // without ever delivering a "complete" event, so a `running` check here
+    // blanked Final Results back to "--" the instant you stopped a run,
+    // discarding the last-known PnL instead of holding it (liveCurve itself
+    // isn't cleared by stop -- only by Reset/a new run -- so lastLiveSample
+    // is already the right guard on its own).
+    const lastLiveSample = liveCurve.length > 0 ? liveCurve[liveCurve.length - 1] : null;
+    // Only final_pnl -- Time / Trade now means real measured decision
+    // latency (see ResultsSummary/metrics.py), and there's no live
+    // equivalent of that: trades only stream in on "complete", not
+    // per-fill, so there's nothing to average yet while a run is still
+    // running. Deliberately no trades_per_second field here anymore (it used
+    // to hold a simulated-time-based approximation) -- ResultsSummary
+    // renders "--" for Time / Trade when that's undefined, which is more
+    // honest than showing a number like "80 s/trade" that reads as broken
+    // this early in a run, when trades are naturally still sparse relative
+    // to simulated time elapsed.
+    const liveMetrics =
+        isOnline && lastLiveSample
+            ? { final_pnl: lastLiveSample.realized_pnl + lastLiveSample.unrealized_pnl }
+            : null;
+    const metrics = result?.metrics ?? liveMetrics;
 
     return (
         <div>
@@ -129,7 +184,11 @@ export default function OnlineDemoPage() {
                 <TopOfBook bestBid={topOfBook?.bestBid} bestAsk={topOfBook?.bestAsk} />
             )}
 
-            <ResultsSummary metrics={result?.metrics} />
+            {isOnline && (running || ouchPackets.length > 0) && (
+                <OuchPacketLog packets={ouchPackets} />
+            )}
+
+            <ResultsSummary metrics={metrics} />
 
             <div className="market-grid">
                 <PnLChart pnlCurve={pnlCurve} />

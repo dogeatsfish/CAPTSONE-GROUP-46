@@ -32,11 +32,13 @@ PYBIND11_MODULE(engine_sim, m) {
         })
         .def_readonly("price", &TradeRecord::price)
         .def_readonly("size", &TradeRecord::size)
+        .def_readonly("decision_latency_ns", &TradeRecord::decision_latency_ns)
         .def("__repr__", [](const TradeRecord& t) {
             return "<TradeRecord ts=" + std::to_string(t.timestamp_ns) +
                    " side=" + std::string(1, t.side) +
                    " price=" + std::to_string(t.price) +
-                   " size=" + std::to_string(t.size) + ">";
+                   " size=" + std::to_string(t.size) +
+                   " decision_latency_ns=" + std::to_string(t.decision_latency_ns) + ">";
         });
 
     py::class_<PnLSnapshot>(m, "PnLSnapshot")
@@ -44,11 +46,13 @@ PYBIND11_MODULE(engine_sim, m) {
         .def_readonly("realized_pnl", &PnLSnapshot::realized_pnl)
         .def_readonly("unrealized_pnl", &PnLSnapshot::unrealized_pnl)
         .def_readonly("position_size", &PnLSnapshot::position_size)
+        .def_readonly("trade_count", &PnLSnapshot::trade_count)
         .def("__repr__", [](const PnLSnapshot& s) {
             return "<PnLSnapshot ts=" + std::to_string(s.timestamp_ns) +
                    " realized=" + std::to_string(s.realized_pnl) +
                    " unrealized=" + std::to_string(s.unrealized_pnl) +
-                   " position=" + std::to_string(s.position_size) + ">";
+                   " position=" + std::to_string(s.position_size) +
+                   " trade_count=" + std::to_string(s.trade_count) + ">";
         });
 
     py::class_<SimulationResult>(m, "SimulationResult")
@@ -82,7 +86,9 @@ PYBIND11_MODULE(engine_sim, m) {
         .def_readwrite("ouch_transport", &OnlineSimulation::Config::ouch_transport)
         .def_readwrite("time_scale",     &OnlineSimulation::Config::time_scale)
         .def_readwrite("max_sleep_ns",   &OnlineSimulation::Config::max_sleep_ns)
-        .def_readwrite("stock_locate",   &OnlineSimulation::Config::stock_locate);
+        .def_readwrite("stock_locate",   &OnlineSimulation::Config::stock_locate)
+        .def_readwrite("enable_local_strategy",
+                        &OnlineSimulation::Config::enable_local_strategy);
 
     py::class_<OnlineSimulation>(m, "OnlineSimulation")
         .def(py::init<const std::string&>(), py::arg("file_path"),
@@ -110,7 +116,7 @@ PYBIND11_MODULE(engine_sim, m) {
                          try {
                              callback(s.timestamp_ns, s.realized_pnl,
                                       s.unrealized_pnl, s.position_size,
-                                      l1.best_bid, l1.best_ask);
+                                      l1.best_bid, l1.best_ask, s.trade_count);
                          } catch (const py::error_already_set&) {
                              // Never let a Python exception unwind into C++.
                              PyErr_Clear();
@@ -127,7 +133,8 @@ PYBIND11_MODULE(engine_sim, m) {
              "Broadcast ITCH market data in real time while serving OUCH order "
              "entry. If a callback is given, it is called once per simulated "
              "second as callback(timestamp_ns, realized_pnl, unrealized_pnl, "
-             "position_size, best_bid, best_ask). Returns a SimulationResult.")
+             "position_size, best_bid, best_ask, trade_count). Returns a "
+             "SimulationResult.")
         .def("stop", &OnlineSimulation::stop,
              // Just an atomic store (see OnlineSimulation::stop()); called from
              // a different thread than the one blocked in run(), so it must
@@ -137,6 +144,40 @@ PYBIND11_MODULE(engine_sim, m) {
              "thread (e.g. a Stop button). run() unwinds through its normal "
              "cleanup path and returns whatever telemetry was collected so "
              "far. Safe to call at any time, including before run() starts "
-             "or after it's already finished (no-op).");
+             "or after it's already finished (no-op).")
+        .def("set_ouch_observer",
+             [](OnlineSimulation& self, py::object callback) {
+                 if (callback.is_none()) {
+                     self.set_ouch_observer(nullptr);
+                     return;
+                 }
+                 // Capture BY VALUE (copies the py::object, incrementing its
+                 // refcount) -- unlike run()'s by-reference hook, this one
+                 // outlives the call that installs it: it's stored as a
+                 // member (ouch_observer_) and fires later, on the OUCH
+                 // thread, for as long as the engine runs. A by-reference
+                 // capture would dangle the moment set_ouch_observer()
+                 // returns.
+                 self.set_ouch_observer(
+                     [callback](const protocol::OuchMessage& msg, const uint8_t* raw, size_t len) {
+                         py::gil_scoped_acquire gil;
+                         try {
+                             callback(std::string(1, msg.msg_type ? msg.msg_type : '?'),
+                                      msg.order_id,
+                                      std::string(1, msg.side ? msg.side : '-'),
+                                      msg.price, msg.size, msg.ticker,
+                                      py::bytes(reinterpret_cast<const char*>(raw), len));
+                         } catch (const py::error_already_set&) {
+                             PyErr_Clear();
+                         }
+                     });
+             },
+             py::arg("callback"),
+             "Set an observer invoked for every inbound OUCH message (real "
+             "FPGA or a test client), called as callback(msg_type, order_id, "
+             "side, price, size, ticker, raw_bytes) -- ticker is '' for "
+             "OUCH Cancel (no symbol on that wire format) or if the sender "
+             "left it blank. Must be set before run() -- it fires on the "
+             "engine's OUCH thread. Pass None to clear it.");
 #endif  // CT_NO_ONLINE_SIM
 }
