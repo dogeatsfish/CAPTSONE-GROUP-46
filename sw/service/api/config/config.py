@@ -94,6 +94,21 @@ ONLINE_STREAM_TIME_SCALE = 0.001
 # fixed-cadence tick) while making the worst-case pause barely noticeable.
 ONLINE_STREAM_MAX_SLEEP_NS = 150_000_000
 
+# --- Auto-fill toggle (online simulation) -------------------------------
+# Set to 1 to force every aggressive order the engine submits (the local
+# strategy's orders in the loopback demo, and inbound OUCH ENTER orders) to
+# fill completely at its limit price, instead of only partially filling (or
+# resting) against this dataset's thin, often one-sided book. 0 = off (only
+# genuine book fills count). Applied to ALL online runs -- both the loopback
+# stream and the hardware-addressed /simulate/online endpoint. Maps to
+# OnlineSimulation::Config::auto_fill (see online_simulation.h) via the engine
+# binding. THIS is the knob to flip.
+#
+# NOTE for real-hardware runs: auto_fill synthesizes fills the real book
+# wouldn't support, so PnL is optimistic. Set this to 0 when you want a run to
+# reflect only genuine fills against the actual board.
+ONLINE_AUTO_FILL = 1
+
 # Make the schema modules and the compiled engine importable.
 for _path in (INCLUDE_DIR, ENGINE_DIR):
     if str(_path) not in sys.path:

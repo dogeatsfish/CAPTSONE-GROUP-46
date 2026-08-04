@@ -135,6 +135,9 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
         if (rec.message_type == protocol::MBO_ADD) {
             Order mkt_order{rec.order_id, rec.price, rec.size, rec.side, false};
             matching_engine.process_add(mkt_order, ts);
+            // Track the market's own top of book for marking, independent of
+            // the strategy's consumption of the live book below.
+            note_market_quote(rec.side, rec.price);
         } else if (rec.message_type == protocol::MBO_CANCEL) {
             matching_engine.process_cancel(rec.order_id, rec.side);
         }
@@ -160,7 +163,8 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
             std::optional<Order> user_order = strategy.on_market_update(l1);
             if (user_order.has_value()) {
                 Order& uo = user_order.value();
-                const FillReport fill = matching_engine.process_add(uo, ts);
+                FillReport fill = matching_engine.process_add(uo, ts);
+                finalize_auto_fill(uo, fill); // no-op unless cfg.auto_fill
                 if (fill.filled_size > 0.0) {
                     const uint64_t decision_latency_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                         std::chrono::steady_clock::now() - decision_start).count();
@@ -173,9 +177,7 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
 
         // 4. Sample the PnL curve once per simulated second.
         if (ts >= next_sample_ns) {
-            const double mark = (l1.best_bid > 0.0 && l1.best_ask > 0.0)
-                                    ? 0.5 * (l1.best_bid + l1.best_ask)
-                                    : 0.0;
+            const double mark = market_mid();
             const PnLSnapshot snap{
                 ts,
                 strategy.get_realized_pnl(),
@@ -192,6 +194,57 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
     if (sampled && on_sample_cb) {
         on_sample_cb(*sampled, l1);
     }
+}
+
+void OnlineSimulation::note_market_quote(char side, double price) {
+    if (price <= 0.0) return;
+
+    // Reject stub/erroneous quotes: a price more than MAX_STUB_RATIO times (or
+    // less than 1/MAX_STUB_RATIO of) the current market mid is a bad tick, not
+    // a real quote. This dataset has asks at 199999.99 and bids at 0.0001
+    // against a ~$4-10 mid -- thousands of times off -- while genuine
+    // tick-to-tick moves are tiny, so this cleanly separates them. The first
+    // quote (no mid yet) is always accepted to seed the tracker.
+    constexpr double MAX_STUB_RATIO = 5.0;
+    const double ref = market_mid();
+    if (ref > 0.0 && (price > ref * MAX_STUB_RATIO || price < ref / MAX_STUB_RATIO)) {
+        return;
+    }
+
+    if (side == 'B') {
+        market_bid_ = price;
+    } else if (side == 'S') {
+        market_ask_ = price;
+    }
+}
+
+double OnlineSimulation::market_mid() const {
+    if (market_bid_ > 0.0 && market_ask_ > 0.0) return 0.5 * (market_bid_ + market_ask_);
+    if (market_bid_ > 0.0) return market_bid_;
+    if (market_ask_ > 0.0) return market_ask_;
+    return 0.0;
+}
+
+void OnlineSimulation::finalize_auto_fill(Order& order, FillReport& fill) {
+    // Off by default, and nothing to do if the order already filled fully.
+    if (!cfg.auto_fill || order.size <= 0.0) {
+        return;
+    }
+
+    // process_add() rested the unmatched remainder in the book under this
+    // order's id; pull it back out so we don't both rest it AND count it as
+    // filled, then fold that remainder into the fill at the order's own limit
+    // price. The result is a guaranteed complete fill regardless of how much
+    // real liquidity the book held.
+    const double remaining = order.size;
+    matching_engine.process_cancel(order.order_id);
+
+    const double prior_notional = fill.avg_fill_price * fill.filled_size;
+    fill.filled_size += remaining;
+    fill.avg_fill_price = (fill.filled_size > 0.0)
+                              ? (prior_notional + order.price * remaining) / fill.filled_size
+                              : order.price;
+    order.size = 0.0;
 }
 
 // ---------------------------------------------------------
@@ -224,6 +277,7 @@ FillReport OnlineSimulation::apply_ouch_order(const protocol::OuchMessage& msg) 
         // OUCH_ENTER: convert to an aggressive order and match it.
         Order order = protocol::ouch_to_order(msg);
         fill = matching_engine.process_add(order, ts);
+        finalize_auto_fill(order, fill); // no-op unless cfg.auto_fill
         if (fill.filled_size > 0.0) {
             strategy.on_fill(order.side, fill.avg_fill_price, fill.filled_size);
             active_result->trades.push_back(
@@ -237,9 +291,7 @@ FillReport OnlineSimulation::apply_ouch_order(const protocol::OuchMessage& msg) 
             // sample happens to land, which can make a genuinely active
             // board look frozen in the UI.
             l1 = matching_engine.get_l1_state();
-            const double mark = (l1.best_bid > 0.0 && l1.best_ask > 0.0)
-                                    ? 0.5 * (l1.best_bid + l1.best_ask)
-                                    : 0.0;
+            const double mark = market_mid();
             const PnLSnapshot snap{
                 ts,
                 strategy.get_realized_pnl(),
