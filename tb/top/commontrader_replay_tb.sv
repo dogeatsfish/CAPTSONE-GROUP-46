@@ -39,8 +39,8 @@ module commontrader_replay_tb
   //--------------------------------------------------------------------------
   // Stimulus files (override with +FRAMES=... etc.)
   //--------------------------------------------------------------------------
-  localparam int MAX_BYTES  = 262144;
-  localparam int MAX_FRAMES = 4096;
+  localparam int MAX_BYTES  = 8388608;
+  localparam int MAX_FRAMES = 16384;
 
   string f_frames = "sim/replay_frames.hex";
   string f_lens   = "sim/replay_lens.hex";
@@ -51,6 +51,8 @@ module commontrader_replay_tb
   logic [127:0] exp_tob  [0:MAX_FRAMES*NUM_ASSETS-1];
 
   int n_frames;
+  
+  real last_valid_mid [NUM_ASSETS];
 
   //--------------------------------------------------------------------------
   // Clocks / reset
@@ -86,7 +88,14 @@ module commontrader_replay_tb
   logic       led_drop_n;
   logic       led_overflow_n;
 
-  commontrader_top dut (
+  commontrader_top #(
+    .ENGINE_THRESHOLD(10),
+    .ENGINE_SKEW_SHIFT(0),
+    .ENGINE_RATE_LIMIT(1000),
+    .RISK_RATE_TOKENS(1000),
+    .RISK_RATE_PERIOD(25_000),
+    .TOP_INITIAL_CASH(64'd100_000_000_000)
+  ) dut (
     .sys_clk_p        (sys_clk_p),
     .sys_clk_n        (sys_clk_n),
     .sys_rst_n        (sys_rst_n),
@@ -160,6 +169,45 @@ module commontrader_replay_tb
   end
 
   //--------------------------------------------------------------------------
+  // OUCH Decoder
+  // Snoops the TX Generator's output to decode and print OUCH Enter messages.
+  //--------------------------------------------------------------------------
+  int ouch_byte_idx = 0;
+  logic [7:0] ouch_buf [0:46];
+  int ouch_decoded_cnt = 0;
+
+  always @(posedge dut.core_clk) begin
+    if (dut.core_rst_n && dut.u_tx_gen.m_axis_tvalid) begin
+      if (ouch_byte_idx >= 28 && ouch_byte_idx < 75) begin
+        ouch_buf[ouch_byte_idx - 28] = dut.u_tx_gen.m_axis_tdata;
+      end
+      
+      if (dut.u_tx_gen.m_axis_tlast || ouch_byte_idx == 76) begin
+        automatic string symbol = "";
+        automatic longint price_int = 0;
+        automatic int qty = 0;
+        automatic int user_ref = 0;
+        
+        user_ref = {ouch_buf[1], ouch_buf[2], ouch_buf[3], ouch_buf[4]};
+        qty = {ouch_buf[6], ouch_buf[7], ouch_buf[8], ouch_buf[9]};
+        for (int i=0; i<8; i++) begin
+          if (ouch_buf[10+i] != 8'h20 && ouch_buf[10+i] != 0)
+            symbol = {symbol, string'(ouch_buf[10+i])};
+        end
+        price_int = {ouch_buf[18], ouch_buf[19], ouch_buf[20], ouch_buf[21],
+                     ouch_buf[22], ouch_buf[23], ouch_buf[24], ouch_buf[25]};
+                     
+        ouch_decoded_cnt++;
+        $display("[OUCH #%0d] decoded: ENTER id=%0d side=%c qty=%0d symbol=%s price=%.4f",
+                 ouch_decoded_cnt, user_ref, ouch_buf[5], qty, symbol, real'(price_int) / 10000.0);
+        ouch_byte_idx = 0;
+      end else begin
+        ouch_byte_idx++;
+      end
+    end
+  end
+
+  //--------------------------------------------------------------------------
   // RGMII ingress driver. Nibbles change mid-phase, never on the clock edge --
   // driving on the edge races the DUT's capture flops and the two simulators
   // resolve that race differently.
@@ -196,6 +244,10 @@ module commontrader_replay_tb
     bad = 1'b0;
     for (int a = 0; a < NUM_ASSETS; a++) begin
       e = exp_tob[frame_idx * NUM_ASSETS + a];
+      
+      if (dut.tob_bid_price[a] != 0 && dut.tob_ask_price[a] != 0) begin
+        last_valid_mid[a] = (real'(dut.tob_bid_price[a]) + real'(dut.tob_ask_price[a])) / 20000.0;
+      end
       if (dut.tob_bid_price[a] !== e[127:96] ||
           dut.tob_bid_qty  [a] !== e[95:64]  ||
           dut.tob_ask_price[a] !== e[63:32]  ||
@@ -277,6 +329,42 @@ module commontrader_replay_tb
 
     $display("\n  replayed %0d frames, %0d bytes", n_frames, offset);
     $display("  outbound OUCH orders generated: %0d", orders_out);
+
+    $display("\n==============================================================");
+    $display("  Portfolio State Summary");
+    $display("==============================================================");
+    $display("  Available Cash : $%.2f", real'(dut.u_portfolio.m_portfolio_state.available_cash) / 10000.0);
+    $display("  ------------------------------------------------------------");
+    $display("  Asset | Position | Total Value | Realized PnL | Unrealized PnL | Avg Entry | Cur Mid");
+    $display("  --------------------------------------------------------------------------------------");
+    for (int i=0; i<NUM_ASSETS; i++) begin
+      automatic string sym = "";
+      automatic real avg_entry = real'(dut.u_portfolio.m_portfolio_state.assets[i].avg_entry_price) / 10000.0;
+      automatic real current_mid = last_valid_mid[i];
+      automatic real unrealized_pnl = 0.0;
+      
+      if (dut.u_portfolio.m_portfolio_state.assets[i].net_position > 0)
+        unrealized_pnl = (current_mid - avg_entry) * real'(dut.u_portfolio.m_portfolio_state.assets[i].net_position);
+      else if (dut.u_portfolio.m_portfolio_state.assets[i].net_position < 0)
+        unrealized_pnl = (avg_entry - current_mid) * real'(-dut.u_portfolio.m_portfolio_state.assets[i].net_position);
+
+      case (i)
+        0: sym = "AAPL";
+        1: sym = "MSFT";
+        2: sym = "AMZN";
+        3: sym = "GOOG";
+        4: sym = "TSLA";
+      endcase
+      $display("  %-5s | %8d | %11.2f | %12.2f | %14.2f | %9.4f | %7.4f",
+               sym,
+               dut.u_portfolio.m_portfolio_state.assets[i].net_position,
+               real'(dut.u_portfolio.m_portfolio_state.assets[i].total_position_value) / 10000.0,
+               real'(dut.u_portfolio.m_portfolio_state.assets[i].realized_pnl) / 10000.0,
+               unrealized_pnl,
+               avg_entry,
+               current_mid);
+    end
+    $display("==============================================================\n");
 
     check_int("R1 RX CDC FIFO never back-pressured", rx_fifo_stall_n,        0);
     check_int("R1 Order Book never stalled parser",  book_stall_n,           0);

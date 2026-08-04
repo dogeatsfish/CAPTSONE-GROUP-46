@@ -88,6 +88,10 @@ printf '%s\n' "-----------------------------------------------------------------
 for name in "${RUN_LIST[@]}"; do
   log="$LOG_DIR/${name}.log"
 
+  if [[ "$name" == "replay" ]]; then
+    python3 sim/csv_to_itch.py --events 400 --out sim/replay
+  fi
+
   # ${PLUSARGS[@]+...} guards against an unbound empty array under `set -u`.
   if ! bash "$RUNNER" "$name" ${PLUSARGS[@]+"${PLUSARGS[@]}"} >"$log" 2>&1; then
     printf '%-28s %10s %8s   %s\n' "$name" "-" "-" "BUILD/RUN ERROR"

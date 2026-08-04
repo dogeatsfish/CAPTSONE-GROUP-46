@@ -69,7 +69,8 @@ module alpha_engine_core_tb
 
   alpha_engine_core #(
     .EMA_SHIFT(EMA_SHIFT), .THRESHOLD(THRESHOLD),
-    .STRATEGY_SEL(0), .PAIR_A(0), .PAIR_B(1), .LOT_SIZE(LOT_SIZE)
+    .STRATEGY_SEL(0), .PAIR_A(0), .PAIR_B(1), .LOT_SIZE(LOT_SIZE),
+    .RATE_LIMIT(0)
   ) dut_ema (
     .core_clk(core_clk), .core_rst_n(core_rst_n),
     .tob_bid_price(tob_bid_price), .tob_bid_qty(tob_bid_qty),
@@ -84,7 +85,8 @@ module alpha_engine_core_tb
 
   alpha_engine_core #(
     .EMA_SHIFT(EMA_SHIFT), .THRESHOLD(THRESHOLD),
-    .STRATEGY_SEL(1), .PAIR_A(0), .PAIR_B(1), .LOT_SIZE(LOT_SIZE)
+    .STRATEGY_SEL(1), .PAIR_A(0), .PAIR_B(1), .LOT_SIZE(LOT_SIZE),
+    .RATE_LIMIT(0)
   ) dut_spread (
     .core_clk(core_clk), .core_rst_n(core_rst_n),
     .tob_bid_price(tob_bid_price), .tob_bid_qty(tob_bid_qty),

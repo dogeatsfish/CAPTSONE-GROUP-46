@@ -12,12 +12,33 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-if [[ "${1:-}" == "--events" ]]; then
-  python3 sim/csv_to_itch.py --events "$2" --out sim/replay
-  shift 2
-elif [[ ! -f sim/replay_frames.hex ]]; then
-  echo "stimulus missing, generating..."
-  python3 sim/csv_to_itch.py --events 400 --out sim/replay
+EVENTS="5000"
+SIM="verilator"
+ARGS=()
+
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "--events" ]]; then
+    EVENTS="$2"
+    shift 2
+  elif [[ "$1" == "--sim" ]]; then
+    SIM="$2"
+    shift 2
+  else
+    ARGS+=("$1")
+    shift
+  fi
+done
+
+echo "generating $EVENTS events..."
+python3 sim/csv_to_itch.py --events "$EVENTS" --out sim/replay
+
+if [[ "$SIM" == "xsim" ]]; then
+  RUNNER="./sim/run_xsim.sh"
+elif [[ "$SIM" == "verilator" ]]; then
+  RUNNER="./sim/run_verilator.sh"
+else
+  echo "unknown simulator '$SIM' (expected verilator or xsim)" >&2
+  exit 2
 fi
 
-exec ./sim/run_verilator.sh replay "$@"
+exec "$RUNNER" replay ${ARGS[@]+"${ARGS[@]}"}
