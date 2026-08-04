@@ -73,26 +73,30 @@ ONLINE_STREAM_ITCH_ADDRESS = "127.0.0.1"
 ONLINE_STREAM_ITCH_PORT = 26000
 ONLINE_STREAM_OUCH_PORT = 26001
 
-# Pacing for the streaming endpoint. The engine samples PnL once per SIMULATED
-# second, so a factor of 1.0 (true real time) would make telemetry arrive at
-# roughly one event per wall-clock second -- but the bundled dataset's replay
-# spans ~19,200 simulated seconds (~5.3 real hours) and the default strategy
-# stays flat for most of that before its PnL moves late in the replay, so 1.0
-# makes the live demo look inert for a very long time. 0.001 (~1000x) finishes
-# the full replay in well under 30s while still streaming visibly rather than
-# jumping straight to the end -- use the new stop endpoint (see routes.py) if
-# even that's more than you want to sit through.
-ONLINE_STREAM_TIME_SCALE = 0.001
+# Pacing for the streaming endpoint. 1.0 = true real time: simulated time
+# elapsed matches wall-clock time elapsed 1:1, so a run stopped after N real
+# seconds shows exactly N seconds of PnL-curve time, not a compressed/inflated
+# span. This does mean a long dataset takes just as long to fully complete as
+# it would live -- use the Stop button (see routes.py) rather than waiting out
+# a multi-hour file if you don't need the whole thing.
+ONLINE_STREAM_TIME_SCALE = 1.0
 
 # Cap on any single inter-record sleep (OnlineSimulation::Config::max_sleep_ns),
-# in nanoseconds. The engine default (5 real seconds) is sized for the
-# hardware target's true real-time pacing; at loopback's 1000x speed it instead
-# makes real market data's quiet stretches show up as multi-second dead pauses
-# in the live UI, immediately followed by a burst of catch-up samples once
-# data resumes -- visibly "jumpy" rather than smooth. 150ms keeps the same
-# relative bursty/quiet shape (this is still a real-time-paced replay, not a
-# fixed-cadence tick) while making the worst-case pause barely noticeable.
-ONLINE_STREAM_MAX_SLEEP_NS = 150_000_000
+# in nanoseconds. 0 = no cap. Measured directly against the bundled dataset
+# (sw/data_pipeline/data/synthetic_mbo_stream.bin): 818 of its ~61k
+# inter-record gaps exceed 5 real seconds, and together those 818 gaps
+# account for ~85.7% of the file's entire 19,192s simulated span (worst
+# single gap: ~1844s, ~31 minutes) -- so ANY nonzero cap here silently speeds
+# through the vast majority of the file's real duration, which is exactly
+# the "N real seconds elapsed shows more than N simulated seconds" bug this
+# was supposed to fix. 0 makes the "N real seconds elapsed = N seconds shown"
+# guarantee exact, at the cost of the replay going real-time-silent (no new
+# ITCH broadcast, no new PnL sample) for as long as ~31 minutes during this
+# file's quietest stretch. That's correct behavior for true real-time replay
+# of real market data, not a bug -- if that's more than you want to sit
+# through, use the Stop button (see routes.py) rather than reintroducing a
+# cap that would just quietly compress time again.
+ONLINE_STREAM_MAX_SLEEP_NS = 0
 
 # --- Auto-fill toggle (online simulation) -------------------------------
 # Set to 1 to force every aggressive order the engine submits (the local
