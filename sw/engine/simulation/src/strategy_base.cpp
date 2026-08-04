@@ -16,7 +16,9 @@ Strategy::Strategy()
       have_last_l1(false),
       last_bid(0.0),
       last_ask(0.0),
-      last_spread(0.0)
+      last_spread(0.0),
+      have_mean(false),
+      mean_mid(0.0)
 {}
 
 // ---------------------------------------------------------

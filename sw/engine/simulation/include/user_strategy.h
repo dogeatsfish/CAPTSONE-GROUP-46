@@ -32,4 +32,9 @@ private:
     double last_bid;
     double last_ask;
     double last_spread;
+
+    // Mean-reversion state: exponential moving average of the L1 mid price,
+    // used as the "fair value" the strategy expects price to revert toward.
+    bool   have_mean;        // false until the EMA has been seeded
+    double mean_mid;         // EMA of the mid price ((best_bid + best_ask) / 2)
 };
