@@ -193,6 +193,31 @@ class StreamSession:
         except queue.Full:
             pass  # slow/absent client: drop this sample, never block the engine
 
+    def _on_trade(
+        self,
+        ts_ns: int,
+        side: str,
+        price: float,
+        size: float,
+        decision_latency_ns: int,
+    ) -> None:
+        """Fires for every trade fill as it happens -- the loopback local
+        strategy or a real inbound OUCH order -- so the UI can populate the
+        Order Blotter per-fill instead of only once "complete" arrives."""
+        try:
+            self.events.put_nowait(
+                {
+                    "type": "trade",
+                    "timestamp_ns": ts_ns,
+                    "side": side,
+                    "price": price,
+                    "size": size,
+                    "decision_latency_ns": decision_latency_ns,
+                }
+            )
+        except queue.Full:
+            pass  # slow/absent client: drop this event, never block the engine
+
     def _on_ouch(
         self,
         msg_type: str,
@@ -253,6 +278,9 @@ class StreamSession:
             set_observer = getattr(self._engine, "set_ouch_observer", None)
             if set_observer is not None:
                 set_observer(self._on_ouch)
+            set_trade_observer = getattr(self._engine, "set_trade_observer", None)
+            if set_trade_observer is not None:
+                set_trade_observer(self._on_trade)
             result = self._engine.run(self._on_sample)
             self._log_run(started_at_ns, result)
             metrics = compute_summary_metrics(

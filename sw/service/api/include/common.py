@@ -45,6 +45,14 @@ class PnLPoint(BaseModel):
 class SummaryMetrics(BaseModel):
     """Derived performance stats computed from a run's PnL curve.
 
+    final_realized_pnl is the run's realized PnL alone (closed trades only,
+    excludes any open position's mark-to-market) -- what the UI's "Current
+    PnL" card shows, since a card labeled "PnL" reading as unrealized MTM
+    was misleading (looks the same as realized until you actually close
+    something, and swings with the market mark in the meantime). final_pnl
+    remains the combined realized+unrealized total for anything that wants
+    it.
+
     final_pnl / max_drawdown / volatility are in the same $ units as the
     engine's realized/unrealized PnL. sharpe_ratio is annualized assuming a
     252-day, 23,400-second-per-day trading year (the NYSE session length
@@ -64,6 +72,7 @@ class SummaryMetrics(BaseModel):
     """
 
     final_pnl: float
+    final_realized_pnl: float
     max_drawdown: float
     max_drawdown_pct: float
     volatility: float

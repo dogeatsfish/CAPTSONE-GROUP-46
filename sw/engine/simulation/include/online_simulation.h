@@ -104,6 +104,16 @@ public:
         std::function<void(const protocol::OuchMessage&, const uint8_t*, size_t)>;
     void set_ouch_observer(OuchObserver cb) { ouch_observer_ = std::move(cb); }
 
+    // Observer invoked for every trade fill as it happens -- both the
+    // loopback local-strategy path (apply_market_event) and a real inbound
+    // OUCH order (apply_ouch_order) -- so a live consumer (the streaming
+    // demo's Order Blotter) can populate per-fill instead of waiting for
+    // run() to return. Set before run(); fires on whichever thread produced
+    // the fill (market-data thread for loopback, OUCH thread for a real
+    // order), always after book_mutex is released, same as on_sample_cb.
+    using TradeObserver = std::function<void(const TradeRecord&)>;
+    void set_trade_observer(TradeObserver cb) { trade_observer_ = std::move(cb); }
+
 private:
     std::string mbo_file_path;
     Config      cfg;
@@ -123,6 +133,7 @@ private:
     std::thread           ouch_thread;
     SampleCallback        on_sample_cb; // optional live-telemetry hook
     OuchObserver          ouch_observer_; // optional inbound-OUCH observer
+    TradeObserver         trade_observer_; // optional per-fill observer
     // Most recent market timestamp seen on the ITCH side. Used to stamp trades
     // that originate from OUCH orders (OUCH frames carry no timestamp).
     std::atomic<uint64_t> last_market_ts_ns{0};
