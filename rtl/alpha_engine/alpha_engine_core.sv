@@ -284,7 +284,7 @@ module alpha_engine_core
         s1_mid_c         <= mid_c;
         // Inventory penalty: (inventory >>> SKEW_SHIFT). Positive inventory adds to the delta,
         // making it harder to buy (drop below -THR) and easier to sell (exceed +THR).
-        s1_ema_delta_raw <= signed'(delta_sum3 >>> 1) + signed'(MW'(s0_inventory >>> SKEW_SHIFT));
+        s1_ema_delta_raw <= signed'(delta_sum3 >>> 1) + (s0_inventory >>> SKEW_SHIFT);
         s1_pre_a         <= s0_mid_a - s0_spread_avg;     // parallel single adds
         s1_pre_b         <= s0_mid_b + s0_spread_avg;
         mid_reg[s0_sel]  <= mid_c;
