@@ -9,6 +9,9 @@
 
 module portfolio_state
   import ct_pkg::*;
+#(
+  parameter logic [63:0] PORTFOLIO_INITIAL_CASH = INITIAL_CASH
+)
 (
   input  logic                    core_clk,
   input  logic                    rst_n,
@@ -97,7 +100,7 @@ module portfolio_state
 
   always_ff @(posedge core_clk or negedge rst_n) begin
     if (!rst_n) begin
-      cash <= 64'd10_000_000; // Start with 10M cash
+      cash <= PORTFOLIO_INITIAL_CASH;
       for (int i = 1; i <= 4; i++) p_valid[i] <= 1'b0;
       for (int i = 0; i < NUM_ASSETS; i++) begin
         assets[i].net_position <= '0;
@@ -152,26 +155,56 @@ module portfolio_state
         if (p_is_buy[4]) begin
           cash <= cash - p5_trade_val;
           assets[p_idx[4]].net_position <= assets[p_idx[4]].net_position + signed'(p_trade[4].quantity);
-          assets[p_idx[4]].total_position_value <= assets[p_idx[4]].total_position_value + p5_trade_val;
           
-          // Trigger division for new average cost
-          div_state[p_idx[4]] <= DIVIDE;
-          div_num[p_idx[4]]   <= (assets[p_idx[4]].total_position_value + p5_trade_val);
-          div_den[p_idx[4]]   <= (assets[p_idx[4]].net_position + signed'(p_trade[4].quantity));
-          div_quot[p_idx[4]]  <= '0;
-          div_rem[p_idx[4]]   <= '0;
-          div_count[p_idx[4]] <= 32;
+          if (assets[p_idx[4]].net_position < 0) begin
+            // Closing a short
+            if (assets[p_idx[4]].net_position >= -signed'(p_trade[4].quantity)) begin
+              // Flipped to long or flat
+              automatic logic signed [31:0] closed_qty = -assets[p_idx[4]].net_position;
+              automatic logic signed [31:0] remaining = assets[p_idx[4]].net_position + signed'(p_trade[4].quantity);
+              assets[p_idx[4]].realized_pnl <= assets[p_idx[4]].realized_pnl + closed_qty * (assets[p_idx[4]].avg_entry_price - signed'(p_trade[4].price));
+              assets[p_idx[4]].total_position_value <= 64'(remaining) * signed'(p_trade[4].price);
+              assets[p_idx[4]].avg_entry_price <= remaining > 0 ? p_trade[4].price : '0;
+              div_state[p_idx[4]] <= IDLE;
+            end else begin
+              // Still short
+              assets[p_idx[4]].realized_pnl <= assets[p_idx[4]].realized_pnl - p5_pnl_val;
+              assets[p_idx[4]].total_position_value <= assets[p_idx[4]].total_position_value - p5_cost_basis;
+            end
+          end else begin
+            // Opening/Adding to a long
+            assets[p_idx[4]].total_position_value <= assets[p_idx[4]].total_position_value + p5_trade_val;
+            div_state[p_idx[4]] <= DIVIDE;
+            div_num[p_idx[4]]   <= (assets[p_idx[4]].total_position_value + p5_trade_val);
+            div_den[p_idx[4]]   <= (assets[p_idx[4]].net_position + signed'(p_trade[4].quantity));
+            div_quot[p_idx[4]]  <= '0; div_rem[p_idx[4]] <= '0; div_count[p_idx[4]] <= 32;
+          end
         end else begin // Sell
           cash <= cash + p5_trade_val;
-          assets[p_idx[4]].realized_pnl <= assets[p_idx[4]].realized_pnl + p5_pnl_val;
           assets[p_idx[4]].net_position <= assets[p_idx[4]].net_position - signed'(p_trade[4].quantity);
-          assets[p_idx[4]].total_position_value <= assets[p_idx[4]].total_position_value - p5_cost_basis;
           
-          // If flat or short, reset tracking
-          if (assets[p_idx[4]].net_position <= signed'(p_trade[4].quantity)) begin
-            assets[p_idx[4]].total_position_value <= '0;
-            assets[p_idx[4]].avg_entry_price <= '0;
-            div_state[p_idx[4]] <= IDLE; // cancel any running division
+          if (assets[p_idx[4]].net_position > 0) begin
+            // Closing a long
+            if (assets[p_idx[4]].net_position <= signed'(p_trade[4].quantity)) begin
+              // Flipped to short or flat
+              automatic logic signed [31:0] closed_qty = assets[p_idx[4]].net_position;
+              automatic logic signed [31:0] remaining = signed'(p_trade[4].quantity) - assets[p_idx[4]].net_position;
+              assets[p_idx[4]].realized_pnl <= assets[p_idx[4]].realized_pnl + closed_qty * (signed'(p_trade[4].price) - assets[p_idx[4]].avg_entry_price);
+              assets[p_idx[4]].total_position_value <= 64'(remaining) * signed'(p_trade[4].price);
+              assets[p_idx[4]].avg_entry_price <= remaining > 0 ? p_trade[4].price : '0;
+              div_state[p_idx[4]] <= IDLE;
+            end else begin
+              // Still long
+              assets[p_idx[4]].realized_pnl <= assets[p_idx[4]].realized_pnl + p5_pnl_val;
+              assets[p_idx[4]].total_position_value <= assets[p_idx[4]].total_position_value - p5_cost_basis;
+            end
+          end else begin
+            // Opening/Adding to a short
+            assets[p_idx[4]].total_position_value <= assets[p_idx[4]].total_position_value + p5_trade_val;
+            div_state[p_idx[4]] <= DIVIDE;
+            div_num[p_idx[4]]   <= (assets[p_idx[4]].total_position_value + p5_trade_val);
+            div_den[p_idx[4]]   <= (-assets[p_idx[4]].net_position + signed'(p_trade[4].quantity));
+            div_quot[p_idx[4]]  <= '0; div_rem[p_idx[4]] <= '0; div_count[p_idx[4]] <= 32;
           end
         end
       end
@@ -212,11 +245,13 @@ module pipelined_mult_32x32 (
   end
   
   logic signed [63:0] res_stg1;
+  logic signed [63:0] p3_d;
   logic signed [63:0] res_stg2;
   
   always_ff @(posedge clk) begin
       res_stg1 <= 64'(p0) + (64'(p1) <<< 16) + (64'(p2) <<< 16);
-      res_stg2 <= res_stg1 + (64'(p3) <<< 32);
+      p3_d     <= 64'(p3) <<< 32;
+      res_stg2 <= res_stg1 + p3_d;
   end
   
   assign p = res_stg2;

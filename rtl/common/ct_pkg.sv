@@ -24,9 +24,10 @@ package ct_pkg;
   parameter real CORE_PERIOD_NS  = 4.444;        // 1 / 225 MHz
 
   // --- Market structure -----------------------------------------------------
-  parameter int NUM_ASSETS       = 5;            // FS-6: minimum 5 assets
+  parameter int NUM_ASSETS       = 5;            // max concurrent active order books
+  parameter logic [63:0] INITIAL_CASH      = 64'd10_000_000;           // initial cash in portfolio
   parameter int NUM_LEVELS       = 16;           // price levels per side
-  parameter int NUM_LIVE_ORDERS  = 1024;         // Order Reference Table depth
+  parameter int NUM_LIVE_ORDERS  = 65536;         // Order Reference Table depth
 
   // --- Field widths ---------------------------------------------------------
   parameter int SYMBOL_W         = 8;            // asset index (indexes NUM_ASSETS)
