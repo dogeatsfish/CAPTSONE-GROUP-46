@@ -172,6 +172,7 @@ class StreamSession:
         position: float,
         best_bid: float,
         best_ask: float,
+        trade_count: int,
     ) -> None:
         try:
             self.events.put_nowait(
@@ -183,6 +184,7 @@ class StreamSession:
                     "position_size": position,
                     "best_bid": best_bid,
                     "best_ask": best_ask,
+                    "trade_count": trade_count,
                 }
             )
         except queue.Full:
@@ -251,7 +253,7 @@ class StreamSession:
             result = self._engine.run(self._on_sample)
             self._log_run(started_at_ns, result)
             metrics = compute_summary_metrics(
-                result.pnl_curve, result.compute_time_us, result.total_trades
+                result.pnl_curve, result.compute_time_us, result.total_trades, result.trades
             )
             self.events.put(
                 {
@@ -265,6 +267,7 @@ class StreamSession:
                             "side": t.side,
                             "price": t.price,
                             "size": t.size,
+                            "decision_latency_ns": t.decision_latency_ns,
                         }
                         for t in result.trades
                     ],

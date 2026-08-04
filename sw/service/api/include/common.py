@@ -29,6 +29,10 @@ class Trade(BaseModel):
     side: str
     price: float
     size: float
+    # Real wall-clock decision-to-fill latency in nanoseconds. 0 = not
+    # measured -- see TradeRecord::decision_latency_ns in offline_simulation.h;
+    # today only online-loopback local-strategy trades populate this.
+    decision_latency_ns: int = 0
 
 
 class PnLPoint(BaseModel):
@@ -49,6 +53,14 @@ class SummaryMetrics(BaseModel):
     engine's own wall-clock measurement of the run. trades_per_second is
     total_trades divided by compute_time_us (converted to seconds) -- engine
     throughput, not a market-timing or latency figure.
+
+    avg_decision_latency_ns is the mean of each trade's own real wall-clock
+    decision-to-fill latency (Trade.decision_latency_ns), i.e. the actual
+    "how fast did this software execute a trade" figure -- distinct from
+    trades_per_second above, which measures batch replay throughput, not
+    per-trade decision speed. 0.0 means no trade in this run had a nonzero
+    decision_latency_ns (offline runs and hardware-target runs don't
+    instrument this yet -- see the field's docstring).
     """
 
     final_pnl: float
@@ -58,3 +70,4 @@ class SummaryMetrics(BaseModel):
     sharpe_ratio: float
     compute_time_us: int
     trades_per_second: float
+    avg_decision_latency_ns: float = 0.0

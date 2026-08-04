@@ -74,7 +74,8 @@ SimulationResult OfflineSimulation::run() {
                         next_sample_ns,
                         strategy.get_realized_pnl(),
                         strategy.get_unrealized_pnl(mark),
-                        strategy.get_position()});
+                        strategy.get_position(),
+                        result.trades.size()});
                     next_sample_ns += SAMPLE_INTERVAL_NS;
                     ++backfilled;
                 }
@@ -130,7 +131,8 @@ SimulationResult OfflineSimulation::run() {
                     tick_timestamp_ns,
                     strategy.get_realized_pnl(),
                     strategy.get_unrealized_pnl(mark),
-                    strategy.get_position()});
+                    strategy.get_position(),
+                    result.trades.size()});
                 next_sample_ns = tick_timestamp_ns + SAMPLE_INTERVAL_NS;
             }
         }

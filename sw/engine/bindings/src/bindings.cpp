@@ -32,11 +32,13 @@ PYBIND11_MODULE(engine_sim, m) {
         })
         .def_readonly("price", &TradeRecord::price)
         .def_readonly("size", &TradeRecord::size)
+        .def_readonly("decision_latency_ns", &TradeRecord::decision_latency_ns)
         .def("__repr__", [](const TradeRecord& t) {
             return "<TradeRecord ts=" + std::to_string(t.timestamp_ns) +
                    " side=" + std::string(1, t.side) +
                    " price=" + std::to_string(t.price) +
-                   " size=" + std::to_string(t.size) + ">";
+                   " size=" + std::to_string(t.size) +
+                   " decision_latency_ns=" + std::to_string(t.decision_latency_ns) + ">";
         });
 
     py::class_<PnLSnapshot>(m, "PnLSnapshot")
@@ -44,11 +46,13 @@ PYBIND11_MODULE(engine_sim, m) {
         .def_readonly("realized_pnl", &PnLSnapshot::realized_pnl)
         .def_readonly("unrealized_pnl", &PnLSnapshot::unrealized_pnl)
         .def_readonly("position_size", &PnLSnapshot::position_size)
+        .def_readonly("trade_count", &PnLSnapshot::trade_count)
         .def("__repr__", [](const PnLSnapshot& s) {
             return "<PnLSnapshot ts=" + std::to_string(s.timestamp_ns) +
                    " realized=" + std::to_string(s.realized_pnl) +
                    " unrealized=" + std::to_string(s.unrealized_pnl) +
-                   " position=" + std::to_string(s.position_size) + ">";
+                   " position=" + std::to_string(s.position_size) +
+                   " trade_count=" + std::to_string(s.trade_count) + ">";
         });
 
     py::class_<SimulationResult>(m, "SimulationResult")
@@ -112,7 +116,7 @@ PYBIND11_MODULE(engine_sim, m) {
                          try {
                              callback(s.timestamp_ns, s.realized_pnl,
                                       s.unrealized_pnl, s.position_size,
-                                      l1.best_bid, l1.best_ask);
+                                      l1.best_bid, l1.best_ask, s.trade_count);
                          } catch (const py::error_already_set&) {
                              // Never let a Python exception unwind into C++.
                              PyErr_Clear();
@@ -129,7 +133,8 @@ PYBIND11_MODULE(engine_sim, m) {
              "Broadcast ITCH market data in real time while serving OUCH order "
              "entry. If a callback is given, it is called once per simulated "
              "second as callback(timestamp_ns, realized_pnl, unrealized_pnl, "
-             "position_size, best_bid, best_ask). Returns a SimulationResult.")
+             "position_size, best_bid, best_ask, trade_count). Returns a "
+             "SimulationResult.")
         .def("stop", &OnlineSimulation::stop,
              // Just an atomic store (see OnlineSimulation::stop()); called from
              // a different thread than the one blocked in run(), so it must

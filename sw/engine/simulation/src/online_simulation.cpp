@@ -148,14 +148,25 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
         // default (see Config::enable_local_strategy) so the hardware target
         // still shows only the real board's own trading activity.
         if (cfg.enable_local_strategy) {
+            // Real wall-clock span, not simulated time: how long this
+            // software actually took, from handing the market update to the
+            // strategy through to the resulting fill being confirmed. This
+            // is the loopback-target equivalent of the FPGA's own FS-12
+            // latency telemetry (see outbound_tx_generator.sv / the 2-byte
+            // trailer ouch_udp_loop() currently discards) -- there's no wire
+            // to measure for a local in-process strategy, so this brackets
+            // the same conceptual span with std::chrono instead.
+            const auto decision_start = std::chrono::steady_clock::now();
             std::optional<Order> user_order = strategy.on_market_update(l1);
             if (user_order.has_value()) {
                 Order& uo = user_order.value();
                 const FillReport fill = matching_engine.process_add(uo, ts);
                 if (fill.filled_size > 0.0) {
+                    const uint64_t decision_latency_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - decision_start).count();
                     strategy.on_fill(uo.side, fill.avg_fill_price, fill.filled_size);
-                    active_result->trades.push_back(
-                        TradeRecord{ts, uo.side, fill.avg_fill_price, fill.filled_size});
+                    active_result->trades.push_back(TradeRecord{
+                        ts, uo.side, fill.avg_fill_price, fill.filled_size, decision_latency_ns});
                 }
             }
         }
@@ -169,7 +180,8 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
                 ts,
                 strategy.get_realized_pnl(),
                 strategy.get_unrealized_pnl(mark),
-                strategy.get_position()};
+                strategy.get_position(),
+                active_result->trades.size()};
             active_result->pnl_curve.push_back(snap);
             sampled = snap;
             next_sample_ns = ts + SAMPLE_INTERVAL_NS;
@@ -232,7 +244,8 @@ FillReport OnlineSimulation::apply_ouch_order(const protocol::OuchMessage& msg) 
                 ts,
                 strategy.get_realized_pnl(),
                 strategy.get_unrealized_pnl(mark),
-                strategy.get_position()};
+                strategy.get_position(),
+                active_result->trades.size()};
             active_result->pnl_curve.push_back(snap);
             sampled = snap;
         }
