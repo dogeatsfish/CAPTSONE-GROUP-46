@@ -1,13 +1,10 @@
 #include "online_simulation.h"
-
 #include <iostream>
 #include <cstdio>
 #include <cstring>
 #include <chrono>
 #include <thread>
 #include <optional>
-
-// POSIX networking (macOS / Linux).
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/socket.h>
@@ -16,20 +13,16 @@
 #include <arpa/inet.h>
 
 namespace {
-// Sample the PnL curve once per simulated second (matches the offline sim).
 constexpr uint64_t SAMPLE_INTERVAL_NS = 1'000'000'000ULL;
-// Number of MBO records to pull off disk per fread call.
 constexpr size_t   READ_CHUNK = 8192;
-} // namespace
+} 
 
-// ---------------------------------------------------------
-// Construction / destruction
-// ---------------------------------------------------------
+
+OnlineSimulation::OnlineSimulation(const OnlineConfig& config)
+    : cfg(config) {}
+
 OnlineSimulation::OnlineSimulation(const std::string& file_path)
-    : mbo_file_path(file_path), cfg(Config{}) {}
-
-OnlineSimulation::OnlineSimulation(const std::string& file_path, const Config& config)
-    : mbo_file_path(file_path), cfg(config) {}
+    : cfg(OnlineConfig{}) { cfg.file_path = file_path; }
 
 OnlineSimulation::~OnlineSimulation() {
     running = false;
@@ -39,9 +32,6 @@ OnlineSimulation::~OnlineSimulation() {
     close_sockets();
 }
 
-// ---------------------------------------------------------
-// Socket setup / teardown
-// ---------------------------------------------------------
 bool OnlineSimulation::open_itch_socket() {
     itch_fd = ::socket(AF_INET, SOCK_DGRAM, 0);
     if (itch_fd < 0) {
@@ -78,9 +68,6 @@ bool OnlineSimulation::open_ouch_listener() {
         ouch_listen_fd = -1;
         return false;
     }
-
-    // Only a connection-oriented (TCP) socket needs to be put into the listen
-    // state; UDP is connectionless and reads straight from the bound socket.
     if (!is_udp && ::listen(ouch_listen_fd, 1) < 0) {
         std::cerr << "WARN: OUCH listen() failed; order entry disabled.\n";
         ::close(ouch_listen_fd);
@@ -100,44 +87,27 @@ void OnlineSimulation::close_sockets() {
 // ---------------------------------------------------------
 void OnlineSimulation::broadcast_itch(const std::vector<uint8_t>& itch_msg) {
     if (itch_fd < 0 || itch_msg.empty()) return;
-
-    // Wrap the ITCH message in a MoldUDP64 packet (one message per datagram),
-    // matching the encapsulation the FPGA parser strips. The sequence number
-    // advances per message sent.
     const std::vector<uint8_t> packet =
         protocol::to_moldudp64({itch_msg}, itch_seq_num, cfg.session);
     itch_seq_num += 1;
-
     sockaddr_in dest{};
     dest.sin_family = AF_INET;
     dest.sin_port   = htons(cfg.itch_port);
     ::inet_pton(AF_INET, cfg.itch_address.c_str(), &dest.sin_addr);
-
     ::sendto(itch_fd, packet.data(), packet.size(), 0,
              reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
-    // Best-effort market data: a failed sendto is non-fatal to the replay.
 }
 
 void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_sample_ns) {
     const uint64_t ts = rec.timestamp_ns;
-
-    // Snapshot produced this call (if the per-second sampler fired). Captured
-    // under the lock but the telemetry callback is invoked afterwards, without
-    // the lock held, so a slow consumer can never stall the OUCH thread.
     std::optional<PnLSnapshot> sampled;
-    std::optional<TradeRecord> new_trade; // set below if the local strategy fills
-    L1State l1; // read under the lock below, used for the callback outside it
-
+    std::optional<TradeRecord> new_trade; 
+    L1State l1; 
     {
         std::lock_guard<std::mutex> lock(book_mutex);
-
-        // rec is a source MBORecord, so compare against the MBO record tags
-        // ('A'/'C'), not the ITCH wire tags (Cancel is 'X' on the wire).
         if (rec.message_type == protocol::MBO_ADD) {
             Order mkt_order{rec.order_id, rec.price, rec.size, rec.side, false};
             matching_engine.process_add(mkt_order, ts);
-            // Track the market's own top of book for marking, independent of
-            // the strategy's consumption of the live book below.
             note_market_quote(rec.side, rec.price);
         } else if (rec.message_type == protocol::MBO_CANCEL) {
             matching_engine.process_cancel(rec.order_id, rec.side);
@@ -294,7 +264,7 @@ FillReport OnlineSimulation::apply_ouch_order(const protocol::OuchMessage& msg) 
 
             // A fill is exactly the kind of event the once-per-second
             // market-data sampler in apply_market_event can sit on for a
-            // while (up to max_sleep_ns under real-time hardware pacing):
+            // while (a long quiet gap under real-time pacing):
             // without pushing a sample here too, the live PnL/top-of-book
             // stream only reflects a board fill whenever the next scheduled
             // sample happens to land, which can make a genuinely active
@@ -487,9 +457,9 @@ SimulationResult OnlineSimulation::run(SampleCallback on_sample) {
     // Install the live-telemetry hook for the duration of this run.
     on_sample_cb = std::move(on_sample);
 
-    FILE* fp = std::fopen(mbo_file_path.c_str(), "rb");
+    FILE* fp = std::fopen(cfg.file_path.c_str(), "rb");
     if (fp == nullptr) {
-        std::cerr << "CRITICAL: Failed to open MBO binary stream at " << mbo_file_path << std::endl;
+        std::cerr << "CRITICAL: Failed to open MBO binary stream at " << cfg.file_path << std::endl;
         return result;
     }
 
@@ -534,9 +504,6 @@ SimulationResult OnlineSimulation::run(SampleCallback on_sample) {
                 uint64_t gap_ns = rec.timestamp_ns - prev_ts;
                 double   scaled = static_cast<double>(gap_ns) * cfg.time_scale;
                 uint64_t sleep_ns = static_cast<uint64_t>(scaled);
-                if (cfg.max_sleep_ns > 0 && sleep_ns > cfg.max_sleep_ns) {
-                    sleep_ns = cfg.max_sleep_ns;
-                }
                 if (sleep_ns > 0) {
                     std::this_thread::sleep_for(std::chrono::nanoseconds(sleep_ns));
                 }

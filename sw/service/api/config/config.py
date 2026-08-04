@@ -81,23 +81,6 @@ ONLINE_STREAM_OUCH_PORT = 26001
 # a multi-hour file if you don't need the whole thing.
 ONLINE_STREAM_TIME_SCALE = 1.0
 
-# Cap on any single inter-record sleep (OnlineSimulation::Config::max_sleep_ns),
-# in nanoseconds. 0 = no cap. Measured directly against the bundled dataset
-# (sw/data_pipeline/data/synthetic_mbo_stream.bin): 818 of its ~61k
-# inter-record gaps exceed 5 real seconds, and together those 818 gaps
-# account for ~85.7% of the file's entire 19,192s simulated span (worst
-# single gap: ~1844s, ~31 minutes) -- so ANY nonzero cap here silently speeds
-# through the vast majority of the file's real duration, which is exactly
-# the "N real seconds elapsed shows more than N simulated seconds" bug this
-# was supposed to fix. 0 makes the "N real seconds elapsed = N seconds shown"
-# guarantee exact, at the cost of the replay going real-time-silent (no new
-# ITCH broadcast, no new PnL sample) for as long as ~31 minutes during this
-# file's quietest stretch. That's correct behavior for true real-time replay
-# of real market data, not a bug -- if that's more than you want to sit
-# through, use the Stop button (see routes.py) rather than reintroducing a
-# cap that would just quietly compress time again.
-ONLINE_STREAM_MAX_SLEEP_NS = 0
-
 # --- Auto-fill toggle (online simulation) -------------------------------
 # Set to 1 to force every aggressive order the engine submits (the local
 # strategy's orders in the loopback demo, and inbound OUCH ENTER orders) to

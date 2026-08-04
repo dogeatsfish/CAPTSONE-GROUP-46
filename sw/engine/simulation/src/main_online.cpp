@@ -28,7 +28,7 @@
 int main(int argc, char* argv[]) {
     std::string data_file_path = "data/synthetic_mbo_stream.bin";
 
-    OnlineSimulation::Config cfg; // defaults
+    OnlineConfig cfg; // defaults
 
     const bool from_ini = argc == 2 &&
         std::string(argv[1]).size() > 4 &&
@@ -44,8 +44,8 @@ int main(int argc, char* argv[]) {
         cfg.time_scale     = ini.get_double("time_scale", cfg.time_scale);
         const std::string t = ini.get_string("ouch_transport", "udp");
         cfg.ouch_transport = (t == "tcp" || t == "TCP")
-                                 ? OnlineSimulation::OuchTransport::TCP
-                                 : OnlineSimulation::OuchTransport::UDP;
+                                 ? OuchTransport::TCP
+                                 : OuchTransport::UDP;
     } else {
         if (argc > 1) data_file_path = argv[1];
         if (argc > 2) cfg.time_scale = std::atof(argv[2]);
@@ -55,13 +55,14 @@ int main(int argc, char* argv[]) {
         if (argc > 6) {
             const std::string t = argv[6];
             cfg.ouch_transport = (t == "tcp" || t == "TCP")
-                                     ? OnlineSimulation::OuchTransport::TCP
-                                     : OnlineSimulation::OuchTransport::UDP;
+                                     ? OuchTransport::TCP
+                                     : OuchTransport::UDP;
         }
     }
+    cfg.file_path = data_file_path;
 
     const char* ouch_proto =
-        (cfg.ouch_transport == OnlineSimulation::OuchTransport::UDP) ? "udp" : "tcp";
+        (cfg.ouch_transport == OuchTransport::UDP) ? "udp" : "tcp";
 
     std::cout << "========================================\n";
     std::cout << "Online (Real-Time) Trading Engine\n";
@@ -71,7 +72,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Time scale:        " << cfg.time_scale << "x\n";
     std::cout << "========================================\n";
 
-    OnlineSimulation simulation(data_file_path, cfg);
+    OnlineSimulation simulation(cfg);
     SimulationResult result = simulation.run();
 
     std::cout << "\n=== Simulation Complete ===\n";

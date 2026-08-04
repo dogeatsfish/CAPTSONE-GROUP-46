@@ -158,9 +158,10 @@ def run_online_simulation(req: SimulationRequest):
     cfg.ouch_transport = engine_sim.OuchTransport.UDP  # matches the FPGA
     cfg.time_scale = ONLINE_DEFAULT_TIME_SCALE
     cfg.auto_fill = bool(ONLINE_AUTO_FILL)  # on for all online runs
+    cfg.file_path = str(data_file)  # MBO stream to replay now travels in the config
 
     try:
-        result = engine_sim.OnlineSimulation(str(data_file), cfg).run()
+        result = engine_sim.OnlineSimulation(cfg).run()
     except Exception as exc:  # noqa: BLE001 - surface engine errors as HTTP 500
         raise HTTPException(
             status_code=500, detail=f"Online simulation failed: {exc}"

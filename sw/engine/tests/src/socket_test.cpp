@@ -285,16 +285,17 @@ int main(int argc, char* argv[]) {
         });
     }
 
-    OnlineSimulation::Config cfg;
+    OnlineConfig cfg;
+    cfg.file_path = market_book;
     cfg.itch_address = "127.0.0.1"; // loopback (the subscriber above, if any, binds here)
     cfg.itch_port  = ITCH_PORT;
     cfg.ouch_port  = OUCH_PORT;
     cfg.time_scale = 1.0; // real time
     // The OUCH client below is a TCP stream client, so run order entry in TCP
     // mode. (The engine defaults to UDP to match the FPGA; see online_simulation.h.)
-    cfg.ouch_transport = OnlineSimulation::OuchTransport::TCP;
+    cfg.ouch_transport = OuchTransport::TCP;
 
-    OnlineSimulation sim(market_book, cfg);
+    OnlineSimulation sim(cfg);
 
     SimulationResult result;
     std::thread sim_thread([&]() { result = sim.run(); });

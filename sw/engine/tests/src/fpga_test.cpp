@@ -71,11 +71,12 @@ int main(int argc, char* argv[]) {
     if (argc > 2) scale    = std::atof(argv[2]);
 
     // DEFAULT config: ITCH -> 192.168.0.1:50001, OUCH intake over UDP on 50001.
-    OnlineSimulation::Config cfg;
+    OnlineConfig cfg;
+    cfg.file_path = mbo_file;
     cfg.time_scale = scale;
 
     const char* proto =
-        (cfg.ouch_transport == OnlineSimulation::OuchTransport::UDP) ? "udp" : "tcp";
+        (cfg.ouch_transport == OuchTransport::UDP) ? "udp" : "tcp";
 
     std::cout << "========================================\n";
     std::cout << "FPGA hardware test (real board over Ethernet)\n";
@@ -88,7 +89,7 @@ int main(int argc, char* argv[]) {
 
     std::atomic<size_t> ouch_count{0};
 
-    OnlineSimulation sim(mbo_file, cfg);
+    OnlineSimulation sim(cfg);
 
     // Ctrl+C now unwinds sim.run() through its normal cleanup path (stop the
     // OUCH thread, close itch_fd/ouch_listen_fd) instead of the OS just

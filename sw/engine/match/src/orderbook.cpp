@@ -2,15 +2,6 @@
 #include <algorithm> // Required for std::min
 
 namespace {
-
-// ---------------------------------------------------------
-// Templated matching core, shared by both book sides.
-//
-// Walks the passive book from its best price level outward, filling the
-// aggressive order against resting orders in strict price-then-time priority
-// until it is exhausted or no more levels cross. Emptied orders and price
-// levels are popped as we go, so the hot path never re-sorts.
-// ---------------------------------------------------------
 template <class Book>
 FillReport match_impl(Order& aggressive_order,
                       Book& passive_book,
@@ -60,23 +51,18 @@ FillReport match_impl(Order& aggressive_order,
         }
     }
 
-    // Volume-weighted average execution price for this aggressive order.
     if (report.filled_size > 0.0) {
         report.avg_fill_price = notional / report.filled_size;
     }
     return report;
 }
 
-// Rest an order at its price level and register it in the id index.
 template <class Book>
 void rest_order(const Order& order, Book& book, OrderBook::IdIndex& index) {
     book[order.price].push_back(order);
     index[order.order_id] = order.price;
 }
 
-// Cancel order_id out of one side's book + index. Returns false (a no-op)
-// if order_id isn't in this side's index at all -- the caller decides
-// whether that means "unknown id" or "try the other side."
 template <class Book>
 bool cancel_from(uint64_t order_id, Book& book, OrderBook::IdIndex& index) {
     auto idx_it = index.find(order_id);
@@ -96,14 +82,9 @@ bool cancel_from(uint64_t order_id, Book& book, OrderBook::IdIndex& index) {
     index.erase(idx_it);
     return true;
 }
+} 
 
-} // namespace
-
-// ---------------------------------------------------------
-// Constructor
-// ---------------------------------------------------------
 OrderBook::OrderBook() {
-    // Trades are the only append-heavy structure left on the hot path.
     trade_log.reserve(10000);
 }
 
@@ -135,8 +116,7 @@ void OrderBook::process_cancel(uint64_t order_id, char side) {
 }
 
 void OrderBook::process_cancel(uint64_t order_id) {
-    // Side unknown: try bids first, then asks. A no-op (both misses) just
-    // means an unrecognized id, same as the side-known overload.
+
     if (!cancel_from(order_id, bids, bid_index)) {
         cancel_from(order_id, asks, ask_index);
     }
