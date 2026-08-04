@@ -133,9 +133,25 @@ export default function OnlineDemoPage() {
     // full curve to mean anything, so those stay blank until the real
     // server-computed metrics land; fmtCurrency/fmtNumber already render
     // undefined as "--", so a partial object here is safe to pass through.
+    // Deliberately not gated on `running`: Stop moves status to "idle"
+    // without ever delivering a "complete" event, so a `running` check here
+    // blanked Final Results back to "--" the instant you stopped a run,
+    // discarding the last-known PnL instead of holding it (liveCurve itself
+    // isn't cleared by stop -- only by Reset/a new run -- so lastLiveSample
+    // is already the right guard on its own).
     const lastLiveSample = liveCurve.length > 0 ? liveCurve[liveCurve.length - 1] : null;
+    // Only final_pnl -- Time / Trade now means real measured decision
+    // latency (see ResultsSummary/metrics.py), and there's no live
+    // equivalent of that: trades only stream in on "complete", not
+    // per-fill, so there's nothing to average yet while a run is still
+    // running. Deliberately no trades_per_second field here anymore (it used
+    // to hold a simulated-time-based approximation) -- ResultsSummary
+    // renders "--" for Time / Trade when that's undefined, which is more
+    // honest than showing a number like "80 s/trade" that reads as broken
+    // this early in a run, when trades are naturally still sparse relative
+    // to simulated time elapsed.
     const liveMetrics =
-        isOnline && running && lastLiveSample
+        isOnline && lastLiveSample
             ? { final_pnl: lastLiveSample.realized_pnl + lastLiveSample.unrealized_pnl }
             : null;
     const metrics = result?.metrics ?? liveMetrics;
