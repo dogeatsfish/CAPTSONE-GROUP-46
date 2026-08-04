@@ -640,18 +640,23 @@ module order_book_array
         //   removal      -> sh_en[k] for k >= hit_idx, plus the tail
         //   insert       -> sh_en[k] for k >= 1 && k > hit_idx
         SHIFT: begin
-          for (int unsigned k = 0; k < NUM_LEVELS; k++) begin
+          for (int unsigned k = 0; k < NUM_LEVELS-1; k++) begin
             if (sh_en[k]) begin
               if (is_removal) begin
-                // Levels [hit_idx .. N-2] take their successor; the tail vacates.
-                sel[k] <= (k == NUM_LEVELS-1) ? '0 : sel[k+1];
+                // Levels [hit_idx .. N-2] take their successor.
+                sel[k] <= sel[k+1];
               end else if (k >= 1) begin
-                // Insert: levels [hit_idx+1 .. N-1] take their predecessor. The
-                // k >= 1 guard is a constant per unrolled iteration (it costs
-                // nothing) and keeps sel[k-1] in range for k = 0, which sh_en
-                // never enables on an insert anyway.
+                // Insert: levels [hit_idx+1 .. N-2] take their predecessor.
                 sel[k] <= sel[k-1];
               end
+            end
+          end
+          // Tail element handled separately to avoid out-of-bounds sel[k+1] access in xsim
+          if (sh_en[NUM_LEVELS-1]) begin
+            if (is_removal) begin
+              sel[NUM_LEVELS-1] <= '0;
+            end else begin
+              sel[NUM_LEVELS-1] <= sel[NUM_LEVELS-2];
             end
           end
           state <= WRITE_COMMIT;
