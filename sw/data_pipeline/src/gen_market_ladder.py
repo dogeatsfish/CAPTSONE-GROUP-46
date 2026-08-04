@@ -6,8 +6,8 @@ import struct
 
 MBO_RECORD = struct.Struct("<QcQcdd")
 
-HERE = os.path.dirname(os.path.abspath(__file__))  # tests/src
-# Data lives in tests/data (one level up from this script).
+HERE = os.path.dirname(os.path.abspath(__file__))  # data_pipeline/src
+# Data lives in data_pipeline/data (one level up from this script).
 DATA_DIR = os.path.normpath(os.path.join(HERE, "..", "data"))
 
 CSV_FIELDS = ["timestamp_ns", "message_type", "order_id", "side", "price", "size"]

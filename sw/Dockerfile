@@ -56,6 +56,9 @@ COPY data_pipeline/data/ ./data_pipeline/data/
 # excludes build artifacts (*.so, simulation_run, etc.) from this copy, so
 # the builder's own compiled module below can't be shadowed by it.
 COPY engine/ ./engine/
+# Strategy-compiler sources (main_job, strategy_base, template) live here and
+# are compiled per-job by strategy_compile_manager.py (see config.COMPILER_DIR).
+COPY compiler/ ./compiler/
 COPY --from=builder /app/engine/engine_sim*.so ./engine/
 
 # A dedicated, code-free directory for anything that needs to survive a

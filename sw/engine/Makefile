@@ -1,13 +1,18 @@
 # Makefile for the trading engine
 # Modules:
-#   shared/      - common structs (Order, Trade, L1State, FillReport)
-#   match/       - OrderBook matching engine
-#   simulation/  - Strategy + OfflineSimulation + CLI entry point
-#   bindings/    - pybind11 wrapper exposing the simulation to Python
+#   shared/           - common structs (Order, Trade, L1State, FillReport, OnlineConfig)
+#   match/            - OrderBook matching engine
+#   network/          - ITCH/OUCH wire protocol (protocol.h/.cpp)
+#   simulation/main.cpp  - online (real-time) CLI entry point
+#   simulation/include/  - all simulation headers (offline/online sim, user_strategy, ini_config)
+#   simulation/src/      - OfflineSimulation / OnlineSimulation + trading_context (fixed Strategy machinery)
+#   simulation/templates/- trading_template (editable on_market_update strategy body)
+#   bindings/            - pybind11 wrapper exposing the simulation to Python
+#   ../compiler/         - strategy-compiler entry point (main_job, job template)
 #
 # Targets:
-#   make            -> build the native CLI binary (simulation_run)
-#   make run        -> build + run the CLI with the default data file
+#   make            -> build the real-time CLI binary (online_run)
+#   make run-online -> build + run the real-time CLI with the default data file
 #   make pymodule   -> build the importable Python extension (engine_sim*.so)
 #   make clean      -> remove all build artifacts
 
@@ -15,7 +20,7 @@ CXX      := g++
 CXXFLAGS := -std=c++17 -O2 -Wall -Wextra
 
 # Per-module include directories (headers are referenced by bare name)
-INCLUDES := -Ishared/include -Imatch/include -Isimulation/include
+INCLUDES := -Ishared/include -Imatch/include -Isimulation/include -Inetwork/include
 
 # Core engine sources shared by both the CLI and the Python module.
 # OFFLINE_CORE_SRCS has no socket usage and is portable as-is; ONLINE_SRCS
@@ -23,22 +28,18 @@ INCLUDES := -Ishared/include -Imatch/include -Isimulation/include
 # don't exist on native Windows/MinGW without a Winsock2 port -- see the
 # Windows branch of the pymodule target below.
 OFFLINE_CORE_SRCS := simulation/src/offline_simulation.cpp \
-                     simulation/src/protocol.cpp \
-                     simulation/src/strategy_base.cpp \
-                     simulation/src/user_strategy.cpp \
+                     network/src/protocol.cpp \
+                     simulation/src/trading_context.cpp \
+                     simulation/templates/trading_template.cpp \
                      match/src/orderbook.cpp
 ONLINE_SRCS := simulation/src/online_simulation.cpp
 CORE_SRCS := $(OFFLINE_CORE_SRCS) $(ONLINE_SRCS)
 
 # ---------------------------------------------------------
-# Native CLI binary
-# ---------------------------------------------------------
-TARGET := simulation_run
-CLI_SRCS := simulation/src/main.cpp $(CORE_SRCS)
-
 # Online (real-time) CLI binary
+# ---------------------------------------------------------
 ONLINE_TARGET := online_run
-ONLINE_SRCS   := simulation/src/main_online.cpp $(CORE_SRCS)
+ONLINE_SRCS   := simulation/main.cpp $(CORE_SRCS)
 
 # Default data file used by `make run` (override with FILE=...)
 FILE ?= ../data_pipeline/data/synthetic_mbo_stream.bin
@@ -83,15 +84,9 @@ PY_LINK_LIBS :=
 endif
 endif
 
-.PHONY: all run online run-online pymodule stress-book test-online socket-test flood-test hw-smoke-test fpga-test run-fpga-test clean
+.PHONY: all online run-online pymodule stress-book test-online socket-test flood-test hw-smoke-test fpga-test run-fpga-test clean
 
-all: $(TARGET) $(ONLINE_TARGET)
-
-$(TARGET): $(CLI_SRCS)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(CLI_SRCS) -o $(TARGET)
-
-run: $(TARGET)
-	./$(TARGET) $(FILE)
+all: $(ONLINE_TARGET)
 
 # ---------------------------------------------------------
 # Online (real-time) CLI binary
@@ -138,7 +133,7 @@ SOCKET_TEST_BIN    := tests/src/socket_test
 SOCKET_TEST_SRCS   := tests/src/socket_test.cpp $(CORE_SRCS)
 SOCKET_TEST_CONFIG ?= tests/config/socket_test.ini
 TEST_ONLINE_CONFIG ?= tests/config/test_online.ini
-GEN_LADDER         := tests/src/gen_market_ladder.py
+GEN_LADDER         := ../data_pipeline/src/gen_market_ladder.py
 
 socket-test: $(SOCKET_TEST_SRCS) $(GEN_LADDER)
 	$(PY) $(GEN_LADDER)
@@ -150,10 +145,10 @@ test-online: $(SOCKET_TEST_SRCS) $(GEN_LADDER)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SOCKET_TEST_SRCS) -o $(SOCKET_TEST_BIN) -lpthread
 	./$(SOCKET_TEST_BIN) $(TEST_ONLINE_CONFIG)
 
-# tests/src/gen_test_datasets.py produces smoke_book.bin (hw-smoke-test) and
-# flood_book.bin (flood-test) -- same price band/shape as market_ladder.bin,
+# ../data_pipeline/src/gen_test_datasets.py produces smoke_book.bin (hw-smoke-test)
+# and flood_book.bin (flood-test) -- same price band/shape as market_ladder.bin,
 # just shorter or denser, so the existing test assertions still hold.
-GEN_TEST_DATASETS := tests/src/gen_test_datasets.py
+GEN_TEST_DATASETS := ../data_pipeline/src/gen_test_datasets.py
 
 # Flood/stress the online engine with a dense burst of ITCH messages, reusing
 # socket_test's OUCH client against tests/config/flood_test.ini (loopback).
@@ -198,4 +193,4 @@ run-fpga-test: $(FPGA_TEST_BIN)
 	./$(FPGA_TEST_BIN) $(FPGA_FILE) $(FPGA_SCALE)
 
 clean:
-	rm -f $(TARGET) $(ONLINE_TARGET) $(PY_MODULE)*.so $(STRESS_BOOK_BIN) $(SOCKET_TEST_BIN) $(FPGA_TEST_BIN)
+	rm -f $(ONLINE_TARGET) $(PY_MODULE)*.so $(STRESS_BOOK_BIN) $(SOCKET_TEST_BIN) $(FPGA_TEST_BIN)

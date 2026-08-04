@@ -9,6 +9,9 @@ INCLUDE_DIR = API_DIR / "include"  # service/api/include
 SERVICE_ROOT = API_DIR.parent  # service
 REPO_ROOT = SERVICE_ROOT.parent  # sw
 ENGINE_DIR = REPO_ROOT / "engine"
+COMPILER_DIR = (
+    REPO_ROOT / "compiler"
+)  # strategy-compiler sources (main_job, strategy_base, template)
 DATA_DIR = REPO_ROOT / "data_pipeline" / "data"
 DEFAULT_DATA_FILE = DATA_DIR / "synthetic_mbo_stream.bin"
 REPO_TOP = REPO_ROOT.parent  # repo root (sibling of sw/, vivado/, rtl/)
@@ -27,10 +30,8 @@ COMPILE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
 # from the submitted on_market_update body; override via env var if it isn't
 # on PATH.
 CXX_BIN = os.environ.get("CXX_BIN", "g++")
-STRATEGY_JOB_TEMPLATE = (
-    ENGINE_DIR / "simulation" / "src" / "user_strategy.job_template.cpp"
-)
-STRATEGY_MAIN_JOB_SRC = ENGINE_DIR / "simulation" / "src" / "main_job.cpp"
+STRATEGY_JOB_TEMPLATE = COMPILER_DIR / "src" / "user_strategy.job_template.cpp"
+STRATEGY_MAIN_JOB_SRC = COMPILER_DIR / "src" / "main_job.cpp"
 # Wall-clock caps on the compile and run subprocesses (basic isolation tier --
 # same trust model as the Vivado CompileJob above, not a container sandbox).
 STRATEGY_COMPILE_TIMEOUT_S = float(os.environ.get("STRATEGY_COMPILE_TIMEOUT_S", "15"))

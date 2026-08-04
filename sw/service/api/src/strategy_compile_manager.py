@@ -95,6 +95,7 @@ _INCLUDES = [
     f"-I{ENGINE_DIR / 'shared' / 'include'}",
     f"-I{ENGINE_DIR / 'match' / 'include'}",
     f"-I{ENGINE_DIR / 'simulation' / 'include'}",
+    f"-I{ENGINE_DIR / 'network' / 'include'}",
 ]
 # Fixed, non-user-controlled sources compiled straight from the tracked repo
 # tree -- only user_strategy.cpp (written per-job below) is derived from
@@ -102,8 +103,8 @@ _INCLUDES = [
 # if that list changes.
 _SHARED_SRCS = [
     str(ENGINE_DIR / "simulation" / "src" / "offline_simulation.cpp"),
-    str(ENGINE_DIR / "simulation" / "src" / "protocol.cpp"),
-    str(ENGINE_DIR / "simulation" / "src" / "strategy_base.cpp"),
+    str(ENGINE_DIR / "network" / "src" / "protocol.cpp"),
+    str(ENGINE_DIR / "simulation" / "src" / "trading_context.cpp"),
     str(ENGINE_DIR / "match" / "src" / "orderbook.cpp"),
 ]
 
@@ -253,7 +254,10 @@ class StrategyCompileJob:
         self._log(f"[compile] {' '.join(compile_cmd)}")
         try:
             proc = subprocess.run(
-                compile_cmd, capture_output=True, text=True, timeout=STRATEGY_COMPILE_TIMEOUT_S
+                compile_cmd,
+                capture_output=True,
+                text=True,
+                timeout=STRATEGY_COMPILE_TIMEOUT_S,
             )
         except subprocess.TimeoutExpired:
             self._fail(f"Compile timed out after {STRATEGY_COMPILE_TIMEOUT_S}s.")
@@ -298,7 +302,9 @@ class StrategyCompileJob:
             self._log(f"[run] {line}")
 
         if proc.returncode != 0:
-            self._fail(f"strategy_run exited with code {proc.returncode}; see log above.")
+            self._fail(
+                f"strategy_run exited with code {proc.returncode}; see log above."
+            )
             return
 
         try:
@@ -324,7 +330,9 @@ class StrategyCompileJob:
             self._log("[run] warning: failed to persist run to database")
 
         compute_time_us = raw.get("compute_time_us", 0)
-        metrics = compute_summary_metrics(pnl_curve, compute_time_us, raw.get("total_trades", 0))
+        metrics = compute_summary_metrics(
+            pnl_curve, compute_time_us, raw.get("total_trades", 0)
+        )
 
         response = SimulationResponse(
             data_file=str(self.data_file),
@@ -402,7 +410,10 @@ class StrategyCompileManager:
         if job is None:
             return
         threading.Thread(
-            target=lambda: (job.join(), shutil.rmtree(job.workspace, ignore_errors=True)),
+            target=lambda: (
+                job.join(),
+                shutil.rmtree(job.workspace, ignore_errors=True),
+            ),
             daemon=True,
         ).start()
 

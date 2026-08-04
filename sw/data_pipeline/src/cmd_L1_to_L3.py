@@ -8,13 +8,6 @@ from typing import Iterable, Dict, List, Any
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
 
-# Binary MBO record layout (little-endian, packed, no alignment padding):
-#   timestamp_ns : uint64  (nanoseconds since Unix epoch, UTC)
-#   message_type : char    ('A' add, 'C' cancel)
-#   order_id     : uint64
-#   side         : char    ('B' bid, 'S' ask)
-#   price        : double
-#   size         : double
 MBO_RECORD_FORMAT = "<QcQcdd"
 MBO_RECORD_STRUCT = struct.Struct(MBO_RECORD_FORMAT)
 
@@ -40,6 +33,8 @@ class CSVL1Reader(L1DataReader):
                     "ask_price": float(row["ask_price"]),
                     "ask_size": float(row["ask_size"]),
                 }
+
+
 class DatabaseL1Reader(L1DataReader):
     def __init__(self, db_connection_string: str, ticker: str):
         self.db_conn = db_connection_string
@@ -74,10 +69,12 @@ class L1ToMBOConverter:
         """
         if new_price != state["price"] or new_size != state["size"]:
 
-            # Cancel the old order if it exists
+            # Cancel the old order if it exists ('X' = ITCH Order Cancel, so
+            # the record tag matches the wire tag directly -- no translation
+            # needed downstream).
             if state["id"] is not None:
                 self.mbo_events.append(
-                    [timestamp, "C", state["id"], side, state["price"], state["size"]]
+                    [timestamp, "X", state["id"], side, state["price"], state["size"]]
                 )
 
             # Add the new order

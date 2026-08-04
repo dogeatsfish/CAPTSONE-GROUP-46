@@ -5,14 +5,14 @@
 //   socket_test.ini   -- loopback smoke test: two aggressive SELLs that both
 //                         cross a rising bid ladder (`make socket-test`).
 //   flood_test.ini    -- same client behavior, far denser resting book
-//                         (`make flood-test`); see tests/src/gen_test_datasets.py.
+//                         (`make flood-test`); see data_pipeline/src/gen_test_datasets.py.
 //   test_online.ini   -- fuller end-to-end check: also subscribes to and
 //                         verifies the ITCH broadcast, and checks each OUCH
 //                         response's exact type (EXECUTED vs ACCEPTED), not
 //                         just a trade count (`make test-online`).
 //
-// Market data (tests/data/market_ladder.bin, produced by
-// tests/src/gen_market_ladder.py): 100 Add orders forming a rising BID ladder
+// Market data (../data_pipeline/data/market_ladder.bin, produced by
+// data_pipeline/src/gen_market_ladder.py): 100 Add orders forming a rising BID ladder
 // 100.00, 100.05, ... (size 100, 50 ms apart). Because the resting book is
 // bids, an incoming SELL that crosses is aggressive.
 //
@@ -87,12 +87,12 @@ std::vector<OrderSpec> load_orders(const IniConfig& ini) {
 }
 
 // Fallback: regenerate the ladder book if it is missing, so the test is
-// self-contained. Must match tests/src/gen_market_ladder.py.
+// self-contained. Must match data_pipeline/src/gen_market_ladder.py.
 bool ensure_market_book(const std::string& path) {
     struct stat st;
     if (::stat(path.c_str(), &st) == 0 && st.st_size > 0) return true; // already present
 
-    ::mkdir("tests/data", 0755);
+    ::mkdir("../data_pipeline/data", 0755);
     FILE* fp = std::fopen(path.c_str(), "wb");
     if (fp == nullptr) return false;
 
@@ -236,7 +236,7 @@ int main(int argc, char* argv[]) {
     const uint16_t     ITCH_PORT     = ini.get_port("itch_port", 27200);
     const uint16_t     OUCH_PORT     = ini.get_port("ouch_port", 27201);
     const std::string ouch_transport = ini.get_string("ouch_transport", "tcp");
-    const std::string market_book    = ini.get_string("market_book", "tests/data/market_ladder.bin");
+    const std::string market_book    = ini.get_string("market_book", "../data_pipeline/data/market_ladder.bin");
     const int  pre_send_delay_ms     = ini.get_int("pre_send_delay_ms", 1000);
     const int  min_trades            = ini.get_int("min_trades", 2);
     const int  max_trades            = ini.get_int("max_trades", -1); // -1 = unbounded

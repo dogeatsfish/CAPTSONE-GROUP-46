@@ -94,7 +94,7 @@ std::string trim_ticker(const uint8_t* p, size_t len) {
 std::vector<uint8_t> to_itch(const MBORecord& rec, uint16_t stock_locate) {
     std::vector<uint8_t> packet;
 
-    if (rec.message_type == MBO_ADD) {
+    if (rec.message_type == ITCH_ADD) {
         packet.reserve(ITCH_ADD_LEN);
         packet.push_back(static_cast<uint8_t>(ITCH_ADD));   // [0]  type 'A'
         put_u16(packet, stock_locate);                      // [1-2]  locate
@@ -105,7 +105,7 @@ std::vector<uint8_t> to_itch(const MBORecord& rec, uint16_t stock_locate) {
         put_u32(packet, qty_to_wire(rec.size));             // [20-23] shares
         for (int i = 0; i < 8; ++i) packet.push_back(' ');  // [24-31] stock
         put_u32(packet, price_to_wire(rec.price));          // [32-35] price
-    } else if (rec.message_type == MBO_CANCEL) {
+    } else if (rec.message_type == ITCH_CANCEL) {
         packet.reserve(ITCH_CANCEL_LEN);
         packet.push_back(static_cast<uint8_t>(ITCH_CANCEL)); // [0]  type 'X'
         put_u16(packet, stock_locate);                       // [1-2]  locate

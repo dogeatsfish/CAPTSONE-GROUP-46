@@ -4,31 +4,10 @@
 #include <string>
 #include <cstdlib>
 
-// Usage:
-//   online_run [mbo_file] [time_scale] [itch_port] [ouch_port] [itch_address] [ouch_transport]
-//   online_run [config.ini]
-//
-//   mbo_file        packed binary MBO stream (default: data/synthetic_mbo_stream.bin)
-//   time_scale      wall-clock pacing factor (default 1.0 = real time; e.g. 0.001
-//                   replays 1000x faster; 0 disables pacing)
-//   itch_port       UDP port ITCH market data is broadcast to (default 50001)
-//   ouch_port       port the OUCH order-entry server listens on (default 50001;
-//                   must match the FPGA's OUCH DST_PORT in outbound_tx_generator.sv)
-//   itch_address    destination IP for the ITCH UDP feed (default 192.168.0.1, the
-//                   FPGA's SRC_IP). For a hardware target, keep this as the FPGA's
-//                   IP (unicast) or set a multicast group the FPGA subscribes to.
-//                   The OUCH server always listens on 0.0.0.0:ouch_port, so the
-//                   FPGA connects in to HOST_IP:ouch_port.
-//   ouch_transport  order-entry transport: "udp" (default, matches the FPGA) or
-//                   "tcp" (for a streaming software client)
-//
-// A single argument ending in ".ini" is read as a config file instead (see
-// tests/config/*.ini) -- lets one-off scenarios (e.g. `make hw-smoke-test`)
-// live as a checked-in file instead of a long positional-arg command line.
 int main(int argc, char* argv[]) {
     std::string data_file_path = "data/synthetic_mbo_stream.bin";
 
-    OnlineConfig cfg; // defaults
+    OnlineConfig cfg; 
 
     const bool from_ini = argc == 2 &&
         std::string(argv[1]).size() > 4 &&

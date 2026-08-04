@@ -105,31 +105,17 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
     L1State l1; 
     {
         std::lock_guard<std::mutex> lock(book_mutex);
-        if (rec.message_type == protocol::MBO_ADD) {
+        if (rec.message_type == protocol::ITCH_ADD) {
             Order mkt_order{rec.order_id, rec.price, rec.size, rec.side, false};
             matching_engine.process_add(mkt_order, ts);
             note_market_quote(rec.side, rec.price);
-        } else if (rec.message_type == protocol::MBO_CANCEL) {
+        } else if (rec.message_type == protocol::ITCH_CANCEL) {
             matching_engine.process_cancel(rec.order_id, rec.side);
         }
 
         l1 = matching_engine.get_l1_state();
 
-        // 3. Loopback-only: let the engine's own Strategy trade against this
-        // book, exactly like OfflineSimulation::run() does (same call, same
-        // order of operations -- process the resulting order against the L1
-        // state captured above, then sample below reflects the fill). Off by
-        // default (see Config::enable_local_strategy) so the hardware target
-        // still shows only the real board's own trading activity.
         if (cfg.enable_local_strategy) {
-            // Real wall-clock span, not simulated time: how long this
-            // software actually took, from handing the market update to the
-            // strategy through to the resulting fill being confirmed. This
-            // is the loopback-target equivalent of the FPGA's own FS-12
-            // latency telemetry (see outbound_tx_generator.sv / the 2-byte
-            // trailer ouch_udp_loop() currently discards) -- there's no wire
-            // to measure for a local in-process strategy, so this brackets
-            // the same conceptual span with std::chrono instead.
             const auto decision_start = std::chrono::steady_clock::now();
             std::optional<Order> user_order = strategy.on_market_update(l1);
             if (user_order.has_value()) {
@@ -161,7 +147,7 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
             sampled = snap;
             next_sample_ns = ts + SAMPLE_INTERVAL_NS;
         }
-    } // book_mutex released here
+    } 
 
     // 5. Stream the sample (and any new fill) to live-telemetry consumers,
     // outside the lock.
