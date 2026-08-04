@@ -47,6 +47,7 @@ from config import (
     ONLINE_STREAM_MAX_SLEEP_NS,
     ONLINE_STREAM_OUCH_PORT,
     ONLINE_STREAM_TIME_SCALE,
+    ONLINE_AUTO_FILL,
     engine_sim,
 )
 from metrics import compute_summary_metrics
@@ -83,6 +84,8 @@ def build_online_config(target: str = "loopback") -> Any:
     ever sees "loopback" vs "hardware" (SimulationRequest.online_target).
     """
     cfg = engine_sim.OnlineConfig()
+    # Applies to every online run regardless of target (see config.ONLINE_AUTO_FILL).
+    cfg.auto_fill = bool(ONLINE_AUTO_FILL)
     if target == "hardware":
         cfg.itch_address = ONLINE_ITCH_ADDRESS
         cfg.itch_port = ONLINE_ITCH_PORT
@@ -253,7 +256,10 @@ class StreamSession:
             result = self._engine.run(self._on_sample)
             self._log_run(started_at_ns, result)
             metrics = compute_summary_metrics(
-                result.pnl_curve, result.compute_time_us, result.total_trades, result.trades
+                result.pnl_curve,
+                result.compute_time_us,
+                result.total_trades,
+                result.trades,
             )
             self.events.put(
                 {

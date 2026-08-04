@@ -57,6 +57,18 @@ public:
         // trading activity instead of always being flat.
         bool        enable_local_strategy = false;
 
+        // If true, force a complete fill for every aggressive order the engine
+        // submits (the local strategy's orders and inbound OUCH ENTER orders):
+        // any size left unmatched after walking the book is filled at the
+        // order's own limit price instead of resting. Lets a run show full
+        // trading activity even against this dataset's thin, often one-sided
+        // book, where a marketable order would otherwise only partially fill
+        // (or not at all) and just rest. Off by default: a real hardware run
+        // should reflect only genuine fills against the actual book, not
+        // synthesized ones. Applies only to these aggressive orders, never to
+        // the market-data adds that build the book.
+        bool        auto_fill = false;
+
         // MoldUDP64 session id (ASCII, up to protocol::MOLD_SESSION_LEN bytes,
         // zero-padded). Stamped on every market-data datagram.
         std::string session = "";
@@ -115,6 +127,15 @@ private:
     // that originate from OUCH orders (OUCH frames carry no timestamp).
     std::atomic<uint64_t> last_market_ts_ns{0};
 
+    // The market's own top of book, tracked straight from the market-data
+    // stream (not the live order book, which the local strategy consumes -- so
+    // marking off it would read one-sided/empty right after every strategy
+    // fill and zero out unrealized PnL). Stub/erroneous quotes in the data
+    // (asks at 199999.99, bids at 0.0001, etc.) are filtered out in
+    // note_market_quote so they can't corrupt the mark. Guarded by book_mutex.
+    double market_bid_ = 0.0;
+    double market_ask_ = 0.0;
+
     // MoldUDP64 sequence number of the next market-data message (starts at 1,
     // the MoldUDP64 convention). Only touched on the market-data thread.
     uint64_t itch_seq_num = 1;
@@ -127,6 +148,23 @@ private:
     // --- Market-data side ---
     void broadcast_itch(const std::vector<uint8_t>& packet);
     void apply_market_event(const MBORecord& rec, uint64_t& next_sample_ns);
+
+    // When cfg.auto_fill is set, force `order` to a complete fill: pull the
+    // remainder process_add() rested back out of the book and fold it into
+    // `fill` at the order's limit price. A no-op if auto_fill is off or the
+    // order already filled completely. Must be called with book_mutex held.
+    void finalize_auto_fill(Order& order, FillReport& fill);
+
+    // Record a market-data quote (one side, from an MBO add) into
+    // market_bid_/market_ask_, rejecting stub/erroneous prices that sit wildly
+    // off the current market mid. Call with book_mutex held.
+    void note_market_quote(char side, double price);
+
+    // Current market mid used to mark an open position: the mid when both
+    // sides are known, otherwise whichever side is, otherwise 0. Built only
+    // from stub-filtered market data, so it tracks fair value regardless of
+    // how the strategy churns the live book. Call with book_mutex held.
+    double market_mid() const;
 
     // --- Order-entry side (runs on ouch_thread) ---
     void ouch_server_loop();      // dispatches to the TCP or UDP loop

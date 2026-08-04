@@ -88,7 +88,8 @@ PYBIND11_MODULE(engine_sim, m) {
         .def_readwrite("max_sleep_ns",   &OnlineSimulation::Config::max_sleep_ns)
         .def_readwrite("stock_locate",   &OnlineSimulation::Config::stock_locate)
         .def_readwrite("enable_local_strategy",
-                        &OnlineSimulation::Config::enable_local_strategy);
+                        &OnlineSimulation::Config::enable_local_strategy)
+        .def_readwrite("auto_fill", &OnlineSimulation::Config::auto_fill);
 
     py::class_<OnlineSimulation>(m, "OnlineSimulation")
         .def(py::init<const std::string&>(), py::arg("file_path"),
