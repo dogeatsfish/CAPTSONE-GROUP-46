@@ -5,7 +5,7 @@
 #include <map>
 #include <string>
 
-class IniConfig {
+class TestConfig {
 public:
     bool load(const std::string& path) {
         std::ifstream in(path);

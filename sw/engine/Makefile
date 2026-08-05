@@ -3,16 +3,18 @@
 #   shared/           - common structs (Order, Trade, L1State, FillReport, OnlineConfig)
 #   match/            - OrderBook matching engine
 #   network/          - ITCH/OUCH wire protocol (protocol.h/.cpp)
-#   simulation/main.cpp  - online (real-time) CLI entry point
-#   simulation/include/  - all simulation headers (offline/online sim, user_strategy, ini_config)
+#   simulation/include/  - simulation headers (offline/online sim, online_config, user_strategy)
 #   simulation/src/      - OfflineSimulation / OnlineSimulation + trading_context (fixed Strategy machinery)
 #   simulation/templates/- trading_template (editable on_market_update strategy body)
+#   tests/src/test.cpp   - online (real-time) CLI entry point (online_run)
+#   tests/include/test.h - TestConfig (INI decoder, used only by test.cpp)
 #   bindings/            - pybind11 wrapper exposing the simulation to Python
 #   ../compiler/         - strategy-compiler entry point (main_job, job template)
 #
 # Targets:
 #   make            -> build the real-time CLI binary (online_run)
-#   make run-online -> build + run the real-time CLI with the default data file
+#   make run        -> build + run the CLI (defaults, or FILE=<config.ini> to
+#                      run a config file, or FILE=<mbo.bin> SCALE=<x>)
 #   make pymodule   -> build the importable Python extension (engine_sim*.so)
 #   make clean      -> remove all build artifacts
 
@@ -20,7 +22,7 @@ CXX      := g++
 CXXFLAGS := -std=c++17 -O2 -Wall -Wextra
 
 # Per-module include directories (headers are referenced by bare name)
-INCLUDES := -Ishared/include -Imatch/include -Isimulation/include -Inetwork/include
+INCLUDES := -Ishared/include -Imatch/include -Isimulation/include -Inetwork/include -Itests/include
 
 # Core engine sources shared by both the CLI and the Python module.
 # OFFLINE_CORE_SRCS has no socket usage and is portable as-is; ONLINE_SRCS
@@ -39,12 +41,14 @@ CORE_SRCS := $(OFFLINE_CORE_SRCS) $(ONLINE_SRCS)
 # Online (real-time) CLI binary
 # ---------------------------------------------------------
 ONLINE_TARGET := online_run
-ONLINE_SRCS   := simulation/main.cpp $(CORE_SRCS)
+ONLINE_SRCS   := tests/src/test.cpp $(CORE_SRCS)
 
-# Default data file used by `make run` (override with FILE=...)
+# Default data file used by `make run` (override with FILE=..., which may be an
+# MBO .bin or a .ini config file).
 FILE ?= ../data_pipeline/data/synthetic_mbo_stream.bin
 
-# Pacing factor for `make run-online` (override with SCALE=...).
+# Pacing factor for `make run` (override with SCALE=...). Ignored when FILE is
+# a .ini (the config carries its own time_scale).
 # 1.0 = true real time; smaller replays faster; 0 disables pacing.
 SCALE ?= 0.001
 
@@ -84,7 +88,7 @@ PY_LINK_LIBS :=
 endif
 endif
 
-.PHONY: all online run-online pymodule stress-book test-online socket-test flood-test hw-smoke-test fpga-test run-fpga-test clean
+.PHONY: all online run pymodule smoke-test hardware-test clean
 
 all: $(ONLINE_TARGET)
 
@@ -96,7 +100,7 @@ online: $(ONLINE_TARGET)
 $(ONLINE_TARGET): $(ONLINE_SRCS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(ONLINE_SRCS) -o $(ONLINE_TARGET) -lpthread
 
-run-online: $(ONLINE_TARGET)
+run: $(ONLINE_TARGET)
 	./$(ONLINE_TARGET) $(FILE) $(SCALE)
 
 pymodule: $(PY_TARGET)
@@ -106,91 +110,32 @@ $(PY_TARGET): $(PY_SRCS)
 		$(INCLUDES) $(PY_INCLUDES) $(PY_SRCS) $(PY_LINK_LIBS) -o $(PY_TARGET)
 
 # ---------------------------------------------------------
-# Stress / correctness tests
+# Test runs (drive online_run against a config)
 # ---------------------------------------------------------
-# C++ OrderBook stress + correctness harness.
-STRESS_BOOK_BIN  := tests/src/stress_orderbook
-STRESS_BOOK_SRCS := tests/src/stress_orderbook.cpp match/src/orderbook.cpp
-
-# Python interpreter used by the online tests to generate market-data books.
+# Python interpreter used to generate the smoke/flood market-data books.
 # Override with PY=... if needed.
 PY ?= ../service/.venv/bin/python
 
-stress-book: $(STRESS_BOOK_SRCS)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(STRESS_BOOK_SRCS) -o $(STRESS_BOOK_BIN)
-	./$(STRESS_BOOK_BIN)
-
-# OUCH socket client vs a generated rising bid ladder -- one binary, three
-# scenarios selected entirely by which .ini it's pointed at (see the header
-# comment in tests/src/socket_test.cpp):
-#   make socket-test  -> tests/config/socket_test.ini (loopback smoke test)
-#   make test-online  -> tests/config/test_online.ini (adds ITCH-broadcast
-#                         verification + per-order expected-response checks)
-#   make flood-test   -> tests/config/flood_test.ini (below)
-# Override with SOCKET_TEST_CONFIG=.../TEST_ONLINE_CONFIG=... to run against
-# a different .ini.
-SOCKET_TEST_BIN    := tests/src/socket_test
-SOCKET_TEST_SRCS   := tests/src/socket_test.cpp $(CORE_SRCS)
-SOCKET_TEST_CONFIG ?= tests/config/socket_test.ini
-TEST_ONLINE_CONFIG ?= tests/config/test_online.ini
-GEN_LADDER         := ../data_pipeline/src/gen_market_ladder.py
-
-socket-test: $(SOCKET_TEST_SRCS) $(GEN_LADDER)
-	$(PY) $(GEN_LADDER)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SOCKET_TEST_SRCS) -o $(SOCKET_TEST_BIN) -lpthread
-	./$(SOCKET_TEST_BIN) $(SOCKET_TEST_CONFIG)
-
-test-online: $(SOCKET_TEST_SRCS) $(GEN_LADDER)
-	$(PY) $(GEN_LADDER)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SOCKET_TEST_SRCS) -o $(SOCKET_TEST_BIN) -lpthread
-	./$(SOCKET_TEST_BIN) $(TEST_ONLINE_CONFIG)
-
-# ../data_pipeline/src/gen_test_datasets.py produces smoke_book.bin (hw-smoke-test)
-# and flood_book.bin (flood-test) -- same price band/shape as market_ladder.bin,
-# just shorter or denser, so the existing test assertions still hold.
+# ../data_pipeline/src/gen_test_datasets.py produces smoke_book.bin + flood_book.bin.
 GEN_TEST_DATASETS := ../data_pipeline/src/gen_test_datasets.py
 
-# Flood/stress the online engine with a dense burst of ITCH messages, reusing
-# socket_test's OUCH client against tests/config/flood_test.ini (loopback).
-flood-test: $(SOCKET_TEST_SRCS) $(GEN_TEST_DATASETS)
+# Loopback smoke test: generate the short smoke_book, then replay it through
+# online_run over loopback (127.0.0.1) in real time. Software-only, no board.
+# Override with SMOKE_CONFIG=... to run a different .ini.
+SMOKE_CONFIG ?= tests/config/smoke_test.ini
+
+smoke-test: $(ONLINE_TARGET) $(GEN_TEST_DATASETS)
 	$(PY) $(GEN_TEST_DATASETS)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SOCKET_TEST_SRCS) -o $(SOCKET_TEST_BIN) -lpthread
-	./$(SOCKET_TEST_BIN) tests/config/flood_test.ini
+	./$(ONLINE_TARGET) $(SMOKE_CONFIG)
 
-# Quick "is the board alive" check for demo day -- streams a short ladder at
-# the real FPGA over UDP/192.168.0.1 and relies on tcpdump/the activity LED
-# to confirm OUCH responses (see docs/connection-test.md step 4). Needs the
-# host <-> FPGA link already configured; this only builds/runs online_run.
-# Override with HW_SMOKE_CONFIG=... to run against a different .ini (same
-# override pattern as SOCKET_TEST_CONFIG/TEST_ONLINE_CONFIG above).
-HW_SMOKE_CONFIG ?= tests/config/hardware_smoke.ini
+# Real-hardware run: stream the MBO feed at the FPGA over UDP/192.168.0.1 and
+# watch tcpdump/the activity LED for OUCH responses (see docs/connection-test.md
+# step 4). Needs the host <-> FPGA link already configured. Override with
+# HARDWARE_CONFIG=... to run a different .ini.
+HARDWARE_CONFIG ?= tests/config/hardware_test.ini
 
-hw-smoke-test: $(ONLINE_TARGET) $(GEN_TEST_DATASETS)
-	$(PY) $(GEN_TEST_DATASETS)
-	./$(ONLINE_TARGET) $(HW_SMOKE_CONFIG)
-
-# ---------------------------------------------------------
-# FPGA hardware test (real board over Ethernet)
-# ---------------------------------------------------------
-# Streams the synthetic MBO stream to the board using the DEFAULT network config
-# (ITCH -> 192.168.0.1:50001, OUCH received over UDP on 50001) and decodes/prints
-# every OUCH packet the FPGA sends back. Requires the board link to be up
-# (sudo ../../setup/net_setup.sh) and the bitstream loaded.
-FPGA_TEST_BIN  := fpga_test
-FPGA_TEST_SRCS := tests/src/fpga_test.cpp $(CORE_SRCS)
-
-# Market-data stream fed to the board (override with FILE=...).
-FPGA_FILE ?= ../data_pipeline/data/synthetic_mbo_stream.bin
-# Real-time pacing for the hardware run (override with SCALE=...).
-FPGA_SCALE ?= 1.0
-
-fpga-test: $(FPGA_TEST_BIN)
-
-$(FPGA_TEST_BIN): $(FPGA_TEST_SRCS)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(FPGA_TEST_SRCS) -o $(FPGA_TEST_BIN) -lpthread
-
-run-fpga-test: $(FPGA_TEST_BIN)
-	./$(FPGA_TEST_BIN) $(FPGA_FILE) $(FPGA_SCALE)
+hardware-test: $(ONLINE_TARGET)
+	./$(ONLINE_TARGET) $(HARDWARE_CONFIG)
 
 clean:
-	rm -f $(ONLINE_TARGET) $(PY_MODULE)*.so $(STRESS_BOOK_BIN) $(SOCKET_TEST_BIN) $(FPGA_TEST_BIN)
+	rm -f $(ONLINE_TARGET) $(PY_MODULE)*.so

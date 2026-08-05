@@ -80,7 +80,7 @@ ONLINE_STREAM_OUCH_PORT = 26001
 # span. This does mean a long dataset takes just as long to fully complete as
 # it would live -- use the Stop button (see routes.py) rather than waiting out
 # a multi-hour file if you don't need the whole thing.
-ONLINE_STREAM_TIME_SCALE = 1.0
+ONLINE_STREAM_TIME_SCALE = 0.01
 
 # --- Auto-fill toggle (online simulation) -------------------------------
 # Set to 1 to force every aggressive order the engine submits (the local

@@ -1,6 +1,7 @@
 import ModeToggle from "./ModeToggle";
 import DatasetSelector from "./DatasetSelector";
 import OnlineTargetToggle from "./OnlineTargetToggle";
+import TimeScaleControl from "./TimeScaleControl";
 
 // Layout-only: composes the mode toggle, dataset picker, and run/stop/reset
 // buttons. Holds no state of its own -- everything is passed down from App.
@@ -20,6 +21,8 @@ export default function ControlPanel({
     canReset,
     onlineTarget, // optional -- only online mode wires this ("loopback" | "hardware")
     onOnlineTargetChange,
+    timeScale, // optional -- only online mode wires this (number: OnlineConfig time_scale)
+    onTimeScaleChange,
 }) {
     return (
         <div className="panel controls-panel">
@@ -37,6 +40,13 @@ export default function ControlPanel({
                     <OnlineTargetToggle
                         value={onlineTarget}
                         onChange={onOnlineTargetChange}
+                        disabled={running}
+                    />
+                )}
+                {mode === "online" && onTimeScaleChange && (
+                    <TimeScaleControl
+                        value={timeScale}
+                        onChange={onTimeScaleChange}
                         disabled={running}
                     />
                 )}

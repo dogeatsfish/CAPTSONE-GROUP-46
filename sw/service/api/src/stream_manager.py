@@ -68,7 +68,9 @@ _POLL_INTERVAL_S = 0.1
 _KEEPALIVE_TICKS = 100
 
 
-def build_online_config(target: str = "loopback") -> Any:
+def build_online_config(
+    target: str = "loopback", time_scale: Optional[float] = None
+) -> Any:
     """Build the server-side engine transport/pacing config for a stream run.
 
     target="loopback" (default): a software-only live view for the browser,
@@ -78,6 +80,9 @@ def build_online_config(target: str = "loopback") -> Any:
     target="hardware": the real board, same addressing/pacing as the
     blocking /simulate/online endpoint and the hw-smoke-test/fpga-test
     targets.
+
+    time_scale: optional per-request pacing override (SimulationRequest.
+    time_scale, set from the UI). None keeps the target's server-side default.
 
     None of these socket details are ever surfaced to the client -- it only
     ever sees "loopback" vs "hardware" (SimulationRequest.online_target).
@@ -101,6 +106,10 @@ def build_online_config(target: str = "loopback") -> Any:
         # would replay market data forever and never show a single trade
         # (see engine_sim.OnlineConfig's enable_local_strategy docstring).
         cfg.enable_local_strategy = True
+
+    # Per-request pacing override from the UI, if supplied.
+    if time_scale is not None:
+        cfg.time_scale = time_scale
     return cfg
 
 

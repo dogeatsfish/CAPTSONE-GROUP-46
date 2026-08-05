@@ -186,7 +186,7 @@ def start_online_stream(req: SimulationRequest):
     """
     data_file = _resolve_data_file(req.data_file)
     session = stream_manager.create(
-        str(data_file), build_online_config(req.online_target)
+        str(data_file), build_online_config(req.online_target, req.time_scale)
     )
     return StreamStartResponse(
         session_id=session.session_id,

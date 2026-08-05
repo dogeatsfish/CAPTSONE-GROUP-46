@@ -12,6 +12,7 @@
 #include "user_strategy.h"
 #include "offline_simulation.h" 
 #include "protocol.h"
+#include "online_config.h" // OnlineConfig / OuchTransport
 
 class OnlineSimulation {
 public:
