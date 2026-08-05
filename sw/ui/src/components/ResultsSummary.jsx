@@ -12,12 +12,11 @@ import AutoFitValue from "./AutoFitValue";
 //   volatility, sharpe_ratio, compute_time_us, trades_per_second,
 //   avg_decision_latency_ns }
 //
-// Current PnL shows final_realized_pnl (closed trades only), not final_pnl
-// (which also includes the open position's unrealized mark-to-market) --
-// a "PnL" headline that moved with unrealized swings read as misleading,
-// especially since it's indistinguishable from realized until you actually
-// see a close. Realized/Unrealized/Total all still show as separate lines
-// on the PnL Curve chart for anyone who wants the combined view.
+// Current PnL shows final_pnl -- realized plus the open position's unrealized
+// mark-to-market -- so the headline reflects total account value including
+// open exposure, not just closed trades. (final_realized_pnl is still
+// available in metrics if a realized-only view is ever wanted; Realized/
+// Unrealized/Total also show as separate lines on the PnL Curve chart.)
 export default function ResultsSummary({ metrics }) {
     const m = metrics ?? null;
 
@@ -33,8 +32,8 @@ export default function ResultsSummary({ metrics }) {
                     <div className="label">Current PnL ($)</div>
                     <AutoFitValue
                         max={30}
-                        className={`value ${signClass(m?.final_realized_pnl ?? 0)}`}
-                        text={m ? fmtCurrency(m.final_realized_pnl) : "—"}
+                        className={`value ${signClass(m?.final_pnl ?? 0)}`}
+                        text={m ? fmtCurrency(m.final_pnl) : "—"}
                     />
                 </div>
                 <div className="card">

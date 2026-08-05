@@ -9,6 +9,9 @@ INCLUDE_DIR = API_DIR / "include"  # service/api/include
 SERVICE_ROOT = API_DIR.parent  # service
 REPO_ROOT = SERVICE_ROOT.parent  # sw
 ENGINE_DIR = REPO_ROOT / "engine"
+COMPILER_DIR = (
+    REPO_ROOT / "compiler"
+)  # strategy-compiler sources (main_job, strategy_base, template)
 DATA_DIR = REPO_ROOT / "data_pipeline" / "data"
 DEFAULT_DATA_FILE = DATA_DIR / "synthetic_mbo_stream.bin"
 REPO_TOP = REPO_ROOT.parent  # repo root (sibling of sw/, vivado/, rtl/)
@@ -27,10 +30,8 @@ COMPILE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
 # from the submitted on_market_update body; override via env var if it isn't
 # on PATH.
 CXX_BIN = os.environ.get("CXX_BIN", "g++")
-STRATEGY_JOB_TEMPLATE = (
-    ENGINE_DIR / "simulation" / "src" / "user_strategy.job_template.cpp"
-)
-STRATEGY_MAIN_JOB_SRC = ENGINE_DIR / "simulation" / "src" / "main_job.cpp"
+STRATEGY_JOB_TEMPLATE = COMPILER_DIR / "src" / "user_strategy.job_template.cpp"
+STRATEGY_MAIN_JOB_SRC = COMPILER_DIR / "src" / "main_job.cpp"
 # Wall-clock caps on the compile and run subprocesses (basic isolation tier --
 # same trust model as the Vivado CompileJob above, not a container sandbox).
 STRATEGY_COMPILE_TIMEOUT_S = float(os.environ.get("STRATEGY_COMPILE_TIMEOUT_S", "15"))
@@ -79,24 +80,7 @@ ONLINE_STREAM_OUCH_PORT = 26001
 # span. This does mean a long dataset takes just as long to fully complete as
 # it would live -- use the Stop button (see routes.py) rather than waiting out
 # a multi-hour file if you don't need the whole thing.
-ONLINE_STREAM_TIME_SCALE = 1.0
-
-# Cap on any single inter-record sleep (OnlineSimulation::Config::max_sleep_ns),
-# in nanoseconds. 0 = no cap. Measured directly against the bundled dataset
-# (sw/data_pipeline/data/synthetic_mbo_stream.bin): 818 of its ~61k
-# inter-record gaps exceed 5 real seconds, and together those 818 gaps
-# account for ~85.7% of the file's entire 19,192s simulated span (worst
-# single gap: ~1844s, ~31 minutes) -- so ANY nonzero cap here silently speeds
-# through the vast majority of the file's real duration, which is exactly
-# the "N real seconds elapsed shows more than N simulated seconds" bug this
-# was supposed to fix. 0 makes the "N real seconds elapsed = N seconds shown"
-# guarantee exact, at the cost of the replay going real-time-silent (no new
-# ITCH broadcast, no new PnL sample) for as long as ~31 minutes during this
-# file's quietest stretch. That's correct behavior for true real-time replay
-# of real market data, not a bug -- if that's more than you want to sit
-# through, use the Stop button (see routes.py) rather than reintroducing a
-# cap that would just quietly compress time again.
-ONLINE_STREAM_MAX_SLEEP_NS = 0
+ONLINE_STREAM_TIME_SCALE = 0.01
 
 # --- Auto-fill toggle (online simulation) -------------------------------
 # Set to 1 to force every aggressive order the engine submits (the local

@@ -44,7 +44,6 @@ from config import (
     ONLINE_OUCH_PORT,
     ONLINE_STREAM_ITCH_ADDRESS,
     ONLINE_STREAM_ITCH_PORT,
-    ONLINE_STREAM_MAX_SLEEP_NS,
     ONLINE_STREAM_OUCH_PORT,
     ONLINE_STREAM_TIME_SCALE,
     ONLINE_AUTO_FILL,
@@ -69,7 +68,9 @@ _POLL_INTERVAL_S = 0.1
 _KEEPALIVE_TICKS = 100
 
 
-def build_online_config(target: str = "loopback") -> Any:
+def build_online_config(
+    target: str = "loopback", time_scale: Optional[float] = None
+) -> Any:
     """Build the server-side engine transport/pacing config for a stream run.
 
     target="loopback" (default): a software-only live view for the browser,
@@ -79,6 +80,9 @@ def build_online_config(target: str = "loopback") -> Any:
     target="hardware": the real board, same addressing/pacing as the
     blocking /simulate/online endpoint and the hw-smoke-test/fpga-test
     targets.
+
+    time_scale: optional per-request pacing override (SimulationRequest.
+    time_scale, set from the UI). None keeps the target's server-side default.
 
     None of these socket details are ever surfaced to the client -- it only
     ever sees "loopback" vs "hardware" (SimulationRequest.online_target).
@@ -98,11 +102,14 @@ def build_online_config(target: str = "loopback") -> Any:
         cfg.itch_port = ONLINE_STREAM_ITCH_PORT
         cfg.ouch_port = ONLINE_STREAM_OUCH_PORT
         cfg.time_scale = ONLINE_STREAM_TIME_SCALE
-        cfg.max_sleep_ns = ONLINE_STREAM_MAX_SLEEP_NS
         # No board is ever attached in loopback, so without this the demo
         # would replay market data forever and never show a single trade
         # (see engine_sim.OnlineConfig's enable_local_strategy docstring).
         cfg.enable_local_strategy = True
+
+    # Per-request pacing override from the UI, if supplied.
+    if time_scale is not None:
+        cfg.time_scale = time_scale
     return cfg
 
 
@@ -272,7 +279,8 @@ class StreamSession:
     def _run(self) -> None:
         started_at_ns = time.time_ns()
         try:
-            self._engine = engine_sim.OnlineSimulation(self.data_file, self.cfg)
+            self.cfg.file_path = self.data_file  # file to replay travels in the config
+            self._engine = engine_sim.OnlineSimulation(self.cfg)
             # getattr-guarded like stop() -- a stale engine_sim build predating
             # this binding must degrade (no packet log), not crash the run.
             set_observer = getattr(self._engine, "set_ouch_observer", None)

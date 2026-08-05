@@ -93,7 +93,7 @@ SimulationResult OfflineSimulation::run() {
             if (rec.message_type == 'A') {
                 Order mkt_order{rec.order_id, rec.price, rec.size, rec.side, false};
                 matching_engine.process_add(mkt_order, tick_timestamp_ns);
-            } else if (rec.message_type == 'C') {
+            } else if (rec.message_type == 'X') {
                 matching_engine.process_cancel(rec.order_id, rec.side);
             }
 

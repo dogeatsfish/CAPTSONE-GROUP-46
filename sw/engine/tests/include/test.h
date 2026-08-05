@@ -1,23 +1,12 @@
 #pragma once
-
-// Minimal flat INI reader for the C++ test harness.
-//
-// Format: "key = value" per line, "#" or ";" start a comment, blank lines and
-// a single optional "[section]" header (ignored) are skipped. No nesting, no
-// quoting -- this is a test-only config loader, not a general parser.
-//
-// Lets tests/config/*.ini own the socket addresses/ports/transport/dataset
-// for each test instead of those values being hardcoded in the .cpp files.
-
 #include <cctype>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <string>
 
-class IniConfig {
+class TestConfig {
 public:
-    // Returns false (and prints why) if the file can't be opened.
     bool load(const std::string& path) {
         std::ifstream in(path);
         if (!in) {

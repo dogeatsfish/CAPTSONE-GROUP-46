@@ -4,11 +4,7 @@ engine/engine_sim*.so
 engine/engine_sim*.pyd
 
 # Native CLI binaries / object files, not needed by the service image.
-engine/simulation_run
 engine/online_run
-engine/tests/src/stress_orderbook
-engine/tests/src/test_online
-engine/tests/src/socket_test
 **/*.o
 
 # Per-job compile workspaces and the sqlite db -- runtime state, not build

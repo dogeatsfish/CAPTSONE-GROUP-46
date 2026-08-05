@@ -74,30 +74,31 @@ PYBIND11_MODULE(engine_sim, m) {
     // Not registered in Windows builds (CT_NO_ONLINE_SIM) -- see the #include
     // guard above.
 #ifndef CT_NO_ONLINE_SIM
-    py::enum_<OnlineSimulation::OuchTransport>(m, "OuchTransport")
-        .value("UDP", OnlineSimulation::OuchTransport::UDP)
-        .value("TCP", OnlineSimulation::OuchTransport::TCP);
+    py::enum_<OuchTransport>(m, "OuchTransport")
+        .value("UDP", OuchTransport::UDP)
+        .value("TCP", OuchTransport::TCP);
 
-    py::class_<OnlineSimulation::Config>(m, "OnlineConfig")
+    py::class_<OnlineConfig>(m, "OnlineConfig")
         .def(py::init<>())
-        .def_readwrite("itch_address",   &OnlineSimulation::Config::itch_address)
-        .def_readwrite("itch_port",      &OnlineSimulation::Config::itch_port)
-        .def_readwrite("ouch_port",      &OnlineSimulation::Config::ouch_port)
-        .def_readwrite("ouch_transport", &OnlineSimulation::Config::ouch_transport)
-        .def_readwrite("time_scale",     &OnlineSimulation::Config::time_scale)
-        .def_readwrite("max_sleep_ns",   &OnlineSimulation::Config::max_sleep_ns)
-        .def_readwrite("stock_locate",   &OnlineSimulation::Config::stock_locate)
+        .def_readwrite("file_path",      &OnlineConfig::file_path)
+        .def_readwrite("itch_address",   &OnlineConfig::itch_address)
+        .def_readwrite("itch_port",      &OnlineConfig::itch_port)
+        .def_readwrite("ouch_port",      &OnlineConfig::ouch_port)
+        .def_readwrite("ouch_transport", &OnlineConfig::ouch_transport)
+        .def_readwrite("time_scale",     &OnlineConfig::time_scale)
+        .def_readwrite("stock_locate",   &OnlineConfig::stock_locate)
         .def_readwrite("enable_local_strategy",
-                        &OnlineSimulation::Config::enable_local_strategy)
-        .def_readwrite("auto_fill", &OnlineSimulation::Config::auto_fill);
+                        &OnlineConfig::enable_local_strategy)
+        .def_readwrite("auto_fill",      &OnlineConfig::auto_fill)
+        .def_readwrite("session",        &OnlineConfig::session);
 
     py::class_<OnlineSimulation>(m, "OnlineSimulation")
+        .def(py::init<const OnlineConfig&>(), py::arg("config"),
+             "Create a real-time simulation from a config (which carries the MBO "
+             "file_path to replay plus networking/pacing settings).")
         .def(py::init<const std::string&>(), py::arg("file_path"),
-             "Create a real-time simulation reading the packed binary MBO stream "
-             "at file_path (default networking config).")
-        .def(py::init<const std::string&, const OnlineSimulation::Config&>(),
-             py::arg("file_path"), py::arg("config"),
-             "Create a real-time simulation with an explicit networking/pacing config.")
+             "Convenience: create a real-time simulation reading the packed binary "
+             "MBO stream at file_path with otherwise-default config.")
         .def("run",
              [](OnlineSimulation& self, py::object callback) {
                  // Wrap an optional Python callable as the C++ SampleCallback.

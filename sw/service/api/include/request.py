@@ -35,3 +35,13 @@ class SimulationRequest(BaseModel):
             "real time to match it. Ignored by every other endpoint."
         ),
     )
+    time_scale: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "Wall-clock pacing for /simulate/online/stream: 1.0 = real time, "
+            "smaller replays faster (e.g. 0.001 = 1000x), 0 = no pacing. None "
+            "(default) uses the server-side default for the chosen target. "
+            "Ignored by every other endpoint."
+        ),
+    )

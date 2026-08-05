@@ -27,6 +27,10 @@ export default function OnlineDemoPage() {
     const [ouchPackets, setOuchPackets] = useState([]); // every inbound OUCH packet, live
     const [streamResult, setStreamResult] = useState(null); // set from the SSE "complete" event
     const [onlineTarget, setOnlineTarget] = useState("loopback"); // "loopback" | "hardware"
+    // OnlineConfig time_scale. Default 0.01 (100x) matches the server's loopback
+    // default (config.ONLINE_STREAM_TIME_SCALE): real time (1) would sit idle
+    // through the dataset's long gaps and look frozen. User can still pick it.
+    const [timeScale, setTimeScale] = useState(0.01);
 
     const { datasets, loading: datasetsLoading, error: datasetsError } = useDatasets();
 
@@ -108,7 +112,11 @@ export default function OnlineDemoPage() {
             setLiveTrades([]);
             setOuchPackets([]);
             setStreamResult(null);
-            streaming.start({ data_file: selectedDataset || undefined, online_target: onlineTarget });
+            streaming.start({
+                data_file: selectedDataset || undefined,
+                online_target: onlineTarget,
+                time_scale: timeScale,
+            });
         } else {
             blocking.run({ mode, dataFile: selectedDataset });
         }
@@ -203,6 +211,8 @@ export default function OnlineDemoPage() {
                 canReset={canReset}
                 onlineTarget={onlineTarget}
                 onOnlineTargetChange={isOnline ? setOnlineTarget : undefined}
+                timeScale={timeScale}
+                onTimeScaleChange={isOnline ? setTimeScale : undefined}
             />
 
             {isOnline && (running || topOfBook) && (
