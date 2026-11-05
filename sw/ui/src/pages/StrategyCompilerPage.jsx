@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import PnlCharts from "../components/PnlCharts.jsx";
+import StrategyCharts from "../components/StrategyCharts.jsx";
 import StatCards from "../components/StatCards.jsx";
 import StatusIndicator from "../components/StatusIndicator.jsx";
-import { fmt } from "../lib/format.js";
-import { pnlCurveToPoints } from "../lib/pnl.js";
-import { useEventSourceRun } from "../lib/useEventSourceRun.js";
+import ErrorBanner from "../components/ErrorBanner";
+import { useDatasets } from "../hooks/useDatasets";
+import { fmtNumber } from "../utils/format";
+import { pnlCurveToPoints } from "../utils/pnl.js";
+import { useEventSourceRun } from "../hooks/useEventSourceRun.js";
 
 const STATUS_LABEL = {
     idle: "Idle",
@@ -74,22 +76,13 @@ return order_to_send;`;
 
 export default function StrategyCompilerPage() {
     const [body, setBody] = useState(DEFAULT_BODY);
-    const [datasets, setDatasets] = useState([]);
+    const { datasets } = useDatasets();
     const [dataset, setDataset] = useState("");
     const [logs, setLogs] = useState([]);
     const [points, setPoints] = useState([]);
     const [summary, setSummary] = useState(null);
 
     const logPanelRef = useRef(null);
-
-    useEffect(() => {
-        fetch("/datasets")
-            .then((r) => r.json())
-            .then((d) => setDatasets(d.datasets || []))
-            .catch(() => {
-                /* dataset picker just stays empty -> server default is used */
-            });
-    }, []);
 
     // Scroll only the log panel itself, never the page around it.
     useEffect(() => {
@@ -148,7 +141,7 @@ export default function StrategyCompilerPage() {
                 </div>
             </div>
 
-            {error && <div className="error-banner">{error}</div>}
+            <ErrorBanner message={error} />
 
             <div className="panel">
                 <h3>on_market_update body</h3>
@@ -197,15 +190,15 @@ export default function StrategyCompilerPage() {
                 <>
                     <StatCards
                         items={[
-                            { label: "Total PnL", display: fmt(totalPnl), raw: totalPnl },
+                            { label: "Total PnL", display: fmtNumber(totalPnl), raw: totalPnl },
                             {
                                 label: "Position",
-                                display: last ? fmt(last.position, 0) : "—",
+                                display: last ? fmtNumber(last.position, 0) : "—",
                                 raw: last?.position ?? 0,
                             },
                             {
                                 label: "Compute Time",
-                                display: summary ? `${fmt(summary.compute_time_us / 1000, 1)} ms` : "—",
+                                display: summary ? `${fmtNumber(summary.compute_time_us / 1000, 1)} ms` : "—",
                             },
                             {
                                 label: "Total Trades",
@@ -214,26 +207,26 @@ export default function StrategyCompilerPage() {
                             {
                                 label: "Max Drawdown",
                                 display: summary
-                                    ? `$${fmt(summary.max_drawdown)} (${fmt(summary.max_drawdown_pct, 1)}%)`
+                                    ? `$${fmtNumber(summary.max_drawdown)} (${fmtNumber(summary.max_drawdown_pct, 1)}%)`
                                     : "—",
                                 raw: summary ? -Math.abs(summary.max_drawdown) : undefined,
                             },
                             {
                                 label: "Sharpe Ratio (ann.)",
-                                display: summary ? fmt(summary.sharpe_ratio) : "—",
+                                display: summary ? fmtNumber(summary.sharpe_ratio) : "—",
                                 raw: summary?.sharpe_ratio,
                             },
                             {
                                 label: "Volatility ($/s)",
-                                display: summary ? `$${fmt(summary.volatility)}` : "—",
+                                display: summary ? `$${fmtNumber(summary.volatility)}` : "—",
                             },
                             {
                                 label: "Trade Throughput",
-                                display: summary ? `${fmt(summary.trades_per_second, 1)} trades/s` : "—",
+                                display: summary ? `${fmtNumber(summary.trades_per_second, 1)} trades/s` : "—",
                             },
                         ]}
                     />
-                    <PnlCharts points={points} />
+                    <StrategyCharts points={points} />
                 </>
             )}
         </div>

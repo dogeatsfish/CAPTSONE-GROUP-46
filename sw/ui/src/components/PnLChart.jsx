@@ -37,19 +37,19 @@ export default function PnLChart({ pnlCurve, firstTimestampNs, unit }) {
                             type="number"
                             domain={[0, "dataMax"]}
                             ticks={elapsedTicks(points[points.length - 1].t)}
-                            stroke="#4b5468"
+                            stroke="var(--faint)"
                             tick={{ fontSize: 11, fontFamily: "JetBrains Mono, monospace" }}
                             tickFormatter={fmtElapsed}
                             label={{
                                 value: unit.label,
                                 position: "insideBottom",
                                 offset: -4,
-                                fill: "#4b5468",
+                                fill: "var(--faint)",
                                 fontSize: 10,
                             }}
                         />
                         <YAxis
-                            stroke="#4b5468"
+                            stroke="var(--faint)"
                             tick={{ fontSize: 11, fontFamily: "JetBrains Mono, monospace" }}
                             width={64}
                             tickFormatter={fmtCompactCurrency}
@@ -57,19 +57,19 @@ export default function PnLChart({ pnlCurve, firstTimestampNs, unit }) {
                                 value: "PnL ($)",
                                 angle: -90,
                                 position: "insideLeft",
-                                fill: "#4b5468",
+                                fill: "var(--faint)",
                                 fontSize: 10,
                             }}
                         />
                         <Tooltip
                             contentStyle={{
-                                background: "#161b26",
-                                border: "1px solid #232a3a",
+                                background: "var(--panel-raised)",
+                                border: "1px solid var(--rule)",
                                 borderRadius: 3,
                                 fontFamily: "JetBrains Mono, monospace",
                                 fontSize: 12,
                             }}
-                            labelStyle={{ color: "#8792a6" }}
+                            labelStyle={{ color: "var(--dim)" }}
                             formatter={(value) => fmtCurrency(value)}
                             labelFormatter={(t) => `${fmtElapsed(t)} ${unit.suffix} elapsed`}
                         />
@@ -78,12 +78,12 @@ export default function PnLChart({ pnlCurve, firstTimestampNs, unit }) {
                             height={28}
                             wrapperStyle={{ fontSize: 11, fontFamily: "Space Grotesk, sans-serif" }}
                         />
-                        <ReferenceLine y={0} stroke="#4b5468" />
+                        <ReferenceLine y={0} stroke="var(--faint)" />
                         <Line
                             type="monotone"
                             dataKey="realized"
                             name="Realized"
-                            stroke="#5eead4"
+                            stroke="var(--trace)"
                             dot={false}
                             isAnimationActive={false}
                             strokeWidth={2}
@@ -92,7 +92,7 @@ export default function PnLChart({ pnlCurve, firstTimestampNs, unit }) {
                             type="monotone"
                             dataKey="unrealized"
                             name="Unrealized"
-                            stroke="#f0b429"
+                            stroke="var(--amber)"
                             dot={false}
                             isAnimationActive={false}
                             strokeWidth={2}
@@ -101,7 +101,7 @@ export default function PnLChart({ pnlCurve, firstTimestampNs, unit }) {
                             type="monotone"
                             dataKey="total"
                             name="Total"
-                            stroke="#e8ecf3"
+                            stroke="var(--paper)"
                             strokeDasharray="4 3"
                             dot={false}
                             isAnimationActive={false}

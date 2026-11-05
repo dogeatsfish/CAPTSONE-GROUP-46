@@ -1,4 +1,4 @@
-import { sign } from "../lib/format.js";
+import { signClass } from "../utils/format";
 import AutoFitValue from "./AutoFitValue";
 
 // The 4-card summary grid (Total PnL / Position / one run-specific stat /
@@ -13,7 +13,7 @@ export default function StatCards({ items }) {
             {items.map(({ label, display, raw }) => (
                 <div className="card" key={label}>
                     <div className="label">{label}</div>
-                    <AutoFitValue max={24} className={`value ${raw !== undefined ? sign(raw) : ""}`} text={display} />
+                    <AutoFitValue max={24} className={`value ${raw !== undefined ? signClass(raw) : ""}`} text={display} />
                 </div>
             ))}
         </div>

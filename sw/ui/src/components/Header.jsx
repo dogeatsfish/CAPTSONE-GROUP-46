@@ -1,3 +1,5 @@
+import StatusIndicator from "./StatusIndicator";
+
 const STATUS_LABEL = {
     idle: "Idle",
     running: "Running simulation…",
@@ -15,10 +17,7 @@ export default function Header({ status }) {
                     Offline backtest or online replay against a fixed market-data file
                 </div>
             </div>
-            <span className="status">
-                <span className={`dot ${status}`} />
-                {STATUS_LABEL[status] ?? status}
-            </span>
+            <StatusIndicator status={status} labels={STATUS_LABEL} />
         </div>
     );
 }

@@ -9,7 +9,7 @@ import OuchPacketLog from "../components/OuchPacketLog.jsx";
 import ErrorBanner from "../components/ErrorBanner";
 import { useDatasets } from "../hooks/useDatasets";
 import { useSimulation } from "../hooks/useSimulation";
-import { useEventSourceRun } from "../lib/useEventSourceRun.js";
+import { useEventSourceRun } from "../hooks/useEventSourceRun.js";
 import { computeLiveMetrics } from "../utils/metrics.js";
 import { elapsedSeconds, pickElapsedUnit } from "../utils/format";
 

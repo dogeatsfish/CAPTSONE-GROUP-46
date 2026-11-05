@@ -1,4 +1,4 @@
-import useFitFontSize from "../lib/useFitFontSize";
+import useFitFontSize from "../hooks/useFitFontSize";
 
 // Stat-card value that shrinks to fit its own box when it's a single
 // unbreakable token; multi-word values wrap underneath instead (see

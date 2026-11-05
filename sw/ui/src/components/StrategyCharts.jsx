@@ -23,7 +23,7 @@ const ZERO_LINE = "var(--faint)";
 // { t, realized, unrealized, total, position } -- see pnl.js's
 // pnlCurveToPoints for how callers (StrategyCompilerPage,
 // AlphaEngineCompilerPage) produce this shape from a returned pnl_curve.
-export default function PnlCharts({ points }) {
+export default function StrategyCharts({ points }) {
     const ticks = elapsedTicks(points.length > 0 ? points[points.length - 1].t : 0);
 
     return (

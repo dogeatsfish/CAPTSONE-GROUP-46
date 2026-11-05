@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import StatCards from "../components/StatCards.jsx";
 import StatusIndicator from "../components/StatusIndicator.jsx";
-import { fmt } from "../lib/format.js";
-import { useEventSourceRun } from "../lib/useEventSourceRun.js";
-import { DEFAULT_SOURCE } from "../lib/defaultAlphaEngineSource.js";
+import ErrorBanner from "../components/ErrorBanner";
+import { fmtNumber } from "../utils/format";
+import { useEventSourceRun } from "../hooks/useEventSourceRun.js";
+import { DEFAULT_SOURCE } from "../utils/defaultAlphaEngineSource.js";
 
 const STATUS_LABEL = {
     idle: "Idle",
@@ -72,7 +73,7 @@ export default function AlphaEngineCompilerPage() {
                 </div>
             </div>
 
-            {error && <div className="error-banner">{error}</div>}
+            <ErrorBanner message={error} />
 
             <div className="panel">
                 <h3>alpha_engine_core.sv</h3>
@@ -107,7 +108,7 @@ export default function AlphaEngineCompilerPage() {
                         items={[
                             {
                                 label: "Synth Time",
-                                display: report.synth_time_s != null ? `${fmt(report.synth_time_s, 1)} s` : "—",
+                                display: report.synth_time_s != null ? `${fmtNumber(report.synth_time_s, 1)} s` : "—",
                             },
                             { label: "LUTs", display: report.lut_count?.toLocaleString() ?? "—" },
                             { label: "FFs", display: report.ff_count?.toLocaleString() ?? "—" },
