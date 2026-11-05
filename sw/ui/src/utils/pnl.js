@@ -1,5 +1,5 @@
 // Converts one PnL snapshot -- one entry of a SimulationResponse-shaped
-// pnl_curve -- into the shape PnlCharts/StatCards expect:
+// pnl_curve -- into the shape StrategyCharts expects:
 // { t, realized, unrealized, total, position }, with `t` = seconds since
 // `firstTs`.
 function snapshotToPoint(snapshot, firstTs) {

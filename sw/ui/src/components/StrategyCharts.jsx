@@ -19,10 +19,9 @@ const AXIS = "var(--dim)";
 const TOOLTIP_BG = "var(--panel)";
 const ZERO_LINE = "var(--faint)";
 
-// Shared PnL/position chart pair. `points` is an array of
-// { t, realized, unrealized, total, position } -- see pnl.js's
-// pnlCurveToPoints for how callers (StrategyCompilerPage,
-// AlphaEngineCompilerPage) produce this shape from a returned pnl_curve.
+// PnL/position chart pair for the Strategy Compiler page. `points` is an array
+// of { t, realized, unrealized, total, position } -- see pnl.js's
+// pnlCurveToPoints for how a returned pnl_curve becomes this shape.
 export default function StrategyCharts({ points }) {
     const ticks = elapsedTicks(points.length > 0 ? points[points.length - 1].t : 0);
 

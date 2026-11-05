@@ -1,6 +1,6 @@
 // Client-side mirror of sw/service/api/include/metrics.py's
 // compute_summary_metrics(). Exists so the Online-mode dashboard can show
-// drawdown/Sharpe/volatility/Time-per-Trade updating live from the
+// drawdown/Sharpe/volatility updating live from the
 // in-progress pnl_curve/trades arrays (liveCurve/liveTrades in
 // OnlineDemoPage.jsx), the same way the PnL number/graph already do,
 // instead of sitting on "--" until the server's "complete" event lands.

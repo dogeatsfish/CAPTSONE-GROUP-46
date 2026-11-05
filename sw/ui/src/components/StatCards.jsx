@@ -1,8 +1,7 @@
 import { signClass } from "../utils/format";
 import AutoFitValue from "./AutoFitValue";
 
-// The 4-card summary grid (Total PnL / Position / one run-specific stat /
-// Total Trades), shared between the online demo and the strategy compiler.
+// Summary card grid shared by the two compiler pages.
 // `items` is [{ label, display, raw }] -- `display` is the already-formatted
 // string to render, `raw` is the underlying number used only to decide
 // pos/neg coloring (omit `raw` for cards that aren't signed values, e.g.

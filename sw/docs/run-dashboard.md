@@ -110,23 +110,24 @@ in-page instructions on each page for specifics).
    - `Offline` POSTs to `/simulate` (blocking) and renders the response once
      the whole run finishes.
    - `Online` opens `/simulate/online/stream` (SSE) instead and updates live:
-     a **Top of Book** card (best bid/best ask) ticks every simulated second
-     as market data replays, then the rest of the page renders from the
-     terminal `complete` event once the run finishes.
-   - **Final Results** — current PnL, compute time, max drawdown, Sharpe
-     ratio, volatility (drawdown/Sharpe/volatility are computed API-side in
-     `service/api/include/metrics.py` from the run's PnL curve; the engine
-     itself only returns raw trades/PnL samples/compute time).
+     the **Top of Book** card, results, PnL curve, and blotter all fill in as
+     market data replays, and the terminal `complete` event replaces them with
+     the server's final figures. **Stop Simulation** ends a run early and still
+     delivers that final event.
+   - **Results** — current PnL, max drawdown, Sharpe ratio, volatility
+     (computed API-side in `service/api/include/metrics.py` from the run's PnL
+     curve, and mirrored in `ui/src/utils/metrics.js` for live online updates;
+     the engine itself only returns raw trades/PnL samples/compute time).
    - **PnL Curve** — realized, unrealized, and total PnL over simulated time.
    - **Order Blotter** — every filled trade, side-coded buy/sell.
 
-> **Online mode currently shows zero trades.** `OnlineSimulation` broadcasts
-> market data and opens an OUCH listener, but nothing auto-connects to send
-> orders against it — unlike offline mode, it doesn't run the strategy
-> internally. The Top of Book card updates live off the real market-data feed
-> (that part doesn't need a connected client), but the run still completes
-> with an empty blotter and a flat PnL curve. This is a real gap in the
-> engine/API, not a UI bug — see `sw/engine/simulation/src/online_simulation.cpp`.
+> **Datasets:** `synthetic_mbo_stream.bin` is the default and the only shipped
+> file that produces trades. The others are small test files that finish almost
+> immediately with zero fills.
+
+> **Online targets:** `Loopback` runs a local strategy, so trades appear with no
+> board attached. `Real Board` only records trades from the board's own OUCH
+> orders, so it shows none unless the board sends them.
 
 ## Troubleshooting
 

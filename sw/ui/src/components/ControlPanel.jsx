@@ -4,7 +4,7 @@ import OnlineTargetToggle from "./OnlineTargetToggle";
 import TimeScaleControl from "./TimeScaleControl";
 
 // Layout-only: composes the mode toggle, dataset picker, and run/stop/reset
-// buttons. Holds no state of its own -- everything is passed down from App.
+// buttons. Holds no state of its own -- everything is passed down from the page.
 export default function ControlPanel({
     mode,
     onModeChange,

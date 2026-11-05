@@ -5,11 +5,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const STOP_GRACE_MS = 5000;
 
 // Shared "POST to start a job, then consume its SSE stream" lifecycle used
-// by both the online-simulation demo (App.jsx) and the strategy compiler
-// (StrategyCompiler.jsx): open/cleanup, the start POST, EventSource
-// wiring, and the idle/running/complete/error status state machine were
-// previously hand-duplicated between the two. Callers only supply what's
-// actually different -- the start URL/body and what to do with each event.
+// by the online dashboard and both compiler pages: open/cleanup, the start
+// POST, EventSource wiring, and the idle/running/complete/error status state
+// machine. Callers only supply what's actually different -- the start
+// URL/body and what to do with each event.
 export function useEventSourceRun({ startUrl, onEvent }) {
     const [status, setStatus] = useState("idle");
     const [error, setError] = useState(null);

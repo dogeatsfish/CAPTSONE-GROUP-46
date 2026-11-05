@@ -174,7 +174,7 @@ export default function OnlineDemoPage() {
     // A hardware run can go for minutes (or, at real-time pacing, hours)
     // before "complete" ever arrives, so Final Results would otherwise sit
     // on "--" the whole time even though real PnL is accruing. Recompute the
-    // full metrics set (drawdown/Sharpe/volatility/Time-per-Trade, not just
+    // full metrics set (drawdown/Sharpe/volatility, not just
     // final_pnl) from whatever's streamed in so far -- same math as
     // metrics.py, ported to utils/metrics.js -- the same tradeoff the PnL
     // number/graph already accept: early in a run this is naturally noisy
