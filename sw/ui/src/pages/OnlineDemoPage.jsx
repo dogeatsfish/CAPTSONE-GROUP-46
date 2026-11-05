@@ -18,6 +18,10 @@ import { elapsedSeconds, pickElapsedUnit } from "../utils/format";
 // MAX_LOG_LINES).
 const MAX_OUCH_PACKETS = 500;
 
+// The only shipped dataset that actually produces trades; the others are small
+// test files that finish instantly with zero fills.
+const DEFAULT_DATASET = "synthetic_mbo_stream.bin";
+
 export default function OnlineDemoPage() {
     const [mode, setMode] = useState("offline");
     const [selectedDataset, setSelectedDataset] = useState(null);
@@ -95,10 +99,10 @@ export default function OnlineDemoPage() {
     const error = isOnline ? streaming.error : blocking.error;
     const result = isOnline ? streamResult : blocking.result;
 
-    // Default the toggle list to the first available dataset once it loads.
+    // Default the toggle list once it loads, falling back to the first dataset.
     useEffect(() => {
         if (!selectedDataset && datasets.length > 0) {
-            setSelectedDataset(datasets[0]);
+            setSelectedDataset(datasets.includes(DEFAULT_DATASET) ? DEFAULT_DATASET : datasets[0]);
         }
     }, [datasets, selectedDataset]);
 
@@ -189,6 +193,10 @@ export default function OnlineDemoPage() {
     );
     const metrics = result?.metrics ?? liveMetrics;
 
+    let resultsTitle = "Results";
+    if (status === "complete") resultsTitle = "Final Results";
+    else if (isOnline && running) resultsTitle = "Live Results";
+
     return (
         <div>
             <Header status={status} />
@@ -220,11 +228,23 @@ export default function OnlineDemoPage() {
                 <TopOfBook bestBid={topOfBook?.bestBid} bestAsk={topOfBook?.bestAsk} />
             )}
 
-            {isOnline && (running || ouchPackets.length > 0) && (
+            {/* Inbound OUCH packets only come from a real board. */}
+            {isOnline && onlineTarget === "hardware" && (running || ouchPackets.length > 0) && (
                 <OuchPacketLog packets={ouchPackets} />
             )}
 
-            <ResultsSummary metrics={metrics} />
+            {status === "complete" && trades.length === 0 && (
+                <div className="panel">
+                    <div className="hint">
+                        This run finished with no trades, so PnL and the metrics below stay at zero.
+                        {selectedDataset !== DEFAULT_DATASET && datasets.includes(DEFAULT_DATASET) && (
+                            <> {selectedDataset} may be too small to trigger any; try {DEFAULT_DATASET}.</>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            <ResultsSummary title={resultsTitle} metrics={metrics} />
 
             <div className="market-grid">
                 <PnLChart pnlCurve={pnlCurve} firstTimestampNs={firstTimestampNs} unit={elapsedUnit} />

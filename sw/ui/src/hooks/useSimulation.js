@@ -12,6 +12,7 @@ export function useSimulation() {
     const run = useCallback(async ({ mode, dataFile }) => {
         setStatus("running");
         setError(null);
+        setResult(null); // a failed run must not keep showing the previous run's results
         try {
             const data = await runSimulation({ mode, dataFile });
             setResult(data);

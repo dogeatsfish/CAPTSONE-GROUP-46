@@ -17,12 +17,12 @@ import AutoFitValue from "./AutoFitValue";
 // open exposure, not just closed trades. (final_realized_pnl is still
 // available in metrics if a realized-only view is ever wanted; Realized/
 // Unrealized/Total also show as separate lines on the PnL Curve chart.)
-export default function ResultsSummary({ metrics }) {
+export default function ResultsSummary({ title = "Results", metrics }) {
     const m = metrics ?? null;
 
     return (
         <div className="panel">
-            <h3>Final Results</h3>
+            <h3>{title}</h3>
             <div className="results-grid">
                 <div className="card card-hero">
                     <span className="corner corner-tl" />
@@ -40,7 +40,7 @@ export default function ResultsSummary({ metrics }) {
                     <div className="label">Max Drawdown ($)</div>
                     <AutoFitValue
                         max={24}
-                        className="value neg"
+                        className={`value ${m?.max_drawdown > 0 ? "neg" : ""}`}
                         text={m ? `${fmtCompactCurrency(m.max_drawdown)} (${fmtCompactPercent(m.max_drawdown_pct)})` : "—"}
                     />
                 </div>
