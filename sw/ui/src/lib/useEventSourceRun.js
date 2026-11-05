@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+// How long stop() waits for the server's final "complete" event before giving
+// up and closing the stream anyway.
+const STOP_GRACE_MS = 5000;
+
 // Shared "POST to start a job, then consume its SSE stream" lifecycle used
 // by both the online-simulation demo (App.jsx) and the strategy compiler
 // (StrategyCompiler.jsx): open/cleanup, the start POST, EventSource
@@ -24,11 +28,20 @@ export function useEventSourceRun({ startUrl, onEvent }) {
     // or racing a newer call's state updates.
     const callIdRef = useRef(0);
 
+    // True between a Stop click and the stream ending. The ref is read by the
+    // EventSource handlers; the state drives the UI.
+    const [stopping, setStopping] = useState(false);
+    const stoppingRef = useRef(false);
+    const stopTimerRef = useRef(null);
+
     const cleanup = useCallback(() => {
         if (esRef.current) {
             esRef.current.close();
             esRef.current = null;
         }
+        clearTimeout(stopTimerRef.current);
+        stoppingRef.current = false;
+        setStopping(false);
     }, []);
 
     useEffect(() => {
@@ -92,6 +105,12 @@ export function useEventSourceRun({ startUrl, onEvent }) {
             };
 
             es.onerror = () => {
+                // The stream closing after a Stop click isn't a failure.
+                if (stoppingRef.current) {
+                    setStatus((s) => (s === "running" ? "idle" : s));
+                    cleanup();
+                    return;
+                }
                 // Fires on network close. If we didn't already finish, surface it.
                 setStatus((s) => (s === "running" ? "error" : s));
                 setError((e) => e || "stream connection lost");
@@ -102,14 +121,22 @@ export function useEventSourceRun({ startUrl, onEvent }) {
     );
 
     const stop = useCallback(() => {
-        callIdRef.current += 1; // invalidate an in-flight start() too, not just close the socket
-        // Tell the server to actually stop the run, not just stop listening --
-        // best-effort; the local cleanup below happens regardless. Endpoints
-        // that don't hand back a session_id (e.g. the compile pages) never
-        // set one, so this is a no-op for them.
-        if (sessionId) {
+        // A stopped run still ends with a regular "complete" event holding
+        // everything collected so far, so keep listening for it rather than
+        // closing the stream now. The timer covers that event never arriving.
+        if (sessionId && esRef.current) {
+            stoppingRef.current = true;
+            setStopping(true);
             fetch(`${startUrl}/${sessionId}/stop`, { method: "POST" }).catch(() => {});
+            stopTimerRef.current = setTimeout(() => {
+                setStatus((s) => (s === "running" ? "idle" : s));
+                cleanup();
+            }, STOP_GRACE_MS);
+            return;
         }
+        // Nothing to wait for: the start POST is still in flight, or this
+        // endpoint has no session to stop (e.g. the compile pages).
+        callIdRef.current += 1;
         cleanup();
         setStatus((s) => (s === "running" ? "idle" : s));
     }, [cleanup, startUrl, sessionId]);
@@ -129,5 +156,5 @@ export function useEventSourceRun({ startUrl, onEvent }) {
         setSessionId(null);
     }, [cleanup, startUrl, sessionId]);
 
-    return { status, error, sessionId, start, stop, reset };
+    return { status, error, sessionId, stopping, start, stop, reset };
 }

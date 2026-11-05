@@ -17,6 +17,7 @@ export default function ControlPanel({
     onRun,
     canRun,
     onStop, // optional -- only modes that can actually be interrupted wire this (online)
+    stopping, // true while a requested stop is waiting on the server's final results
     onReset,
     canReset,
     onlineTarget, // optional -- only online mode wires this ("loopback" | "hardware")
@@ -66,8 +67,8 @@ export default function ControlPanel({
                     {running ? "Running…" : "Run Simulation"}
                 </button>
                 {onStop && (
-                    <button type="button" className="danger" onClick={onStop} disabled={!running}>
-                        Stop Simulation
+                    <button type="button" className="danger" onClick={onStop} disabled={!running || stopping}>
+                        {stopping ? "Stopping…" : "Stop Simulation"}
                     </button>
                 )}
             </div>

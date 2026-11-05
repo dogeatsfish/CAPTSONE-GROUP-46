@@ -139,9 +139,10 @@ export default function OnlineDemoPage() {
     // abort mechanism, so resetting mid-run would only clear the UI
     // optimistically -- the in-flight request would still resolve later and
     // overwrite the reset state with stale results. Stop already covers
-    // interrupting an active online run; Reset is for clearing a finished
-    // (complete/error) one.
-    const canReset = status === "complete" || status === "error";
+    // interrupting an active online run; Reset is for clearing a finished one.
+    // The liveCurve check covers a stopped run whose "complete" never arrived:
+    // it ends "idle" but still has data on screen.
+    const canReset = !running && (status !== "idle" || liveCurve.length > 0);
 
     // Once "complete" lands, its pnl_curve is authoritative (it's the same
     // data the DB got, and covers the rare edge case of a sample landing
@@ -177,10 +178,9 @@ export default function OnlineDemoPage() {
     // run that might not finish for hours. useMemo since liveCurve can grow
     // into the thousands over a long real-time-paced run, and this would
     // otherwise recompute on every unrelated re-render (e.g. top-of-book
-    // ticks). Deliberately gated on liveCurve.length > 0, not `running`:
-    // Stop moves status to "idle" without ever delivering a "complete"
-    // event, so a `running` check here would blank Final Results back to
-    // "--" the instant you stopped a run, discarding the last-known figures
+    // ticks). Deliberately gated on liveCurve.length > 0, not `running`: if a
+    // stopped run's "complete" event never arrives, a `running` check here
+    // would blank the results back to "--", discarding the last-known figures
     // instead of holding them (liveCurve/liveTrades aren't cleared by stop
     // -- only by Reset/a new run).
     const liveMetrics = useMemo(
@@ -207,6 +207,7 @@ export default function OnlineDemoPage() {
                 onRun={handleRun}
                 canRun={canRun}
                 onStop={isOnline ? streaming.stop : undefined}
+                stopping={isOnline && streaming.stopping}
                 onReset={handleReset}
                 canReset={canReset}
                 onlineTarget={onlineTarget}
