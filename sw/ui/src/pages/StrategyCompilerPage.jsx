@@ -80,7 +80,7 @@ export default function StrategyCompilerPage() {
     const [points, setPoints] = useState([]);
     const [summary, setSummary] = useState(null);
 
-    const logEndRef = useRef(null);
+    const logPanelRef = useRef(null);
 
     useEffect(() => {
         fetch("/datasets")
@@ -91,8 +91,10 @@ export default function StrategyCompilerPage() {
             });
     }, []);
 
+    // Scroll only the log panel itself, never the page around it.
     useEffect(() => {
-        logEndRef.current?.scrollIntoView({ block: "nearest" });
+        const panel = logPanelRef.current;
+        if (panel) panel.scrollTop = panel.scrollHeight;
     }, [logs]);
 
     const onEvent = useCallback((evt) => {
@@ -185,9 +187,8 @@ export default function StrategyCompilerPage() {
             {logs.length > 0 && (
                 <div className="panel">
                     <h3>Compiler / run log</h3>
-                    <pre className="log-panel">
+                    <pre ref={logPanelRef} className="log-panel">
                         {logs.join("\n")}
-                        <div ref={logEndRef} />
                     </pre>
                 </div>
             )}
