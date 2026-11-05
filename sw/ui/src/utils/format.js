@@ -46,6 +46,25 @@ export function elapsedSeconds(timestampNs, firstTimestampNs) {
     return Number((timestampNs - firstTimestampNs) / 1e9);
 }
 
+export function fmtElapsed(t) {
+    return t.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+// Round, evenly spaced x-axis ticks (multiples of 1, 2 or 5) from 0 up to
+// maxElapsed. Recharts' own ticks for a [0, "dataMax"] domain end on the raw
+// maximum (e.g. 0, 2, 5.33), which reads as uneven spacing.
+export function elapsedTicks(maxElapsed, targetCount = 8) {
+    if (!(maxElapsed > 0)) return [0];
+    const rawStep = maxElapsed / targetCount;
+    const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+    const step = [1, 2, 5, 10].find((m) => m * magnitude >= rawStep) * magnitude;
+    const ticks = [];
+    for (let i = 0; i * step <= maxElapsed; i++) {
+        ticks.push(Number((i * step).toFixed(10)));
+    }
+    return ticks;
+}
+
 export function signClass(v) {
     if (v > 0) return "pos";
     if (v < 0) return "neg";

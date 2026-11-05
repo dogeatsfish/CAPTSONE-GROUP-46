@@ -10,6 +10,7 @@ import {
     ReferenceLine,
     Legend,
 } from "recharts";
+import { elapsedTicks, fmtElapsed } from "../utils/format";
 
 // Colors here reuse styles.css's :root custom properties -- SVG/Recharts
 // props accept var(...) directly, so there's no need to hardcode hex that
@@ -24,6 +25,8 @@ const ZERO_LINE = "var(--faint)";
 // pnlCurveToPoints for how callers (StrategyCompilerPage,
 // AlphaEngineCompilerPage) produce this shape from a returned pnl_curve.
 export default function PnlCharts({ points }) {
+    const ticks = elapsedTicks(points.length > 0 ? points[points.length - 1].t : 0);
+
     return (
         <>
             <div className="panel">
@@ -33,6 +36,10 @@ export default function PnlCharts({ points }) {
                         <CartesianGrid stroke={GRID} strokeDasharray="3 3" />
                         <XAxis
                             dataKey="t"
+                            type="number"
+                            domain={[0, "dataMax"]}
+                            ticks={ticks}
+                            tickFormatter={fmtElapsed}
                             stroke={AXIS}
                             tick={{ fontSize: 11 }}
                             label={{ value: "sim seconds", position: "insideBottom", offset: -2, fill: AXIS, fontSize: 11 }}
@@ -42,7 +49,7 @@ export default function PnlCharts({ points }) {
                             contentStyle={{ background: TOOLTIP_BG, border: `1px solid ${GRID}`, borderRadius: 8 }}
                             labelStyle={{ color: AXIS }}
                         />
-                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                        <Legend verticalAlign="top" height={28} wrapperStyle={{ fontSize: 12 }} />
                         <ReferenceLine y={0} stroke={ZERO_LINE} />
                         <Line type="monotone" dataKey="realized" name="Realized" stroke="var(--trace)" dot={false} isAnimationActive={false} strokeWidth={2} />
                         <Line type="monotone" dataKey="unrealized" name="Unrealized" stroke="var(--amber)" dot={false} isAnimationActive={false} strokeWidth={2} />
@@ -55,7 +62,15 @@ export default function PnlCharts({ points }) {
                 <ResponsiveContainer width="100%" height={200}>
                     <LineChart data={points} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
                         <CartesianGrid stroke={GRID} strokeDasharray="3 3" />
-                        <XAxis dataKey="t" stroke={AXIS} tick={{ fontSize: 11 }} />
+                        <XAxis
+                            dataKey="t"
+                            type="number"
+                            domain={[0, "dataMax"]}
+                            ticks={ticks}
+                            tickFormatter={fmtElapsed}
+                            stroke={AXIS}
+                            tick={{ fontSize: 11 }}
+                        />
                         <YAxis stroke={AXIS} tick={{ fontSize: 11 }} width={64} />
                         <Tooltip
                             contentStyle={{ background: TOOLTIP_BG, border: `1px solid ${GRID}`, borderRadius: 8 }}

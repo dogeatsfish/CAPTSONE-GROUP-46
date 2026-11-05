@@ -9,7 +9,7 @@ import {
     ReferenceLine,
     Legend,
 } from "recharts";
-import { elapsedSeconds, fmtCompactCurrency, fmtCurrency } from "../utils/format";
+import { elapsedSeconds, elapsedTicks, fmtCompactCurrency, fmtCurrency, fmtElapsed } from "../utils/format";
 
 // pnlCurve: SimulationResponse.pnl_curve, i.e.
 // [{ timestamp_ns, realized_pnl, unrealized_pnl, position_size }, ...]
@@ -34,9 +34,12 @@ export default function PnLChart({ pnlCurve, firstTimestampNs, unit }) {
                         <CartesianGrid stroke="#1b212f" strokeDasharray="2 4" />
                         <XAxis
                             dataKey="t"
+                            type="number"
+                            domain={[0, "dataMax"]}
+                            ticks={elapsedTicks(points[points.length - 1].t)}
                             stroke="#4b5468"
                             tick={{ fontSize: 11, fontFamily: "JetBrains Mono, monospace" }}
-                            tickFormatter={(v) => v.toLocaleString()}
+                            tickFormatter={fmtElapsed}
                             label={{
                                 value: unit.label,
                                 position: "insideBottom",
@@ -68,9 +71,13 @@ export default function PnLChart({ pnlCurve, firstTimestampNs, unit }) {
                             }}
                             labelStyle={{ color: "#8792a6" }}
                             formatter={(value) => fmtCurrency(value)}
-                            labelFormatter={(t) => `${t.toLocaleString()} ${unit.suffix} elapsed`}
+                            labelFormatter={(t) => `${fmtElapsed(t)} ${unit.suffix} elapsed`}
                         />
-                        <Legend wrapperStyle={{ fontSize: 11, fontFamily: "Space Grotesk, sans-serif" }} />
+                        <Legend
+                            verticalAlign="top"
+                            height={28}
+                            wrapperStyle={{ fontSize: 11, fontFamily: "Space Grotesk, sans-serif" }}
+                        />
                         <ReferenceLine y={0} stroke="#4b5468" />
                         <Line
                             type="monotone"
@@ -110,7 +117,7 @@ export default function PnLChart({ pnlCurve, firstTimestampNs, unit }) {
 function toChartPoints(pnlCurve, firstTimestampNs, unit) {
     if (!pnlCurve || pnlCurve.length === 0) return [];
     return pnlCurve.map((p) => ({
-        t: Number((elapsedSeconds(p.timestamp_ns, firstTimestampNs) / unit.divisor).toFixed(2)),
+        t: elapsedSeconds(p.timestamp_ns, firstTimestampNs) / unit.divisor,
         realized: p.realized_pnl,
         unrealized: p.unrealized_pnl,
         total: p.realized_pnl + p.unrealized_pnl,
