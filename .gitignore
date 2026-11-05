@@ -64,6 +64,7 @@ sw/engine/tests/src/test_online
 node_modules/
 sw/ui/build/
 sw/ui/dist/
+sw/ui/.vite/
 .env
 .env.local
 

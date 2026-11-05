@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import PnlCharts from "../components/PnlCharts.jsx";
 import StatCards from "../components/StatCards.jsx";
 import StatusIndicator from "../components/StatusIndicator.jsx";

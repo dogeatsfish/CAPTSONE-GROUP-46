@@ -1,4 +1,3 @@
-import React from "react";
 import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
 import OnlineDemoPage from "./pages/OnlineDemoPage.jsx";
 import StrategyCompilerPage from "./pages/StrategyCompilerPage.jsx";

@@ -156,5 +156,5 @@ export function useEventSourceRun({ startUrl, onEvent }) {
         setSessionId(null);
     }, [cleanup, startUrl, sessionId]);
 
-    return { status, error, sessionId, stopping, start, stop, reset };
+    return { status, error, stopping, start, stop, reset };
 }

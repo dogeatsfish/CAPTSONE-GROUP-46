@@ -2,7 +2,7 @@
 // pnl_curve -- into the shape PnlCharts/StatCards expect:
 // { t, realized, unrealized, total, position }, with `t` = seconds since
 // `firstTs`.
-export function snapshotToPoint(snapshot, firstTs) {
+function snapshotToPoint(snapshot, firstTs) {
     const t = Number(snapshot.timestamp_ns - firstTs) / 1e9;
     return {
         t: Number(t.toFixed(2)),

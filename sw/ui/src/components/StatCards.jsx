@@ -1,4 +1,3 @@
-import React from "react";
 import { sign } from "../lib/format.js";
 import AutoFitValue from "./AutoFitValue";
 

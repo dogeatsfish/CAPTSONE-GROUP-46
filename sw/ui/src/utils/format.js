@@ -18,29 +18,6 @@ export function fmtCurrency(n, digits = 2) {
     })}`;
 }
 
-// Engine timing is reported in microseconds; pick a readable unit.
-export function fmtDuration(us) {
-    if (us === null || us === undefined || Number.isNaN(us)) return "—";
-    if (us < 1_000) return `${fmtNumber(us, 0)} µs`;
-    if (us < 1_000_000) return `${fmtNumber(us / 1_000, 2)} ms`;
-    return `${fmtNumber(us / 1_000_000, 2)} s`;
-}
-
-// Average time per trade, derived by inverting a trades/s rate (whichever
-// kind -- see ResultsSummary's liveThroughput doc: compute-time-based post
-// -run, or simulated-time-based live). Needs its own ns tier that
-// fmtDuration doesn't have: the post-run figure is routinely sub-microsecond
-// (the engine processes way faster than 1 trade/µs), where fmtDuration's
-// whole-microsecond rounding would just show "1 µs" or "0 µs" for
-// everything.
-export function fmtDurationPerTrade(us) {
-    if (us === null || us === undefined || Number.isNaN(us)) return "—";
-    if (us < 1) return `${fmtNumber(us * 1000, 0)} ns`;
-    if (us < 1_000) return `${fmtNumber(us, 2)} µs`;
-    if (us < 1_000_000) return `${fmtNumber(us / 1_000, 2)} ms`;
-    return `${fmtNumber(us / 1_000_000, 2)} s`;
-}
-
 // Nanosecond engine timestamp -> elapsed seconds since the first sample.
 export function elapsedSeconds(timestampNs, firstTimestampNs) {
     return Number((timestampNs - firstTimestampNs) / 1e9);

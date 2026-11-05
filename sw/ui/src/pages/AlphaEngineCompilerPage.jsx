@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import StatCards from "../components/StatCards.jsx";
 import StatusIndicator from "../components/StatusIndicator.jsx";
 import { fmt } from "../lib/format.js";
