@@ -60,7 +60,9 @@ PY_INCLUDES := $(shell python3 -m pybind11 --includes)
 # $(strip ...) matters here: some python3-config builds (observed with MSYS2's
 # mingw-w64 Python) emit a trailing space on --extension-suffix, which Windows
 # silently rejects as part of a filename.
-PY_SUFFIX   := $(strip $(shell python3-config --extension-suffix))
+# Asks the interpreter itself rather than python3-config, which venvs
+# (including CI's) don't ship.
+PY_SUFFIX   := $(strip $(shell python3 -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))"))
 PY_TARGET   := $(PY_MODULE)$(PY_SUFFIX)
 
 # Native Windows/MinGW has no OnlineSimulation support yet (see ONLINE_SRCS
