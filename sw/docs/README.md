@@ -45,6 +45,6 @@ workspace. To use it: open the `sw/` folder in VS Code and choose
 - **Run the real-time engine:** `make -C sw/engine run-online`
 - **Wire protocols:** see `sw/engine/simulation/include/protocol.h` (ITCH in,
   OUCH out; byte layouts mirror the FPGA RTL).
-- **Online networking config:** `OnlineSimulation::Config` in
-  `sw/engine/simulation/include/online_simulation.h` (ports, addresses, and the
-  UDP/TCP OUCH transport toggle).
+- **Online networking config:** `OnlineConfig` in
+  `sw/engine/simulation/include/online_config.h` (ports, addresses, pacing;
+  ITCH out and OUCH in are both UDP).

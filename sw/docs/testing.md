@@ -36,8 +36,7 @@ value not present falls back to its `OnlineConfig` default
 | Section | Key | Meaning |
 |---|---|---|
 | `[network]` | `itch_address` | ITCH market-data destination (`127.0.0.1` loopback vs `192.168.0.1` FPGA) |
-| `[network]` | `itch_port` / `ouch_port` | UDP/TCP ports |
-| `[network]` | `ouch_transport` | `udp` (default, matches FPGA) or `tcp` |
+| `[network]` | `itch_port` / `ouch_port` | UDP ports (OUCH order entry is UDP only, matching the FPGA) |
 | `[data]` | `market_book` | packed MBO `.bin` to replay |
 | `[timing]` | `time_scale` | `1.0` real time, smaller = faster, `0` = no pacing |
 

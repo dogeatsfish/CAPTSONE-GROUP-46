@@ -102,12 +102,6 @@ override with e.g. `TEST_ONLINE_CONFIG=path/to/other.ini` or
 `SOCKET_TEST_CONFIG=...`. See `tests/config/test_online.ini` or the header
 comment in `tests/src/socket_test.cpp` for the full key list.
 
-> **Transport note:** `socket_test.cpp`'s OUCH client (`connect_ouch`) only
-> speaks **TCP**, while the engine's default OUCH transport is now **UDP** —
-> that's why its `.ini` files pin `ouch_transport = tcp`. Pointing one of
-> these configs at `udp` fails fast with a clear error instead of hanging.
-> See `sw/engine/simulation/include/online_simulation.h`.
-
 ### Hardware smoke test
 
 ```bash
@@ -130,7 +124,7 @@ here anymore:
 
 ```bash
 make pymodule
-python3 -c "import engine_sim; print(engine_sim.OuchTransport.UDP)"
+python3 -c "import engine_sim; print(engine_sim.OnlineConfig().ouch_port)"
 ```
 
 What that actually builds differs by platform:

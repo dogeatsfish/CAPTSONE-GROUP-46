@@ -70,10 +70,13 @@ PY_TARGET   := $(PY_MODULE)$(PY_SUFFIX)
 # $(OS) (set to "Windows_NT" by the Windows environment; unset elsewhere) and
 # `uname -s` for the macOS/Linux split.
 ifeq ($(OS),Windows_NT)
+# Winsock (see network/include/socket_compat.h); POSIX sockets need no extra lib.
+NET_LIBS     := -lws2_32
 PY_SRCS      := bindings/src/bindings.cpp $(OFFLINE_CORE_SRCS)
 PY_DEFINES   := -DCT_NO_ONLINE_SIM
 PY_LINK_LIBS := $(shell python3-config --ldflags)
 else
+NET_LIBS     :=
 PY_SRCS      := bindings/src/bindings.cpp $(CORE_SRCS)
 PY_DEFINES   :=
 UNAME_S := $(shell uname -s)
@@ -98,7 +101,7 @@ all: $(ONLINE_TARGET)
 online: $(ONLINE_TARGET)
 
 $(ONLINE_TARGET): $(ONLINE_SRCS)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(ONLINE_SRCS) -o $(ONLINE_TARGET) -lpthread
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(ONLINE_SRCS) -o $(ONLINE_TARGET) -lpthread $(NET_LIBS)
 
 run: $(ONLINE_TARGET)
 	./$(ONLINE_TARGET) $(FILE) $(SCALE)
