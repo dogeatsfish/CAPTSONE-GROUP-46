@@ -89,7 +89,7 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
             matching_engine.process_add(mkt_order, ts);
             note_market_quote(rec.side, rec.price);
         } else if (rec.message_type == protocol::ITCH_CANCEL) {
-            matching_engine.process_cancel(rec.order_id, rec.side);
+            matching_engine.process_cancel(rec.order_id, ts, rec.side);
         }
 
         l1 = matching_engine.get_l1_state();
@@ -99,8 +99,8 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
             std::optional<Order> user_order = strategy.on_market_update(l1);
             if (user_order.has_value()) {
                 Order& uo = user_order.value();
-                FillReport fill = matching_engine.process_add(uo, ts);
-                finalize_auto_fill(uo, fill); // no-op unless cfg.auto_fill
+                FillReport fill = fill_report(matching_engine.process_add(uo, ts));
+                finalize_auto_fill(uo, fill, ts); // no-op unless cfg.auto_fill
                 if (fill.filled_size > 0.0) {
                     const uint64_t decision_latency_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                         std::chrono::steady_clock::now() - decision_start).count();
@@ -167,7 +167,7 @@ double OnlineSimulation::market_mid() const {
     return 0.0;
 }
 
-void OnlineSimulation::finalize_auto_fill(Order& order, FillReport& fill) {
+void OnlineSimulation::finalize_auto_fill(Order& order, FillReport& fill, uint64_t ts) {
     // Off by default, and nothing to do if the order already filled fully.
     if (!cfg.auto_fill || order.size <= 0.0) {
         return;
@@ -179,7 +179,7 @@ void OnlineSimulation::finalize_auto_fill(Order& order, FillReport& fill) {
     // price. The result is a guaranteed complete fill regardless of how much
     // real liquidity the book held.
     const double remaining = order.size;
-    matching_engine.process_cancel(order.order_id);
+    matching_engine.process_cancel(order.order_id, ts);
 
     const double prior_notional = fill.avg_fill_price * fill.filled_size;
     fill.filled_size += remaining;
@@ -209,18 +209,16 @@ FillReport OnlineSimulation::apply_ouch_order(const protocol::OuchMessage& msg) 
 
         if (msg.msg_type == protocol::OUCH_CANCEL) {
             // msg.side is always 0 here -- the OUCH Cancel wire format carries no
-            // side (see protocol::from_ouch) -- so this must use the side-agnostic
-            // overload, not guess. Passing msg.side straight through used to
-            // silently no-op every bid-side cancel (process_cancel(id, side)'s
-            // side != 'B' branch always looked in the ask index).
-            matching_engine.process_cancel(msg.order_id);
+            // side (see protocol::from_ouch) -- so this leaves process_cancel's
+            // side at its default and lets it search both sides of the book.
+            matching_engine.process_cancel(msg.order_id, ts);
             return FillReport{};
         }
 
         // OUCH_ENTER: convert to an aggressive order and match it.
         Order order = protocol::ouch_to_order(msg);
-        fill = matching_engine.process_add(order, ts);
-        finalize_auto_fill(order, fill); // no-op unless cfg.auto_fill
+        fill = fill_report(matching_engine.process_add(order, ts));
+        finalize_auto_fill(order, fill, ts); // no-op unless cfg.auto_fill
         if (fill.filled_size > 0.0) {
             strategy.on_fill(order.side, fill.avg_fill_price, fill.filled_size);
             const TradeRecord tr{ts, order.side, fill.avg_fill_price, fill.filled_size};

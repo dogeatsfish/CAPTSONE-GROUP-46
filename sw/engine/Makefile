@@ -16,6 +16,7 @@
 #   make run        -> build + run the CLI (defaults, or FILE=<config.ini> to
 #                      run a config file, or FILE=<mbo.bin> SCALE=<x>)
 #   make pymodule   -> build the importable Python extension (engine_sim*.so)
+#   make test       -> build + run the unit tests (tests/src/test_*.cpp)
 #   make clean      -> remove all build artifacts
 
 CXX      := g++
@@ -93,7 +94,7 @@ PY_LINK_LIBS :=
 endif
 endif
 
-.PHONY: all online run pymodule smoke-test hardware-test clean
+.PHONY: all online run pymodule test smoke-test hardware-test clean
 
 all: $(ONLINE_TARGET)
 
@@ -113,6 +114,17 @@ pymodule: $(PY_TARGET)
 $(PY_TARGET): $(PY_SRCS)
 	$(CXX) $(CXXFLAGS) $(PY_DEFINES) -shared -fPIC \
 		$(INCLUDES) $(PY_INCLUDES) $(PY_SRCS) $(PY_LINK_LIBS) -o $(PY_TARGET)
+
+# ---------------------------------------------------------
+# Unit tests
+# ---------------------------------------------------------
+TEST_TARGET := test_orderbook
+
+test: $(TEST_TARGET)
+	./$(TEST_TARGET)
+
+$(TEST_TARGET): tests/src/test_orderbook.cpp match/src/orderbook.cpp match/include/orderbook.h shared/include/common.h
+	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_orderbook.cpp match/src/orderbook.cpp -o $(TEST_TARGET)
 
 # ---------------------------------------------------------
 # Test runs (drive online_run against a config)
@@ -143,4 +155,4 @@ hardware-test: $(ONLINE_TARGET)
 	./$(ONLINE_TARGET) $(HARDWARE_CONFIG)
 
 clean:
-	rm -f $(ONLINE_TARGET) $(PY_MODULE)*.so
+	rm -f $(ONLINE_TARGET) $(TEST_TARGET) $(PY_MODULE)*.so

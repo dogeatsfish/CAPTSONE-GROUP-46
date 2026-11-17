@@ -94,7 +94,7 @@ SimulationResult OfflineSimulation::run() {
                 Order mkt_order{rec.order_id, rec.price, rec.size, rec.side, false};
                 matching_engine.process_add(mkt_order, tick_timestamp_ns);
             } else if (rec.message_type == 'X') {
-                matching_engine.process_cancel(rec.order_id, rec.side);
+                matching_engine.process_cancel(rec.order_id, tick_timestamp_ns, rec.side);
             }
 
             // --- 2. Extract the updated L1 state ---
@@ -110,7 +110,7 @@ SimulationResult OfflineSimulation::run() {
                 Order& uo = user_order.value();
 
                 // Feed the order into the engine and capture what actually filled.
-                const FillReport fill = matching_engine.process_add(uo, tick_timestamp_ns);
+                const FillReport fill = fill_report(matching_engine.process_add(uo, tick_timestamp_ns));
 
                 // Only update PnL/telemetry for the volume that truly executed;
                 // any unfilled remainder now rests passively in the book.

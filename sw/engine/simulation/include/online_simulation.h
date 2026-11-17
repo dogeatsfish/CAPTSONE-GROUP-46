@@ -71,7 +71,7 @@ private:
     // --- Market-data side ---
     void broadcast_itch(const std::vector<uint8_t>& packet);
     void apply_market_event(const MBORecord& rec, uint64_t& next_sample_ns);
-    void finalize_auto_fill(Order& order, FillReport& fill);
+    void finalize_auto_fill(Order& order, FillReport& fill, uint64_t ts);
     void note_market_quote(char side, double price);
     double market_mid() const;
     void ouch_udp_loop();         // recvfrom() datagram reader
