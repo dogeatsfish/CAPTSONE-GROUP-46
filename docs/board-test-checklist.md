@@ -85,7 +85,7 @@ Only once step 4 actually returns OUCH responses.
 
 ```bash
 cd sw
-./dev-hardware.sh
+./dev.sh
 ```
 
 Rebuilds `engine_sim` fresh, starts the FastAPI backend natively (not
@@ -107,4 +107,4 @@ Ctrl-C in the terminal stops both the backend and the UI together.
 | Link LED on, activity LED never blinks | [`docs/connection-test.md`](connection-test.md) § 3 — likely host-side (no `inet` line, wrong interface) |
 | Activity LED blinks, `hw-smoke-test`/`tcpdump` sees nothing back | [`docs/board_bringup_issues.md`](board_bringup_issues.md) + [`docs/hw_sw_transport_gaps.md`](hw_sw_transport_gaps.md) — FPGA-side (RTL/bitstream) |
 | UI's "Real Board" run completes but shows zero trades | Expected today — `OnlineSimulation` doesn't auto-connect a strategy to send orders; see the note in [`sw/docs/run-dashboard.md`](../sw/docs/run-dashboard.md) |
-| `dev-hardware.sh` refuses to run | You're on native Windows — use WSL2 (mirrored networking mode) or a macOS/Linux box instead |
+| `dev.sh` refuses to run | You're on native Windows — use WSL2 (mirrored networking mode) or a macOS/Linux box instead |

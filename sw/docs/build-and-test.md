@@ -139,7 +139,7 @@ That Windows row is a real, currently-unsolved gap, not a build-script bug:
 `online_simulation.cpp` uses POSIX sockets with no Winsock2 port. For
 online/hardware work on a Windows machine, use the
 [Dev Container](README.md) or WSL2 instead of a native build — see
-`sw/dev-hardware.sh` and
+`sw/dev.sh` and
 [`docs/connection-test.md`](../../docs/connection-test.md#running-the-backend-against-real-hardware)
 for the real-board case specifically.
 

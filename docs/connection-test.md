@@ -149,13 +149,13 @@ container either. It looks like it "works" for loopback online-mode testing
 (the container talking to itself) and then silently gets no traffic against
 real hardware.
 
-Use `sw/dev-hardware.sh` instead -- it runs the FastAPI service natively so
+Use `sw/dev.sh` instead -- it runs the FastAPI service natively so
 it shares the host's real network stack. It needs macOS, Linux, or WSL2
 (with `networkingMode=mirrored` in `.wslconfig`, so WSL shares the host's NIC
 instead of NATing through its own virtual adapter); native Windows can't do
 hardware-target testing at all, container or not, since
 `engine/Makefile` only compiles online support when the build isn't running
-on `Windows_NT`. Run `setup/net_setup.sh` first either way -- `dev-hardware.sh`
+on `Windows_NT`. Run `setup/net_setup.sh` first either way -- `dev.sh`
 doesn't do that step for you.
 
 ## Important caveats

@@ -70,11 +70,12 @@ The API is then at `http://127.0.0.1:8000`, which is exactly what
 synthesis endpoint) won't work inside the container -- run the service
 natively via `uvicorn` if you need that endpoint.
 
-Or skip doing both by hand: `sw/dev.sh` (macOS/Linux) / `sw/dev.ps1`
+Or skip doing both by hand: `sw/dev.sh` (macOS/Linux/WSL2) / `sw/dev.ps1`
 (Windows) build + start the backend, wait for it to actually answer, then
 start the UI dev server -- with a clear error message (and the backend's
 logs) if any step fails instead of a silent hang. Stopping it (Ctrl-C) tears
-the backend back down too. Software side only -- it doesn't touch the board.
+the backend back down too. `dev.sh` runs the backend natively (no Docker);
+`dev.ps1` uses Docker.
 
 ```bash
 cd sw && ./dev.sh          # macOS/Linux
@@ -83,9 +84,9 @@ cd sw && ./dev.sh          # macOS/Linux
 cd sw; .\dev.ps1           # Windows
 ```
 
-**Testing against the real board?** Don't use the scripts above -- Docker's
-networking can't reach the board. Use `sw/dev-hardware.sh` instead (macOS,
-Linux, or WSL2 only; see [`docs/connection-test.md`](docs/connection-test.md#running-the-backend-against-real-hardware)).
+**Testing against the real board?** Use `sw/dev.sh` (macOS, Linux, or WSL2),
+not `dev.ps1` or `docker compose` -- Docker's networking can't reach the board
+(see [`docs/connection-test.md`](docs/connection-test.md#running-the-backend-against-real-hardware)).
 For the full cold-start sequence (bitstream → link → board → software),
 see [`docs/board-test-checklist.md`](docs/board-test-checklist.md).
 

@@ -117,7 +117,7 @@ L1, now pinned by a regression test).
       "hardware"` against the real board -- Docker Desktop's networking is
       an isolated VM, so a Dockerized backend never reaches the host's
       physical NIC/static-ARP setup, and the board's replies never reach the
-      container. `sw/dev-hardware.sh` works around it by running the service
+      container. `sw/dev.sh` works around it by running the service
       natively on macOS/Linux/WSL2 instead, but that still leaves native
       Windows with zero hardware-target path (`CT_NO_ONLINE_SIM` at compile
       time, container or not). Worth revisiting if native-Windows
