@@ -5,12 +5,6 @@
 #include <chrono>
 #include <thread>
 #include <optional>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/socket.h>
-#include <sys/select.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 
 namespace {
 constexpr uint64_t SAMPLE_INTERVAL_NS = 1'000'000'000ULL;
@@ -33,8 +27,8 @@ OnlineSimulation::~OnlineSimulation() {
 }
 
 bool OnlineSimulation::open_itch_socket() {
-    itch_fd = ::socket(AF_INET, SOCK_DGRAM, 0);
-    if (itch_fd < 0) {
+    itch_fd = net::open_udp();
+    if (itch_fd == net::INVALID_SOCK) {
         std::cerr << "WARN: ITCH UDP socket() failed; market data will not be broadcast.\n";
         return false;
     }
@@ -42,60 +36,45 @@ bool OnlineSimulation::open_itch_socket() {
 }
 
 bool OnlineSimulation::open_ouch_listener() {
-    const bool is_udp   = (cfg.ouch_transport == OuchTransport::UDP);
-    const char* proto   = is_udp ? "UDP" : "TCP";
-    const int  sock_type = is_udp ? SOCK_DGRAM : SOCK_STREAM;
-
-    ouch_listen_fd = ::socket(AF_INET, sock_type, 0);
-    if (ouch_listen_fd < 0) {
-        std::cerr << "WARN: OUCH " << proto
-                  << " socket() failed; order entry disabled.\n";
+    ouch_listen_fd = net::open_udp();
+    if (ouch_listen_fd == net::INVALID_SOCK) {
+        std::cerr << "WARN: OUCH UDP socket() failed; order entry disabled.\n";
         return false;
     }
 
-    int yes = 1;
-    ::setsockopt(ouch_listen_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    net::set_reuse_addr(ouch_listen_fd);
 
-    sockaddr_in addr{};
-    addr.sin_family      = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port        = htons(cfg.ouch_port);
-
-    if (::bind(ouch_listen_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+    if (!net::bind_any(ouch_listen_fd, cfg.ouch_port)) {
         std::cerr << "WARN: OUCH bind() to port " << cfg.ouch_port
                   << " failed; order entry disabled.\n";
-        ::close(ouch_listen_fd);
-        ouch_listen_fd = -1;
-        return false;
-    }
-    if (!is_udp && ::listen(ouch_listen_fd, 1) < 0) {
-        std::cerr << "WARN: OUCH listen() failed; order entry disabled.\n";
-        ::close(ouch_listen_fd);
-        ouch_listen_fd = -1;
+        net::close_socket(ouch_listen_fd);
+        ouch_listen_fd = net::INVALID_SOCK;
         return false;
     }
     return true;
 }
 
 void OnlineSimulation::close_sockets() {
-    if (itch_fd >= 0)        { ::close(itch_fd);        itch_fd = -1; }
-    if (ouch_listen_fd >= 0) { ::close(ouch_listen_fd); ouch_listen_fd = -1; }
+    if (itch_fd != net::INVALID_SOCK) {
+        net::close_socket(itch_fd);
+        itch_fd = net::INVALID_SOCK;
+    }
+    if (ouch_listen_fd != net::INVALID_SOCK) {
+        net::close_socket(ouch_listen_fd);
+        ouch_listen_fd = net::INVALID_SOCK;
+    }
 }
 
 // ---------------------------------------------------------
 // Market-data (ITCH) side
 // ---------------------------------------------------------
 void OnlineSimulation::broadcast_itch(const std::vector<uint8_t>& itch_msg) {
-    if (itch_fd < 0 || itch_msg.empty()) return;
+    if (itch_fd == net::INVALID_SOCK || itch_msg.empty()) return;
     const std::vector<uint8_t> packet =
         protocol::to_moldudp64({itch_msg}, itch_seq_num, cfg.session);
     itch_seq_num += 1;
-    sockaddr_in dest{};
-    dest.sin_family = AF_INET;
-    dest.sin_port   = htons(cfg.itch_port);
-    ::inet_pton(AF_INET, cfg.itch_address.c_str(), &dest.sin_addr);
-    ::sendto(itch_fd, packet.data(), packet.size(), 0,
-             reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
+    const sockaddr_in dest = net::make_addr(cfg.itch_address.c_str(), cfg.itch_port);
+    net::send_to(itch_fd, packet.data(), packet.size(), dest);
 }
 
 void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_sample_ns) {
@@ -278,106 +257,6 @@ FillReport OnlineSimulation::apply_ouch_order(const protocol::OuchMessage& msg) 
     return fill;
 }
 
-bool OnlineSimulation::send_all(int fd, const uint8_t* data, size_t len) {
-    size_t sent = 0;
-    while (sent < len) {
-        const ssize_t n = ::send(fd, data + sent, len - sent, 0);
-        if (n <= 0) return false;
-        sent += static_cast<size_t>(n);
-    }
-    return true;
-}
-
-void OnlineSimulation::handle_ouch_client(int client_fd) {
-    uint8_t buf[protocol::OUCH_MAX_LEN];
-
-    while (running.load(std::memory_order_relaxed)) {
-        // Wait (with timeout) until the client has sent at least one byte so we
-        // stay responsive to shutdown between messages.
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(client_fd, &rfds);
-        timeval tv{0, 200'000}; // 200 ms
-
-        const int ready = ::select(client_fd + 1, &rfds, nullptr, nullptr, &tv);
-        if (ready < 0) break;         // socket error
-        if (ready == 0) continue;     // timeout: re-check running flag
-
-        // Read the 1-byte message type to learn the frame length.
-        ssize_t got = ::recv(client_fd, buf, 1, 0);
-        if (got <= 0) break;          // client disconnected
-
-        const size_t frame_len = protocol::ouch_frame_len(buf[0]);
-        if (frame_len == 0 || frame_len > sizeof(buf)) {
-            // Unknown message type: we can't know the frame boundary, so drop
-            // the connection rather than desync the stream.
-            break;
-        }
-
-        // Read the remainder of the frame (recv may return partial data).
-        size_t have = 1;
-        bool   ok   = true;
-        while (have < frame_len) {
-            got = ::recv(client_fd, buf + have, frame_len - have, 0);
-            if (got <= 0) { ok = false; break; }
-            have += static_cast<size_t>(got);
-        }
-        if (!ok) break;
-
-        protocol::OuchMessage msg;
-        if (!protocol::from_ouch(buf, frame_len, msg)) {
-            continue;
-        }
-
-        if (ouch_observer_) ouch_observer_(msg, buf, frame_len);
-
-        const FillReport fill = apply_ouch_order(msg);
-
-        // Reply to the client for ENTER orders: an execution report if any
-        // volume filled, otherwise an accept (the remainder rests in the book).
-        if (msg.msg_type == protocol::OUCH_ENTER) {
-            std::vector<uint8_t> resp;
-            if (fill.filled_size > 0.0) {
-                resp = protocol::to_ouch_response(
-                    protocol::OUCH_EXECUTED, msg.order_id,
-                    fill.filled_size, fill.avg_fill_price);
-            } else {
-                resp = protocol::to_ouch_response(
-                    protocol::OUCH_ACCEPTED, msg.order_id, msg.size, msg.price);
-            }
-            if (!send_all(client_fd, resp.data(), resp.size())) break;
-        }
-    }
-
-    ::close(client_fd);
-}
-
-void OnlineSimulation::ouch_server_loop() {
-    if (cfg.ouch_transport == OuchTransport::UDP) {
-        ouch_udp_loop();
-    } else {
-        ouch_tcp_loop();
-    }
-}
-
-void OnlineSimulation::ouch_tcp_loop() {
-    while (running.load(std::memory_order_relaxed)) {
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(ouch_listen_fd, &rfds);
-        timeval tv{0, 200'000}; // 200 ms accept poll
-
-        const int ready = ::select(ouch_listen_fd + 1, &rfds, nullptr, nullptr, &tv);
-        if (ready < 0) break;
-        if (ready == 0) continue; // no pending connection: re-check running
-
-        const int client_fd = ::accept(ouch_listen_fd, nullptr, nullptr);
-        if (client_fd < 0) continue;
-
-        handle_ouch_client(client_fd);
-    }
-}
-
 void OnlineSimulation::ouch_udp_loop() {
     // One OUCH frame per datagram. The buffer is oversized so trailing bytes the
     // FPGA appends after the OUCH message (e.g. the 2-byte latency telemetry from
@@ -385,19 +264,13 @@ void OnlineSimulation::ouch_udp_loop() {
     uint8_t buf[256];
 
     while (running.load(std::memory_order_relaxed)) {
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(ouch_listen_fd, &rfds);
-        timeval tv{0, 200'000}; // 200 ms poll so we stay responsive to shutdown
-
-        const int ready = ::select(ouch_listen_fd + 1, &rfds, nullptr, nullptr, &tv);
+        // 200 ms poll so we stay responsive to shutdown.
+        const int ready = net::wait_readable(ouch_listen_fd, 200);
         if (ready < 0) break;
         if (ready == 0) continue; // timeout: re-check running flag
 
         sockaddr_in src{};
-        socklen_t   src_len = sizeof(src);
-        const ssize_t n = ::recvfrom(ouch_listen_fd, buf, sizeof(buf), 0,
-                                     reinterpret_cast<sockaddr*>(&src), &src_len);
+        const long n = net::recv_from(ouch_listen_fd, buf, sizeof(buf), src);
         if (n <= 0) continue;
 
         // The first byte is the OUCH message type, which fixes the frame length.
@@ -428,8 +301,7 @@ void OnlineSimulation::ouch_udp_loop() {
                 resp = protocol::to_ouch_response(
                     protocol::OUCH_ACCEPTED, msg.order_id, msg.size, msg.price);
             }
-            ::sendto(ouch_listen_fd, resp.data(), resp.size(), 0,
-                     reinterpret_cast<sockaddr*>(&src), src_len);
+            net::send_to(ouch_listen_fd, resp.data(), resp.size(), src);
         }
     }
 }
@@ -465,7 +337,7 @@ SimulationResult OnlineSimulation::run(SampleCallback on_sample) {
     // feeds the book, just without broadcast / order entry.
     open_itch_socket();
     if (open_ouch_listener()) {
-        ouch_thread = std::thread(&OnlineSimulation::ouch_server_loop, this);
+        ouch_thread = std::thread(&OnlineSimulation::ouch_udp_loop, this);
     }
 
     const auto start_sim_time = std::chrono::high_resolution_clock::now();

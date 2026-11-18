@@ -74,17 +74,12 @@ PYBIND11_MODULE(engine_sim, m) {
     // Not registered in Windows builds (CT_NO_ONLINE_SIM) -- see the #include
     // guard above.
 #ifndef CT_NO_ONLINE_SIM
-    py::enum_<OuchTransport>(m, "OuchTransport")
-        .value("UDP", OuchTransport::UDP)
-        .value("TCP", OuchTransport::TCP);
-
     py::class_<OnlineConfig>(m, "OnlineConfig")
         .def(py::init<>())
         .def_readwrite("file_path",      &OnlineConfig::file_path)
         .def_readwrite("itch_address",   &OnlineConfig::itch_address)
         .def_readwrite("itch_port",      &OnlineConfig::itch_port)
         .def_readwrite("ouch_port",      &OnlineConfig::ouch_port)
-        .def_readwrite("ouch_transport", &OnlineConfig::ouch_transport)
         .def_readwrite("time_scale",     &OnlineConfig::time_scale)
         .def_readwrite("stock_locate",   &OnlineConfig::stock_locate)
         .def_readwrite("enable_local_strategy",

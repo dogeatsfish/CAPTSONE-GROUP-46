@@ -12,7 +12,8 @@
 #include "user_strategy.h"
 #include "offline_simulation.h" 
 #include "protocol.h"
-#include "online_config.h" // OnlineConfig / OuchTransport
+#include "socket_compat.h" // net:: cross-platform UDP wrappers
+#include "online_config.h" // OnlineConfig
 
 class OnlineSimulation {
 public:
@@ -44,9 +45,11 @@ private:
     std::mutex        book_mutex;
     SimulationResult* active_result = nullptr; 
 
-    // Networking state.
-    int itch_fd        = -1; // UDP send socket (ITCH market data)
-    int ouch_listen_fd = -1; // TCP listen socket (OUCH order entry)
+    // Networking state. net_session must be declared before the sockets so
+    // Winsock is up before they open and torn down only after they close.
+    net::Session  net_session;
+    net::socket_t itch_fd        = net::INVALID_SOCK; // UDP send socket (ITCH market data)
+    net::socket_t ouch_listen_fd = net::INVALID_SOCK; // UDP receive socket (OUCH order entry)
 
     std::atomic<bool>     running{false};
     std::thread           ouch_thread;
@@ -71,11 +74,6 @@ private:
     void finalize_auto_fill(Order& order, FillReport& fill);
     void note_market_quote(char side, double price);
     double market_mid() const;
-    void ouch_server_loop();      // dispatches to the TCP or UDP loop
-    void ouch_tcp_loop();         // accept() + per-connection stream reader
     void ouch_udp_loop();         // recvfrom() datagram reader
-    void handle_ouch_client(int client_fd);
     FillReport apply_ouch_order(const protocol::OuchMessage& msg);
-
-    static bool send_all(int fd, const uint8_t* data, size_t len);
 };

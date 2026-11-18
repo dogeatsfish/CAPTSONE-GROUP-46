@@ -8,7 +8,7 @@
 # even with net_setup.ps1's static ARP entry in place), AND engine/Makefile
 # only compiles online/hardware support when NOT building on Windows_NT, so
 # native Windows can't do hardware-target testing at all, containerized or
-# not. Use dev-hardware.sh from WSL2 (mirrored networking mode) or a
+# not. Use dev.sh from WSL2 (mirrored networking mode) or a
 # macOS/Linux box for that.
 #
 # Usage: .\dev.ps1   (from sw/, or anywhere -- it Set-Location's to its own directory)

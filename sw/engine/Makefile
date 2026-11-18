@@ -60,7 +60,9 @@ PY_INCLUDES := $(shell python3 -m pybind11 --includes)
 # $(strip ...) matters here: some python3-config builds (observed with MSYS2's
 # mingw-w64 Python) emit a trailing space on --extension-suffix, which Windows
 # silently rejects as part of a filename.
-PY_SUFFIX   := $(strip $(shell python3-config --extension-suffix))
+# Asks the interpreter itself rather than python3-config, which venvs
+# (including CI's) don't ship.
+PY_SUFFIX   := $(strip $(shell python3 -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))"))
 PY_TARGET   := $(PY_MODULE)$(PY_SUFFIX)
 
 # Native Windows/MinGW has no OnlineSimulation support yet (see ONLINE_SRCS
@@ -70,10 +72,13 @@ PY_TARGET   := $(PY_MODULE)$(PY_SUFFIX)
 # $(OS) (set to "Windows_NT" by the Windows environment; unset elsewhere) and
 # `uname -s` for the macOS/Linux split.
 ifeq ($(OS),Windows_NT)
+# Winsock (see network/include/socket_compat.h); POSIX sockets need no extra lib.
+NET_LIBS     := -lws2_32
 PY_SRCS      := bindings/src/bindings.cpp $(OFFLINE_CORE_SRCS)
 PY_DEFINES   := -DCT_NO_ONLINE_SIM
 PY_LINK_LIBS := $(shell python3-config --ldflags)
 else
+NET_LIBS     :=
 PY_SRCS      := bindings/src/bindings.cpp $(CORE_SRCS)
 PY_DEFINES   :=
 UNAME_S := $(shell uname -s)
@@ -98,7 +103,7 @@ all: $(ONLINE_TARGET)
 online: $(ONLINE_TARGET)
 
 $(ONLINE_TARGET): $(ONLINE_SRCS)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(ONLINE_SRCS) -o $(ONLINE_TARGET) -lpthread
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(ONLINE_SRCS) -o $(ONLINE_TARGET) -lpthread $(NET_LIBS)
 
 run: $(ONLINE_TARGET)
 	./$(ONLINE_TARGET) $(FILE) $(SCALE)
