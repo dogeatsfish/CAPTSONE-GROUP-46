@@ -135,9 +135,9 @@ L1, now pinned by a regression test).
       PR #15 (merged), which removed it along with 3 other stray compiled
       test binaries (`socket_test`, `stress_orderbook`, `test_online`) that
       shouldn't have been tracked either. Also added a VS Code Dev Container
-      (`sw/.devcontainer/`) for engine development — a real Ubuntu 24.04
-      environment with gcc-13/gdb/valgrind, for editing/building/debugging
-      the C++ engine inside VS Code.
+      (`sw/.devcontainer/`) for engine development. That container was
+      removed on 2026-11-19 along with the rest of the Docker setup — the
+      engine builds natively on macOS and Linux, and WSL2 covers Windows.
 - [ ] `sw/data_pipeline/src/cmd_L1_to_L3.py` needs a symbol column added if
       the team decides that way on the "Symbol identity" item above — see
       the HW<->SW integration section. Directly affects whether FS-15's DB
@@ -171,8 +171,9 @@ L1, now pinned by a regression test).
       without a local `g++` -- and it could never reach the board anyway
       (Docker Desktop's networking is an isolated VM). The backend now runs
       natively everywhere via `sw/dev.sh` on macOS, Linux or WSL2.
-      `sw/.devcontainer/` is unaffected: it is a separate image for editing
-      and debugging the C++ engine in VS Code, not for running the service.
+      `sw/.devcontainer/` went with it: the engine builds natively on macOS
+      and Linux, and WSL2 covers Windows, so a second Dockerfile nobody ran
+      was pure upkeep.
 - [ ] Windows hosts now need either WSL2 (recommended -- `dev.sh` works
       there, including against the board with `networkingMode=mirrored`) or
       MSYS2/MinGW for a native `g++` + `make`. `make pymodule` already has a

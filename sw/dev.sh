@@ -78,10 +78,10 @@ if [ "$START_UI" -eq 1 ]; then
 fi
 
 # sw/service/.venv, not sw/.venv: engine/Makefile's online tests default to
-# PY ?= ../service/.venv/bin/python (see build-and-test.md), and
-# run-dashboard.md's manual setup uses the same path -- reusing it here means
-# this script, `make test-online`/`socket-test`, and the manual docs all
-# agree on one venv instead of three.
+# PY ?= ../service/.venv/bin/python, and docs/system-testing.md's manual
+# setup uses the same path -- reusing it here means this script, the
+# Makefile's test-book generation, and the docs all agree on one venv
+# instead of three.
 if [ ! -d "service/.venv" ]; then
     echo "==> Creating a venv at sw/service/.venv..."
     python3 -m venv service/.venv || fail "Failed to create the venv."
