@@ -18,6 +18,7 @@
 #   make pymodule   -> build the importable Python extension (engine_sim*.so)
 #   make test       -> build + run the C++ unit tests (tests/src/test_*.cpp)
 #   make test-python-> build the Python module and check it (tests/test_bindings.py)
+#   make rebuild    -> clean, then build from scratch
 #   make clean      -> remove all build artifacts
 
 CXX      := g++
@@ -40,6 +41,15 @@ OFFLINE_CORE_SRCS := simulation/src/offline_simulation.cpp \
                      match/src/orderbook.cpp
 ONLINE_SRCS := simulation/src/online_simulation.cpp
 CORE_SRCS := $(OFFLINE_CORE_SRCS) $(ONLINE_SRCS)
+
+# Every engine header. Each build target lists these as prerequisites because
+# the compile lines name only .cpp files -- without them, editing a header
+# leaves `make` thinking the binary is up to date and you keep running the old
+# one. A wildcard (not a hand-written list) so a new header is covered the day
+# it's added.
+ALL_HDRS := $(wildcard shared/include/*.h match/include/*.h \
+                       simulation/include/*.h network/include/*.h \
+                       tests/include/*.h)
 
 # ---------------------------------------------------------
 # Online (real-time) CLI binary
@@ -97,16 +107,23 @@ PY_LINK_LIBS :=
 endif
 endif
 
-.PHONY: all online run pymodule test test-python smoke-test hardware-test clean
+.PHONY: all online rebuild run pymodule test test-python smoke-test hardware-test clean
 
 all: $(ONLINE_TARGET)
+
+# Force a from-scratch build. Rarely needed now that headers are tracked as
+# prerequisites -- reach for this when you've changed CXXFLAGS or switched
+# compilers, not as a habit.
+rebuild:
+	$(MAKE) clean
+	$(MAKE) all
 
 # ---------------------------------------------------------
 # Online (real-time) CLI binary
 # ---------------------------------------------------------
 online: $(ONLINE_TARGET)
 
-$(ONLINE_TARGET): $(ONLINE_SRCS)
+$(ONLINE_TARGET): $(ONLINE_SRCS) $(ALL_HDRS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(ONLINE_SRCS) -o $(ONLINE_TARGET) -lpthread $(NET_LIBS)
 
 run: $(ONLINE_TARGET)
@@ -114,7 +131,7 @@ run: $(ONLINE_TARGET)
 
 pymodule: $(PY_TARGET)
 
-$(PY_TARGET): $(PY_SRCS)
+$(PY_TARGET): $(PY_SRCS) $(ALL_HDRS)
 	$(CXX) $(CXXFLAGS) $(PY_DEFINES) -shared -fPIC \
 		$(INCLUDES) $(PY_INCLUDES) $(PY_SRCS) $(PY_LINK_LIBS) -o $(PY_TARGET)
 
@@ -122,9 +139,8 @@ $(PY_TARGET): $(PY_SRCS)
 # Unit tests
 # ---------------------------------------------------------
 TEST_TARGETS := test_orderbook test_account test_scheduler test_participant
-# Everything the scheduler-level tests link, and the headers they depend on.
+# Everything the scheduler-level tests link.
 SCHED_SRCS   := simulation/src/scheduler.cpp simulation/src/account.cpp match/src/orderbook.cpp
-TEST_HDRS    := $(wildcard shared/include/*.h match/include/*.h simulation/include/*.h)
 
 test: $(TEST_TARGETS)
 	@for t in $(TEST_TARGETS); do echo "== $$t"; ./$$t || exit 1; done
@@ -133,16 +149,16 @@ test: $(TEST_TARGETS)
 test-python: pymodule
 	python3 tests/test_bindings.py
 
-test_orderbook: tests/src/test_orderbook.cpp match/src/orderbook.cpp $(TEST_HDRS)
+test_orderbook: tests/src/test_orderbook.cpp match/src/orderbook.cpp $(ALL_HDRS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_orderbook.cpp match/src/orderbook.cpp -o $@
 
-test_account: tests/src/test_account.cpp simulation/src/account.cpp $(TEST_HDRS)
+test_account: tests/src/test_account.cpp simulation/src/account.cpp $(ALL_HDRS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_account.cpp simulation/src/account.cpp -o $@
 
-test_scheduler: tests/src/test_scheduler.cpp $(SCHED_SRCS) $(TEST_HDRS)
+test_scheduler: tests/src/test_scheduler.cpp $(SCHED_SRCS) $(ALL_HDRS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_scheduler.cpp $(SCHED_SRCS) -o $@
 
-test_participant: tests/src/test_participant.cpp $(SCHED_SRCS) $(TEST_HDRS)
+test_participant: tests/src/test_participant.cpp $(SCHED_SRCS) $(ALL_HDRS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_participant.cpp $(SCHED_SRCS) -o $@
 
 # ---------------------------------------------------------
