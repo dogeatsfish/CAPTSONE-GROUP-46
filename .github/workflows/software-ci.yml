@@ -53,6 +53,8 @@ jobs:
         run: make test-python
 
       - name: Offline simulation via Python
+        env:
+          PYTHONPATH: build   # engine_sim*.so lives in sw/engine/build
         run: |
           python3 -c "
           import engine_sim
@@ -63,7 +65,7 @@ jobs:
 
       - name: Online CLI end-to-end run (loopback, unpaced)
         run: |
-          ./online_run ../data_pipeline/data/flood_book.bin 0 50001 50001 127.0.0.1 | tee online.log
+          ./build/online_run ../data_pipeline/data/flood_book.bin 0 50001 50001 127.0.0.1 | tee online.log
           grep -q "Simulation finished successfully" online.log
 
   api:

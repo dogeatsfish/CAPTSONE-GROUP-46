@@ -125,7 +125,7 @@ Terminal B — stream market data (from `sw/engine`):
 ```bash
 make run-online                                   # paced, real time
 # or blast continuously for a strong, steady signal:
-while true; do ./online_run ../data_pipeline/data/synthetic_mbo_stream.bin 0; done
+while true; do ./build/online_run ../data_pipeline/data/synthetic_mbo_stream.bin 0; done
 ```
 
 If OUCH frames appear in Terminal A, the full chain works. If nothing returns

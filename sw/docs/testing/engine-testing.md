@@ -31,6 +31,20 @@ resolves to on `PATH`.
 
 ---
 
+## Where the build output goes
+
+Everything the build produces lands in `sw/engine/build/` — the three tools,
+the four test binaries and `engine_sim*.so`. The module directories stay
+source-only, so `git status` never shows a binary and the engine root holds
+nothing but the Makefile.
+
+`make clean` removes that directory, and also sweeps the engine root where
+output used to land — a leftover `engine_sim*.so` there would otherwise shadow
+the real one on `sys.path`.
+
+The bare target names still work as aliases: `make link_flash`,
+`make bench_scheduler`, `make test_orderbook`.
+
 ## Makefile targets
 
 | Target | What it does |
@@ -43,7 +57,7 @@ resolves to on `PATH`.
 | `flash` | sends ITCH packets at the board so its LED flashes — a visual link check |
 | `bench` | measures the engine's own fan-out cost in wall-clock time |
 | `rebuild` | clean, then build from scratch |
-| `clean` | removes all build artifacts |
+| `clean` | removes `build/` (and sweeps the old locations) |
 
 Overridable variables: `FILE` (the MBO book), `SCALE` (pacing — `1.0` is real
 time, `0` disables it), `ITCH_ADDR` / `ITCH_PORT` / `OUCH_PORT` (default to
@@ -99,7 +113,7 @@ Test binaries are gitignored (`sw/engine/test_*`) and removed by `make clean`.
 real ITCH/OUCH sockets. It takes positional arguments only:
 
 ```bash
-./online_run [mbo_file] [time_scale] [itch_port] [ouch_port] [itch_addr]
+./build/online_run [mbo_file] [time_scale] [itch_port] [ouch_port] [itch_addr]
 ```
 
 Anything you leave off keeps its `OnlineConfig` default

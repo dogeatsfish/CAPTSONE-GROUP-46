@@ -100,7 +100,7 @@ echo "==> Building the engine's Python module (make pymodule)..."
 # PATH, so this only actually imports if the venv (above) was created from
 # that same python3 -- true by construction since we just ran
 # `python3 -m venv .venv`, but worth a clear error if it's somehow not.
-if ! "$PY" -c "import sys; sys.path.insert(0, 'engine'); import engine_sim" 2>/dev/null; then
+if ! "$PY" -c "import sys; sys.path.insert(0, 'engine/build'); import engine_sim" 2>/dev/null; then
     fail "engine_sim built, but the venv's python can't import it -- likely a python3 version mismatch between what built it and service/.venv. Delete service/.venv and re-run this script."
 fi
 

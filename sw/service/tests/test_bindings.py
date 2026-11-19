@@ -11,7 +11,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))        # sw/service/tests
 SW = os.path.dirname(os.path.dirname(HERE))              # sw
-sys.path.insert(0, os.path.join(SW, "engine"))           # where the .so is built
+sys.path.insert(0, os.path.join(SW, "engine", "build"))  # where the .so is built
 
 import engine_sim as es  # noqa: E402
 

@@ -35,6 +35,10 @@
 #   make rebuild    -> clean, then build from scratch
 #   make clean      -> remove all build artifacts
 
+# Everything the build produces goes here, so the module directories stay
+# source-only and `git status` never shows a binary.
+BUILD_DIR := build
+
 CXX      := g++
 CXXFLAGS := -std=c++17 -O2 -Wall -Wextra
 
@@ -77,12 +81,13 @@ ALL_HDRS := $(wildcard $(addsuffix /include/*.h,$(MODULES)))
 # exactly that bug -- it relinked only when its own .cpp changed.)
 SCHED_SRCS   := simcore/src/scheduler.cpp participants/src/participant.cpp \
                 simcore/src/account.cpp exchange/src/orderbook.cpp
-TEST_TARGETS := test_orderbook test_account test_scheduler test_participant
+TEST_NAMES   := test_orderbook test_account test_scheduler test_participant
+TEST_TARGETS := $(addprefix $(BUILD_DIR)/,$(TEST_NAMES))
 
 # ---------------------------------------------------------
 # Online (real-time) CLI binary
 # ---------------------------------------------------------
-ONLINE_TARGET := online_run
+ONLINE_TARGET := $(BUILD_DIR)/online_run
 ONLINE_RUN_SRCS := tools/online_run.cpp $(CORE_SRCS)
 
 # Default data file used by `make run` (override with FILE=..., which may be an
@@ -111,7 +116,7 @@ PY_INCLUDES := $(shell python3 -m pybind11 --includes)
 # Asks the interpreter itself rather than python3-config, which venvs
 # (including CI's) don't ship.
 PY_SUFFIX   := $(strip $(shell python3 -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))"))
-PY_TARGET   := $(PY_MODULE)$(PY_SUFFIX)
+PY_TARGET   := $(BUILD_DIR)/$(PY_MODULE)$(PY_SUFFIX)
 
 # Native Windows/MinGW has no OnlineSimulation support yet (see ONLINE_SRCS
 # above) and needs explicit linking against the Python library instead of the
@@ -145,6 +150,12 @@ endif
 
 all: $(ONLINE_TARGET)
 
+# Order-only (after the |): the directory's timestamp changes whenever a file
+# lands in it, so as a normal prerequisite it would rebuild everything every
+# time something else was built.
+$(BUILD_DIR):
+	@mkdir -p $@
+
 # Force a from-scratch build. Rarely needed now that headers are tracked as
 # prerequisites -- reach for this when you've changed CXXFLAGS or switched
 # compilers, not as a habit.
@@ -157,7 +168,7 @@ rebuild:
 # ---------------------------------------------------------
 online: $(ONLINE_TARGET)
 
-$(ONLINE_TARGET): $(ONLINE_RUN_SRCS) $(ALL_HDRS)
+$(ONLINE_TARGET): $(ONLINE_RUN_SRCS) $(ALL_HDRS) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(ONLINE_RUN_SRCS) -o $(ONLINE_TARGET) -lpthread $(NET_LIBS)
 
 run: $(ONLINE_TARGET)
@@ -165,7 +176,7 @@ run: $(ONLINE_TARGET)
 
 pymodule: $(PY_TARGET)
 
-$(PY_TARGET): $(PY_SRCS) $(ALL_HDRS)
+$(PY_TARGET): $(PY_SRCS) $(ALL_HDRS) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(PY_DEFINES) -shared -fPIC \
 		$(INCLUDES) $(PY_INCLUDES) $(PY_SRCS) $(PY_LINK_LIBS) -o $(PY_TARGET)
 
@@ -180,7 +191,7 @@ $(PY_TARGET): $(PY_SRCS) $(ALL_HDRS)
 # whitespace between a value and a trailing '#', so `X ?= 5   # note` sets X to
 # "5   ", which survives shell word-splitting here but breaks the moment the
 # value is quoted or compared.
-FLASH_TARGET := link_flash
+FLASH_TARGET := $(BUILD_DIR)/link_flash
 FLASH_ADDR  ?= 192.168.0.1
 FLASH_RATE  ?= 5
 FLASH_COUNT ?= 0
@@ -189,7 +200,7 @@ FLASH_PORT  ?= 50001
 flash: $(FLASH_TARGET)
 	./$(FLASH_TARGET) $(FLASH_ADDR) $(FLASH_RATE) $(FLASH_COUNT) $(FLASH_PORT)
 
-$(FLASH_TARGET): tools/link_flash.cpp network/src/protocol.cpp $(ALL_HDRS)
+$(FLASH_TARGET): tools/link_flash.cpp network/src/protocol.cpp $(ALL_HDRS) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) tools/link_flash.cpp network/src/protocol.cpp \
 		-o $@ -lpthread $(NET_LIBS)
 
@@ -213,20 +224,28 @@ headers:
 # ---------------------------------------------------------
 # Measures how long the engine itself takes to fan a trade out to N
 # participants. Timing on a shared CI runner is noise, so this is run by hand.
-BENCH_TARGET := bench_scheduler
+BENCH_TARGET := $(BUILD_DIR)/bench_scheduler
 BENCH_TRIALS ?= 5000
 
 bench: $(BENCH_TARGET)
 	./$(BENCH_TARGET) $(BENCH_TRIALS)
 
-$(BENCH_TARGET): tools/bench_scheduler.cpp $(SCHED_SRCS) $(ALL_HDRS)
+$(BENCH_TARGET): tools/bench_scheduler.cpp $(SCHED_SRCS) $(ALL_HDRS) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) tools/bench_scheduler.cpp $(SCHED_SRCS) -o $@
 
 # ---------------------------------------------------------
 # Unit tests
 # ---------------------------------------------------------
+# The binaries live in $(BUILD_DIR) now, but `make test_orderbook`,
+# `make link_flash` and `make bench_scheduler` are what people's fingers
+# already know -- keep them working as aliases.
+.PHONY: $(TEST_NAMES) link_flash bench_scheduler
+$(TEST_NAMES): %: $(BUILD_DIR)/%
+link_flash: $(FLASH_TARGET)
+bench_scheduler: $(BENCH_TARGET)
+
 test: $(TEST_TARGETS)
-	@for t in $(TEST_TARGETS); do echo "== $$t"; ./$$t || exit 1; done
+	@for t in $(TEST_NAMES); do echo "== $$t"; ./$(BUILD_DIR)/$$t || exit 1; done
 
 # Checks the Python bindings from the service side; needs pybind11 in the
 # python3 on PATH. The test lives with the service because the service is what
@@ -234,17 +253,20 @@ test: $(TEST_TARGETS)
 test-python: pymodule
 	python3 ../service/tests/test_bindings.py
 
-test_orderbook: tests/src/test_orderbook.cpp exchange/src/orderbook.cpp $(ALL_HDRS)
+$(BUILD_DIR)/test_orderbook: tests/src/test_orderbook.cpp exchange/src/orderbook.cpp $(ALL_HDRS) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_orderbook.cpp exchange/src/orderbook.cpp -o $@
 
-test_account: tests/src/test_account.cpp simcore/src/account.cpp $(ALL_HDRS)
+$(BUILD_DIR)/test_account: tests/src/test_account.cpp simcore/src/account.cpp $(ALL_HDRS) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_account.cpp simcore/src/account.cpp -o $@
 
-test_scheduler: tests/src/test_scheduler.cpp $(SCHED_SRCS) $(ALL_HDRS)
+$(BUILD_DIR)/test_scheduler: tests/src/test_scheduler.cpp $(SCHED_SRCS) $(ALL_HDRS) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_scheduler.cpp $(SCHED_SRCS) -o $@
 
-test_participant: tests/src/test_participant.cpp $(SCHED_SRCS) $(ALL_HDRS)
+$(BUILD_DIR)/test_participant: tests/src/test_participant.cpp $(SCHED_SRCS) $(ALL_HDRS) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_participant.cpp $(SCHED_SRCS) -o $@
 
 clean:
-	rm -f $(ONLINE_TARGET) $(FLASH_TARGET) $(BENCH_TARGET) $(TEST_TARGETS) $(PY_MODULE)*.so
+	rm -rf $(BUILD_DIR)
+	@# Build output used to land here; sweep it so a stale engine_sim*.so in
+	@# the engine root cannot shadow the real one in $(BUILD_DIR)/ on sys.path.
+	@rm -f online_run link_flash bench_scheduler $(TEST_NAMES) $(PY_MODULE)*.so

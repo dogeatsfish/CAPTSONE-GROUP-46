@@ -8,6 +8,7 @@ INCLUDE_DIR = CONFIG_DIR.parent / "include"  # service/include
 SERVICE_ROOT = CONFIG_DIR.parent  # service
 REPO_ROOT = SERVICE_ROOT.parent  # sw
 ENGINE_DIR = REPO_ROOT / "engine"
+ENGINE_BUILD_DIR = ENGINE_DIR / "build"  # where `make pymodule` puts engine_sim*.so
 COMPILER_DIR = (
     REPO_ROOT / "compiler"
 )  # strategy-compiler sources (main_job, job template)
@@ -97,7 +98,7 @@ ONLINE_STREAM_TIME_SCALE = 0.01
 ONLINE_AUTO_FILL = 1
 
 # Make the schema modules and the compiled engine importable.
-for _path in (INCLUDE_DIR, ENGINE_DIR):
+for _path in (INCLUDE_DIR, ENGINE_BUILD_DIR):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
@@ -105,6 +106,6 @@ try:
     import engine_sim  # re-exported for the routes to use
 except ImportError as exc:  # pragma: no cover - build/environment issue
     raise ImportError(
-        f"Could not import the compiled 'engine_sim' module from {ENGINE_DIR}. "
+        f"Could not import the compiled 'engine_sim' module from {ENGINE_BUILD_DIR}. "
         "Build it first: run `make pymodule` in the engine/ directory."
     ) from exc

@@ -46,17 +46,14 @@ venv/
 
 # Compiled engine_sim extension module -- platform/interpreter-specific, must
 # be built locally (see sw/engine/Makefile `make pymodule`), not committed.
+# Everything the engine build produces lands in one directory.
+sw/engine/build/
 # *.py[cod] above already covers *.pyd; this adds the macOS/Linux *.so form.
-sw/engine/engine_sim*.so
 
 # Compiled engine binaries -- build locally via the Makefile (`make`,
 # `make online`, `make socket-test`, etc.), never committed. PR #15 already
 # purged these once (see TODO.md); listed explicitly so a stray `git add -A`
 # after a local build can't silently reintroduce them.
-sw/engine/online_run
-sw/engine/link_flash
-sw/engine/bench_scheduler
-sw/engine/test_*
 
 # Node / React
 node_modules/
