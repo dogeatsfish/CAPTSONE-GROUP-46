@@ -36,7 +36,7 @@ browser-level symptom is almost never a browser-level bug.
 | Engine | `make test`, `make test-python` | [engine-testing.md](engine-testing.md) |
 | Backend | `curl` against `:8000` | below |
 | Frontend | the browser, against a known-good backend | below |
-| Hardware | `make hardware-test`, `tcpdump` | below + [`connection-test.md`](../../docs/connection-test.md) |
+| Hardware | `make run SCALE=1.0 ITCH_ADDR=192.168.0.1`, `tcpdump` | below + [`connection-test.md`](../../docs/connection-test.md) |
 
 ---
 
@@ -155,7 +155,7 @@ The narrowest hardware test. Two terminals:
 sudo tcpdump -i en5 -e -n ether src 00:0a:35:01:02:03
 
 # Terminal B — stream market data at the board, in real time
-cd sw/engine && make hardware-test
+cd sw/engine && make run SCALE=1.0 ITCH_ADDR=192.168.0.1
 ```
 
 OUCH frames appearing in Terminal A is the only real proof the board received,

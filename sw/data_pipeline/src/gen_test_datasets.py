@@ -1,17 +1,19 @@
-"""Generates the extra MBO books referenced by tests/config/*.ini, on top of
-the base rising bid ladder produced by gen_market_ladder.py:
+"""Generates the extra MBO books, on top of the base rising bid ladder
+produced by gen_market_ladder.py:
 
   smoke_book.bin  a short, slow ladder for a quick sanity check (e.g. before
                   trusting a run against the real board).
   flood_book.bin  the same price range/shape as market_ladder.bin, but far
                   denser -- stresses the online engine with a burst of
-                  market-data messages instead of a steady trickle.
+                  market-data messages instead of a steady trickle. The CI
+                  workflow's loopback smoke step replays this one.
 
 Both keep the 100.00 -> 104.95 price band and pure rising-bid-ladder shape of
-market_ladder.bin, so tests/src/test_online.cpp and socket_test.cpp's
-execute/rest assertions (SELL @ 99/100/100.00 crosses, SELL @ 200 rests) hold
-for either book without any C++ changes -- only the .ini pointing at them
-differs.
+market_ladder.bin, so a book can be swapped for either without changing what
+crosses and what rests (SELL @ 99/100/100.00 cross, SELL @ 200 rests).
+
+All three books are committed under data_pipeline/data/; run this only to
+regenerate them or to produce a variant.
 """
 
 from gen_market_ladder import EventConfig, EventGenerator

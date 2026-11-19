@@ -39,14 +39,18 @@ resolves to on `PATH`.
 | `pymodule` | builds the importable Python extension `engine_sim*.so` |
 | `test` | builds + runs all four C++ unit-test binaries |
 | `test-python` | builds the module, then runs `tests/test_bindings.py` |
-| `run` | builds + runs `online_run` on `FILE` at pacing `SCALE` |
-| `smoke-test` | generates the short book, then replays it over loopback |
-| `hardware-test` | streams the MBO feed at the real board (see [system-testing.md](system-testing.md)) |
+| `run` | builds + runs `online_run` on `FILE` at pacing `SCALE`, broadcasting to `ITCH_ADDR` |
+| `rebuild` | clean, then build from scratch |
 | `clean` | removes all build artifacts |
 
-Overridable variables: `FILE`, `SCALE`, `PY` (interpreter used to generate test
-books, default `../service/.venv/bin/python`), `SMOKE_CONFIG`,
-`HARDWARE_CONFIG`, `CXX`, `CXXFLAGS`.
+Overridable variables: `FILE` (the MBO book), `SCALE` (pacing — `1.0` is real
+time, `0` disables it), `ITCH_ADDR` / `ITCH_PORT` / `OUCH_PORT` (default to
+loopback on 50001), `CXX`, `CXXFLAGS`.
+
+Headers are tracked as prerequisites, so editing one rebuilds everything that
+includes it. You shouldn't need `make clean` as a habit; `make rebuild` is
+there for the cases where a scratch build is genuinely right, like changing
+`CXXFLAGS`.
 
 ---
 
@@ -58,8 +62,9 @@ make test-python   # the Python binding tests
 ```
 
 Each binary prints one `ok <name>` line per check group and a final
-`PASSED (0 failed checks)`. They use the tiny assertion harness in
-`tests/include/test.h` — no external framework.
+`PASSED (0 failed checks)`. There is no test framework: each file defines its
+own `CHECK` macro that prints the failing line and bumps a counter, and `main`
+exits non-zero if anything failed.
 
 | Binary | Source | Covers |
 |---|---|---|
@@ -73,56 +78,54 @@ Test binaries are gitignored (`sw/engine/test_*`) and removed by `make clean`.
 
 ### Writing a new one
 
-1. Add `tests/src/test_<thing>.cpp`, including `test.h`.
+1. Add `tests/src/test_<thing>.cpp` with its own `CHECK` macro — copy the
+   top of an existing one.
 2. Add `test_<thing>` to `TEST_TARGETS` in the Makefile and give it a rule —
    copy the nearest existing one. `SCHED_SRCS` is the source list anything
-   scheduler-level needs to link.
+   scheduler-level needs to link, and `ALL_HDRS` covers the headers.
 3. `make test` picks it up, and so does CI.
 
 ---
 
-## Replay scenarios
+## Running the engine by hand
 
-These are **runnable scenarios**, not pass/fail tests: you watch the banner,
-the replay, and the final trade/PnL summary. They drive `online_run` (built
-from `tests/src/test.cpp`) against an `.ini` under `tests/config/`.
-
-```bash
-./online_run <config.ini>                   # config mode
-./online_run <mbo_file> <time_scale> [itch_port] [ouch_port] [itch_addr]
-```
-
-| Config | Target | Address | Data | Pacing |
-|---|---|---|---|---|
-| `smoke_test.ini` | `make smoke-test` | loopback | `smoke_book.bin` (10 orders) | `1.0` |
-| `socket_test.ini` | `make run FILE=tests/config/socket_test.ini` | loopback | `synthetic_mbo_stream.bin` | `0.001` |
-| `flood_test.ini` | `make run FILE=tests/config/flood_test.ini` | loopback | `flood_book.bin` (5000 orders) | `0` (burst) |
-| `hardware_test.ini` | `make hardware-test` | `192.168.0.1` | `synthetic_mbo_stream.bin` | `1.0` |
-
-Keys read from the `.ini`: `[network] itch_address / itch_port / ouch_port`,
-`[data] market_book`, `[timing] time_scale`. Anything absent falls back to the
-`OnlineConfig` default in `simulation/include/online_config.h`.
-
-> **Loopback scenarios produce no trades.** `online_run` doesn't enable the
-> local strategy, so it replays market data and stands up the sockets but
-> nothing sends orders in. Trades come from a real board, or from the FastAPI
-> service's loopback path (which *does* set `enable_local_strategy`).
-
-### Generated books
-
-`synthetic_mbo_stream.bin` is committed. The others are generated into
-`data_pipeline/data/`:
+`online_run` (built from `tests/src/test.cpp`) replays a market-data book over
+real ITCH/OUCH sockets. It takes positional arguments only:
 
 ```bash
-python3 data_pipeline/src/gen_market_ladder.py   # -> market_ladder.bin
-python3 data_pipeline/src/gen_test_datasets.py   # -> smoke_book.bin, flood_book.bin
+./online_run [mbo_file] [time_scale] [itch_port] [ouch_port] [itch_addr]
 ```
 
-`make smoke-test` runs the second one for you. Record format is
-`struct "<QcQcdd"` — timestamp, message type, order id, side, price, size — 34
-bytes, asserted at compile time in `offline_simulation.h`.
+Anything you leave off keeps its `OnlineConfig` default
+(`simulation/include/online_config.h`). Through the Makefile:
 
----
+```bash
+make run                                      # loopback, 1000x speed
+make run FILE=../data_pipeline/data/flood_book.bin SCALE=0
+make run SCALE=1.0 ITCH_ADDR=192.168.0.1      # real time, at the board
+```
+
+> **This is a replay, not a test.** `online_run` doesn't enable the local
+> strategy, so it streams market data and stands up the sockets but produces
+> no trades on its own — nothing is sending orders in. Trades come from a real
+> board, or from the FastAPI service's loopback path, which does set
+> `enable_local_strategy`. For pass/fail checking, use `make test`.
+
+### Datasets
+
+`data_pipeline/data/` holds the committed books:
+
+| File | What it is |
+|---|---|
+| `synthetic_mbo_stream.bin` | the full ~5.3h stream, ~61k records |
+| `smoke_book.bin` | 10 orders, about a second |
+| `flood_book.bin` | 5000 orders, dense — used by the CI smoke step |
+| `market_ladder.bin` | a rising bid ladder, 100 orders |
+
+`data_pipeline/src/gen_market_ladder.py` and `gen_test_datasets.py` regenerate
+the last three if you need variants. Record format is `struct "<QcQcdd"` —
+timestamp, message type, order id, side, price, size — 34 bytes, asserted at
+compile time in `offline_simulation.h`.
 
 ## Checking a change didn't move the numbers
 

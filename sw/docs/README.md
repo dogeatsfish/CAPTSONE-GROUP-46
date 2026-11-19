@@ -35,7 +35,7 @@ the FastAPI service, the React UI, and the data pipeline — everything under
 | Build the engine CLI | `make -C sw/engine` |
 | Build the Python module | `make -C sw/engine pymodule` |
 | Run the tests | `make -C sw/engine test` and `make -C sw/engine test-python` |
-| Stream at the real board | `make -C sw/engine hardware-test` |
+| Stream at the real board | `make -C sw/engine run SCALE=1.0 ITCH_ADDR=192.168.0.1` |
 | Wire protocols | `sw/engine/network/include/protocol.h` (ITCH in, OUCH out) |
 | Networking config | `OnlineConfig` in `sw/engine/simulation/include/online_config.h` |
 | API | `http://127.0.0.1:8000` · UI `http://localhost:5173` |

@@ -1,40 +1,20 @@
 #include "online_simulation.h"
-#include "test.h"
 #include <iostream>
 #include <string>
 #include <cstdlib>
 
 int main(int argc, char* argv[]) {
+    // Usage: online_run [mbo_file] [time_scale] [itch_port] [ouch_port] [itch_addr]
+    // Anything not given on the command line keeps its OnlineConfig default,
+    // so those defaults live in exactly one place and are not duplicated here.
     OnlineConfig cfg;
-    // CLI default file (matches the Makefile's FILE default); overridden below
-    // by a positional path or a config's market_book. Everything else keeps
-    // its OnlineConfig default unless a config/arg overrides it -- the config
-    // defaults live in exactly one place (OnlineConfig), not duplicated here.
     cfg.file_path = "../data_pipeline/data/synthetic_mbo_stream.bin";
 
-    // Config-file mode: the first argument ends in ".ini". Detected on argv[1]
-    // alone (not argc), so `make run FILE=foo.ini` works even though the recipe
-    // appends SCALE -- any trailing args are ignored, since the .ini carries
-    // its own settings (time_scale included).
-    const bool from_ini = argc >= 2 &&
-        std::string(argv[1]).size() > 4 &&
-        std::string(argv[1]).substr(std::string(argv[1]).size() - 4) == ".ini";
-
-    if (from_ini) {
-        TestConfig ini;
-        if (!ini.load(argv[1])) return 1;
-        cfg.file_path      = ini.get_string("market_book", cfg.file_path);
-        cfg.itch_address   = ini.get_string("itch_address", cfg.itch_address);
-        cfg.itch_port      = ini.get_port("itch_port", cfg.itch_port);
-        cfg.ouch_port      = ini.get_port("ouch_port", cfg.ouch_port);
-        cfg.time_scale     = ini.get_double("time_scale", cfg.time_scale);
-    } else {
-        if (argc > 1) cfg.file_path = argv[1];
-        if (argc > 2) cfg.time_scale = std::atof(argv[2]);
-        if (argc > 3) cfg.itch_port  = static_cast<uint16_t>(std::atoi(argv[3]));
-        if (argc > 4) cfg.ouch_port  = static_cast<uint16_t>(std::atoi(argv[4]));
-        if (argc > 5) cfg.itch_address = argv[5];
-    }
+    if (argc > 1) cfg.file_path    = argv[1];
+    if (argc > 2) cfg.time_scale   = std::atof(argv[2]);
+    if (argc > 3) cfg.itch_port    = static_cast<uint16_t>(std::atoi(argv[3]));
+    if (argc > 4) cfg.ouch_port    = static_cast<uint16_t>(std::atoi(argv[4]));
+    if (argc > 5) cfg.itch_address = argv[5];
 
     std::cout << "========================================\n";
     std::cout << "Online (Real-Time) Trading Engine\n";
