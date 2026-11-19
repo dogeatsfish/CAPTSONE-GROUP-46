@@ -118,7 +118,9 @@ $(PY_TARGET): $(PY_SRCS)
 # ---------------------------------------------------------
 # Unit tests
 # ---------------------------------------------------------
-TEST_TARGETS := test_orderbook test_account
+TEST_TARGETS := test_orderbook test_account test_scheduler test_participant
+# Everything the scheduler-level tests link, and the headers they depend on.
+SCHED_SRCS   := simulation/src/scheduler.cpp simulation/src/account.cpp match/src/orderbook.cpp
 TEST_HDRS    := $(wildcard shared/include/*.h match/include/*.h simulation/include/*.h)
 
 test: $(TEST_TARGETS)
@@ -129,6 +131,12 @@ test_orderbook: tests/src/test_orderbook.cpp match/src/orderbook.cpp $(TEST_HDRS
 
 test_account: tests/src/test_account.cpp simulation/src/account.cpp $(TEST_HDRS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_account.cpp simulation/src/account.cpp -o $@
+
+test_scheduler: tests/src/test_scheduler.cpp $(SCHED_SRCS) $(TEST_HDRS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_scheduler.cpp $(SCHED_SRCS) -o $@
+
+test_participant: tests/src/test_participant.cpp $(SCHED_SRCS) $(TEST_HDRS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_participant.cpp $(SCHED_SRCS) -o $@
 
 # ---------------------------------------------------------
 # Test runs (drive online_run against a config)
