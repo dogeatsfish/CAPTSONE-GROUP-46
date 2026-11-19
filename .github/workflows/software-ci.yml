@@ -43,8 +43,14 @@ jobs:
       - name: Build online CLI
         run: make
 
+      - name: C++ unit tests
+        run: make test
+
       - name: Build Python module
         run: make pymodule
+
+      - name: Python binding tests
+        run: make test-python
 
       - name: Offline simulation via Python
         run: |
