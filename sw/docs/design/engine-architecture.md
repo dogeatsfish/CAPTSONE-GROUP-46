@@ -73,6 +73,36 @@ flowchart TB
 
 ---
 
+## Where this lives
+
+The directory layout is the architecture — each box above has one home, and
+the arrows between directories only ever point down this list:
+
+| Directory | Holds | Depends on |
+|---|---|---|
+| `shared/` | types everyone shares: `common.h`, `feed.h` (the on-disk record), `telemetry.h` (what a run returns) | nothing |
+| `exchange/` | `OrderBook` — matching, depth, queue position | `shared` |
+| `simcore/` | what makes it a *simulated* exchange: `Scheduler`, `LatencyProfile`, `Account` | `shared`, `exchange` |
+| `participants/` | the `Participant` port, the `StrategyParticipant` adapter, and `agents/` for the built-in bots | `simcore` |
+| `strategy/` | the player's strategy: `src/` is fixed machinery, `templates/` is the editable body | `shared` |
+| `runner/` | `OfflineSimulation`, `OnlineSimulation` — the two ways to run one | everything above |
+| `network/` | ITCH/OUCH wire format and the cross-platform socket layer | `shared` |
+| `tools/`, `bindings/`, `tests/` | entry points; nothing includes them | top of the graph |
+
+The important edge is the one that *isn't* there: `simcore/` does not depend on
+`participants/`. `scheduler.h` forward-declares `class Participant;` rather
+than including it, which it can because every mention is a pointer or a
+reference and no method is called on one in the header. `ParticipantId` lives
+in `shared/common.h` for the same reason — the scheduler keys its queue,
+inboxes and ownership map by it without ever naming the type.
+
+So a new agent is purely additive: write a `Participant` subclass under
+`participants/agents/`, register it with the scheduler, and nothing in the
+engine changes. `make headers` enforces that no header starts leaning on a
+sibling's includes again.
+
+---
+
 ## The queue
 
 A `std::priority_queue<Entry, std::vector<Entry>, Later>` — a binary heap in a
