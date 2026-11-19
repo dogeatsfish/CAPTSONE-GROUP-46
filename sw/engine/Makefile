@@ -118,13 +118,17 @@ $(PY_TARGET): $(PY_SRCS)
 # ---------------------------------------------------------
 # Unit tests
 # ---------------------------------------------------------
-TEST_TARGET := test_orderbook
+TEST_TARGETS := test_orderbook test_account
+TEST_HDRS    := $(wildcard shared/include/*.h match/include/*.h simulation/include/*.h)
 
-test: $(TEST_TARGET)
-	./$(TEST_TARGET)
+test: $(TEST_TARGETS)
+	@for t in $(TEST_TARGETS); do echo "== $$t"; ./$$t || exit 1; done
 
-$(TEST_TARGET): tests/src/test_orderbook.cpp match/src/orderbook.cpp match/include/orderbook.h shared/include/common.h
-	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_orderbook.cpp match/src/orderbook.cpp -o $(TEST_TARGET)
+test_orderbook: tests/src/test_orderbook.cpp match/src/orderbook.cpp $(TEST_HDRS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_orderbook.cpp match/src/orderbook.cpp -o $@
+
+test_account: tests/src/test_account.cpp simulation/src/account.cpp $(TEST_HDRS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_account.cpp simulation/src/account.cpp -o $@
 
 # ---------------------------------------------------------
 # Test runs (drive online_run against a config)
@@ -155,4 +159,4 @@ hardware-test: $(ONLINE_TARGET)
 	./$(ONLINE_TARGET) $(HARDWARE_CONFIG)
 
 clean:
-	rm -f $(ONLINE_TARGET) $(TEST_TARGET) $(PY_MODULE)*.so
+	rm -f $(ONLINE_TARGET) $(TEST_TARGETS) $(PY_MODULE)*.so
