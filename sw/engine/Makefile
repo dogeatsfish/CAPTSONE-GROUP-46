@@ -16,7 +16,8 @@
 #   make run        -> build + run the CLI (defaults, or FILE=<config.ini> to
 #                      run a config file, or FILE=<mbo.bin> SCALE=<x>)
 #   make pymodule   -> build the importable Python extension (engine_sim*.so)
-#   make test       -> build + run the unit tests (tests/src/test_*.cpp)
+#   make test       -> build + run the C++ unit tests (tests/src/test_*.cpp)
+#   make test-python-> build the Python module and check it (tests/test_bindings.py)
 #   make clean      -> remove all build artifacts
 
 CXX      := g++
@@ -96,7 +97,7 @@ PY_LINK_LIBS :=
 endif
 endif
 
-.PHONY: all online run pymodule test smoke-test hardware-test clean
+.PHONY: all online run pymodule test test-python smoke-test hardware-test clean
 
 all: $(ONLINE_TARGET)
 
@@ -127,6 +128,10 @@ TEST_HDRS    := $(wildcard shared/include/*.h match/include/*.h simulation/inclu
 
 test: $(TEST_TARGETS)
 	@for t in $(TEST_TARGETS); do echo "== $$t"; ./$$t || exit 1; done
+
+# Checks the Python bindings; needs pybind11 in the python3 on PATH.
+test-python: pymodule
+	python3 tests/test_bindings.py
 
 test_orderbook: tests/src/test_orderbook.cpp match/src/orderbook.cpp $(TEST_HDRS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_orderbook.cpp match/src/orderbook.cpp -o $@

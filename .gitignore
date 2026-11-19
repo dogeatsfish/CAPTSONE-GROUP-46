@@ -55,7 +55,7 @@ sw/engine/engine_sim*.so
 # after a local build can't silently reintroduce them.
 sw/engine/simulation_run
 sw/engine/online_run
-sw/engine/test_orderbook
+sw/engine/test_*
 sw/engine/fpga_test
 sw/engine/tests/src/socket_test
 sw/engine/tests/src/stress_orderbook
@@ -103,3 +103,6 @@ synth.tcl
 
 # Executables
 *.exe
+
+# Office lock files (left behind while a document is open)
+~$*
