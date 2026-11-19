@@ -88,8 +88,8 @@ if [ ! -d "service/.venv" ]; then
 fi
 PY="./service/.venv/bin/python"
 
-echo "==> Installing service/api dependencies..."
-"$PY" -m pip install --quiet --disable-pip-version-check -r service/api/requirements.txt \
+echo "==> Installing service dependencies..."
+"$PY" -m pip install --quiet --disable-pip-version-check -r service/requirements.txt \
     || fail "pip install failed -- see the error above."
 
 echo "==> Building the engine's Python module (make pymodule)..."
@@ -105,7 +105,7 @@ if ! "$PY" -c "import sys; sys.path.insert(0, 'engine'); import engine_sim" 2>/d
 fi
 
 echo "==> Starting the backend natively (uvicorn) so it shares the host's real network stack..."
-( cd service/api/src && exec "../../.venv/bin/uvicorn" app:app --host 0.0.0.0 --port 8000 ) \
+( cd service/src && exec "../.venv/bin/uvicorn" app:app --host 0.0.0.0 --port 8000 ) \
     > /tmp/commontrader-uvicorn.log 2>&1 &
 UVICORN_PID=$!
 

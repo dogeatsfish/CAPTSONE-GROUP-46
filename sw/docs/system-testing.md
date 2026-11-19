@@ -33,12 +33,31 @@ browser-level symptom is almost never a browser-level bug.
 
 | Layer | Test it with | Doc |
 |---|---|---|
-| Engine | `make test`, `make test-python` | [engine-testing.md](engine-testing.md) |
+| Engine | `make test` (C++), `make test-python` (`sw/service/tests/`) | [engine-testing.md](engine-testing.md) |
 | Backend | `curl` against `:8000` | below |
 | Frontend | the browser, against a known-good backend | below |
 | Hardware | `make run SCALE=1.0 ITCH_ADDR=192.168.0.1`, `tcpdump` | below + [`connection-test.md`](../../docs/connection-test.md) |
 
 ---
+
+## Where things live
+
+```
+sw/
+  engine/       the C++ engine
+    app/        CLI entry points (online_run)
+    match/      the order book
+    simulation/ scheduler, participants, accounts, the two simulations
+    bindings/   the pybind11 wrapper -> engine_sim*.so
+    tests/src/  C++ unit tests
+  service/      the FastAPI backend
+    src/        app.py, routes, managers
+    include/    request/response models, metrics
+    config/     config.py -- all paths resolve from here
+    tests/      Python tests, including the engine_sim binding tests
+  ui/           the React dashboard
+  data_pipeline/data/   the committed .bin market-data books
+```
 
 ## 1. Software-only full stack
 
@@ -72,11 +91,11 @@ If something in `dev.sh` fails, the same steps individually:
 # 1. Build the engine's Python module
 cd sw/engine && make pymodule
 
-# 2. Set up and start the API  (the venv path matters: the Makefile's
-#    PY default and dev.sh both expect ../service/.venv)
+# 2. Set up and start the API  (the venv path matters: dev.sh expects
+#    sw/service/.venv)
 cd ../service && python3 -m venv .venv
-.venv/bin/pip install -r api/requirements.txt
-cd api/src && ../../.venv/bin/uvicorn app:app --reload
+.venv/bin/pip install -r requirements.txt
+cd src && ../.venv/bin/uvicorn app:app --reload
 
 # 3. Start the UI (second terminal)
 cd sw/ui && npm install && npm run dev

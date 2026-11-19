@@ -38,7 +38,7 @@ resolves to on `PATH`.
 | `all` (default) | builds the real-time CLI `online_run` |
 | `pymodule` | builds the importable Python extension `engine_sim*.so` |
 | `test` | builds + runs all four C++ unit-test binaries |
-| `test-python` | builds the module, then runs `tests/test_bindings.py` |
+| `test-python` | builds the module, then runs `../service/tests/test_bindings.py` |
 | `run` | builds + runs `online_run` on `FILE` at pacing `SCALE`, broadcasting to `ITCH_ADDR` |
 | `rebuild` | clean, then build from scratch |
 | `clean` | removes all build artifacts |
@@ -57,9 +57,13 @@ there for the cases where a scratch build is genuinely right, like changing
 ## The unit tests
 
 ```bash
-make test          # all four, stops at the first failure
-make test-python   # the Python binding tests
+make test          # all four C++ binaries, stops at the first failure
+make test-python   # the Python binding tests, in sw/service/tests/
 ```
+
+The binding tests live with the service rather than the engine because the
+service is what consumes `engine_sim`; `make test-python` builds the module
+and then runs them from there.
 
 Each binary prints one `ok <name>` line per check group and a final
 `PASSED (0 failed checks)`. There is no test framework: each file defines its
@@ -72,7 +76,7 @@ exits non-zero if anything failed.
 | `test_account` | `tests/src/test_account.cpp` | position and average-entry math, realized vs unrealized PnL, taker fee and maker rebate, open-order tracking, fill history |
 | `test_scheduler` | `tests/src/test_scheduler.cpp` | time ordering, same-time tie-break, the no-time-travel guarantee, inbox routing, `run_until`, periodic snapshots, seek-from-snapshot, determinism |
 | `test_participant` | `tests/src/test_participant.cpp` | callbacks at zero latency, both latency legs, fill-notification delay, the "faster participant wins the race" property, tier presets, market orders, order management, fees, timers, queue-position queries, unregistered participants |
-| `tests/test_bindings.py` | — | the Python surface: direct `OrderBook` use, stepping the scheduler, a `Participant` subclass written in Python, latency presets, snapshots, determinism, `OfflineSimulation` options |
+| `sw/service/tests/test_bindings.py` | — | the Python surface: direct `OrderBook` use, stepping the scheduler, a `Participant` subclass written in Python, latency presets, snapshots, determinism, `OfflineSimulation` options |
 
 Test binaries are gitignored (`sw/engine/test_*`) and removed by `make clean`.
 
@@ -89,7 +93,7 @@ Test binaries are gitignored (`sw/engine/test_*`) and removed by `make clean`.
 
 ## Running the engine by hand
 
-`online_run` (built from `tests/src/test.cpp`) replays a market-data book over
+`online_run` (built from `app/online_run.cpp`) replays a market-data book over
 real ITCH/OUCH sockets. It takes positional arguments only:
 
 ```bash

@@ -1,10 +1,10 @@
 """FastAPI application entry point.
 
 Wires up the API by mounting the routers defined in ``routes.py``. Run from
-the ``service/api/src`` directory:
+the ``service/src`` directory:
 
     uvicorn app:app --reload
-    ../../.venv/bin/uvicorn app:app --reload
+    ../.venv/bin/uvicorn app:app --reload
 
 The heavy lifting (running the C++ offline simulation via the ``engine_sim``
 pybind11 module) lives in ``routes.py``.
@@ -16,8 +16,8 @@ import sys
 # Ensure the source and config directories are importable so `import routes`
 # and `import config` work regardless of the working directory uvicorn is
 # launched from. (config.py handles the include/ and engine/ paths itself.)
-_SRC_DIR = os.path.dirname(os.path.abspath(__file__))  # service/api/src
-_CONFIG_DIR = os.path.join(os.path.dirname(_SRC_DIR), "config")  # service/api/config
+_SRC_DIR = os.path.dirname(os.path.abspath(__file__))  # service/src
+_CONFIG_DIR = os.path.join(os.path.dirname(_SRC_DIR), "config")  # service/config
 for _p in (_SRC_DIR, _CONFIG_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)

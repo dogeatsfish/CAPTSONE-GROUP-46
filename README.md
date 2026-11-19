@@ -52,7 +52,7 @@ extension module that the FastAPI service imports.
 
 ```bash
 cd sw/engine && make pymodule          # builds engine_sim*.so (needs g++ + pybind11)
-cd ../service/api/src && uvicorn app:app --port 8000
+cd ../service/src && uvicorn app:app --port 8000
 ```
 
 The API is then at `http://127.0.0.1:8000`, which is exactly what

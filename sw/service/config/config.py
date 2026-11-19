@@ -2,11 +2,10 @@ import os
 import sys
 from pathlib import Path
 
-# --- Directory layout (this file lives in service/api/config) ---
-CONFIG_DIR = Path(__file__).resolve().parent  # service/api/config
-API_DIR = CONFIG_DIR.parent  # service/api
-INCLUDE_DIR = API_DIR / "include"  # service/api/include
-SERVICE_ROOT = API_DIR.parent  # service
+# --- Directory layout (this file lives in service/config) ---
+CONFIG_DIR = Path(__file__).resolve().parent  # service/config
+INCLUDE_DIR = CONFIG_DIR.parent / "include"  # service/include
+SERVICE_ROOT = CONFIG_DIR.parent  # service
 REPO_ROOT = SERVICE_ROOT.parent  # sw
 ENGINE_DIR = REPO_ROOT / "engine"
 COMPILER_DIR = (

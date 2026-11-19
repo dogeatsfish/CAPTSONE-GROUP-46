@@ -1,17 +1,21 @@
-"""Checks the engine_sim Python module (make test-python).
+"""Checks the engine_sim Python module -- the service's view of the engine.
 
-Plain asserts, no pytest needed: run from sw/engine after `make pymodule`.
+Plain asserts, no pytest needed. Run it with `make -C sw/engine test-python`,
+which builds the module first, or directly once engine_sim*.so exists:
+
+    python3 sw/service/tests/test_bindings.py
 """
 
 import os
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))  # sw/engine, where the .so is built
+HERE = os.path.dirname(os.path.abspath(__file__))        # sw/service/tests
+SW = os.path.dirname(os.path.dirname(HERE))              # sw
+sys.path.insert(0, os.path.join(SW, "engine"))           # where the .so is built
 
 import engine_sim as es  # noqa: E402
 
-DATA = os.path.join(HERE, "..", "..", "data_pipeline", "data", "synthetic_mbo_stream.bin")
+DATA = os.path.join(SW, "data_pipeline", "data", "synthetic_mbo_stream.bin")
 FEED = 0
 
 

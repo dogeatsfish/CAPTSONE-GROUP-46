@@ -6,7 +6,8 @@
 #   simulation/include/  - simulation headers (offline/online sim, online_config, user_strategy)
 #   simulation/src/      - OfflineSimulation / OnlineSimulation + trading_context (fixed Strategy machinery)
 #   simulation/templates/- trading_template (editable on_market_update strategy body)
-#   tests/src/test.cpp   - online (real-time) CLI entry point (online_run)
+#   app/online_run.cpp   - online (real-time) CLI entry point
+#   tests/src/           - unit tests (test_*.cpp)
 #   bindings/            - pybind11 wrapper exposing the simulation to Python
 #   ../compiler/         - strategy-compiler entry point (main_job, job template)
 #
@@ -16,7 +17,8 @@
 #                      ITCH_ADDR=<ip> to stream somewhere other than loopback)
 #   make pymodule   -> build the importable Python extension (engine_sim*.so)
 #   make test       -> build + run the C++ unit tests (tests/src/test_*.cpp)
-#   make test-python-> build the Python module and check it (tests/test_bindings.py)
+#   make test-python-> build the Python module and check it
+#                      (../service/tests/test_bindings.py)
 #   make rebuild    -> clean, then build from scratch
 #   make clean      -> remove all build artifacts
 
@@ -53,7 +55,7 @@ ALL_HDRS := $(wildcard shared/include/*.h match/include/*.h \
 # Online (real-time) CLI binary
 # ---------------------------------------------------------
 ONLINE_TARGET := online_run
-ONLINE_SRCS   := tests/src/test.cpp $(CORE_SRCS)
+ONLINE_SRCS   := app/online_run.cpp $(CORE_SRCS)
 
 # Default data file used by `make run` (override with FILE=..., which may be an
 # MBO .bin file).
@@ -149,9 +151,11 @@ SCHED_SRCS   := simulation/src/scheduler.cpp simulation/src/account.cpp match/sr
 test: $(TEST_TARGETS)
 	@for t in $(TEST_TARGETS); do echo "== $$t"; ./$$t || exit 1; done
 
-# Checks the Python bindings; needs pybind11 in the python3 on PATH.
+# Checks the Python bindings from the service side; needs pybind11 in the
+# python3 on PATH. The test lives with the service because the service is what
+# consumes engine_sim.
 test-python: pymodule
-	python3 tests/test_bindings.py
+	python3 ../service/tests/test_bindings.py
 
 test_orderbook: tests/src/test_orderbook.cpp match/src/orderbook.cpp $(ALL_HDRS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_orderbook.cpp match/src/orderbook.cpp -o $@
