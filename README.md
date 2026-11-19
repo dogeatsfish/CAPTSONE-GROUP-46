@@ -45,50 +45,39 @@ Lint the RTL locally before pushing:
 verilator --lint-only -Wall -Irtl/common rtl/**/*.sv
 ```
 
-### Running the engine + FastAPI service (containerized)
+### Running the engine + FastAPI service
 
-`sw/Dockerfile` containerizes the C++ matching engine and the FastAPI
-service only -- not `rtl/`/`vivado/`, since Vivado needs a license, a GUI,
-and direct USB/JTAG access to the board. This is also the easiest way to
-sidestep the cross-platform build issues tracked in `TODO.md` (the container
-is always Linux, so the engine's POSIX socket code just works regardless of
-your host OS).
-
-Don't have Docker yet? Windows/macOS: grab [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-and open it once so the daemon's actually running. Linux: install
-[Docker Engine](https://docs.docker.com/engine/install/), which brings the
-`docker compose` plugin with it. `docker info` will tell you if it's up.
+The backend runs natively: the C++ matching engine is compiled into a Python
+extension module that the FastAPI service imports.
 
 ```bash
-cd sw
-docker compose up --build
+cd sw/engine && make pymodule          # builds engine_sim*.so (needs g++ + pybind11)
+cd ../service/api/src && uvicorn app:app --port 8000
 ```
 
 The API is then at `http://127.0.0.1:8000`, which is exactly what
 `sw/ui/vite.config.js`'s dev-server proxy targets -- run the UI natively
-(`npm run dev` in `sw/ui/`) alongside it. Note: `/compile` (the Vivado
-synthesis endpoint) won't work inside the container -- run the service
-natively via `uvicorn` if you need that endpoint.
+(`npm run dev` in `sw/ui/`) alongside it.
 
-Or skip doing both by hand: `sw/dev.sh` (macOS/Linux/WSL2) / `sw/dev.ps1`
-(Windows) build + start the backend, wait for it to actually answer, then
-start the UI dev server -- with a clear error message (and the backend's
-logs) if any step fails instead of a silent hang. Stopping it (Ctrl-C) tears
-the backend back down too. `dev.sh` runs the backend natively (no Docker);
-`dev.ps1` uses Docker.
+Or skip doing both by hand: `sw/dev.sh` builds + starts the backend, waits
+for it to actually answer, then starts the UI dev server -- with a clear
+error message (and the backend's logs) if any step fails instead of a silent
+hang. Stopping it (Ctrl-C) tears the backend back down too.
 
 ```bash
-cd sw && ./dev.sh          # macOS/Linux
-```
-```powershell
-cd sw; .\dev.ps1           # Windows
+cd sw && ./dev.sh          # macOS, Linux, or WSL2
 ```
 
-**Testing against the real board?** Use `sw/dev.sh` (macOS, Linux, or WSL2),
-not `dev.ps1` or `docker compose` -- Docker's networking can't reach the board
-(see [`docs/connection-test.md`](docs/connection-test.md#running-the-backend-against-real-hardware)).
-For the full cold-start sequence (bitstream → link → board → software),
-see [`docs/board-test-checklist.md`](docs/board-test-checklist.md).
+Native Windows isn't supported for the backend: `sw/engine/Makefile` only
+compiles the online/hardware path off `Windows_NT`, and the engine needs
+`g++`. Use WSL2 (with `networkingMode=mirrored` in `.wslconfig` if you also
+want to reach the board) and run `dev.sh` from there.
+
+**Testing against the real board?** Run `sw/dev.sh` on macOS, Linux, or WSL2
+and work through [`docs/connection-test.md`](docs/connection-test.md) first --
+the host NIC needs a static IP and a static ARP entry before anything reaches
+the board. For the full cold-start sequence (bitstream → link → board →
+software), see [`docs/board-test-checklist.md`](docs/board-test-checklist.md).
 
 ## Subsystem Owners
 

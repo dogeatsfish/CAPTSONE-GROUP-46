@@ -16,6 +16,8 @@
 #   make run        -> build + run the CLI (defaults, or FILE=<config.ini> to
 #                      run a config file, or FILE=<mbo.bin> SCALE=<x>)
 #   make pymodule   -> build the importable Python extension (engine_sim*.so)
+#   make test       -> build + run the C++ unit tests (tests/src/test_*.cpp)
+#   make test-python-> build the Python module and check it (tests/test_bindings.py)
 #   make clean      -> remove all build artifacts
 
 CXX      := g++
@@ -30,6 +32,8 @@ INCLUDES := -Ishared/include -Imatch/include -Isimulation/include -Inetwork/incl
 # don't exist on native Windows/MinGW without a Winsock2 port -- see the
 # Windows branch of the pymodule target below.
 OFFLINE_CORE_SRCS := simulation/src/offline_simulation.cpp \
+                     simulation/src/scheduler.cpp \
+                     simulation/src/account.cpp \
                      network/src/protocol.cpp \
                      simulation/src/trading_context.cpp \
                      simulation/templates/trading_template.cpp \
@@ -93,7 +97,7 @@ PY_LINK_LIBS :=
 endif
 endif
 
-.PHONY: all online run pymodule smoke-test hardware-test clean
+.PHONY: all online run pymodule test test-python smoke-test hardware-test clean
 
 all: $(ONLINE_TARGET)
 
@@ -113,6 +117,33 @@ pymodule: $(PY_TARGET)
 $(PY_TARGET): $(PY_SRCS)
 	$(CXX) $(CXXFLAGS) $(PY_DEFINES) -shared -fPIC \
 		$(INCLUDES) $(PY_INCLUDES) $(PY_SRCS) $(PY_LINK_LIBS) -o $(PY_TARGET)
+
+# ---------------------------------------------------------
+# Unit tests
+# ---------------------------------------------------------
+TEST_TARGETS := test_orderbook test_account test_scheduler test_participant
+# Everything the scheduler-level tests link, and the headers they depend on.
+SCHED_SRCS   := simulation/src/scheduler.cpp simulation/src/account.cpp match/src/orderbook.cpp
+TEST_HDRS    := $(wildcard shared/include/*.h match/include/*.h simulation/include/*.h)
+
+test: $(TEST_TARGETS)
+	@for t in $(TEST_TARGETS); do echo "== $$t"; ./$$t || exit 1; done
+
+# Checks the Python bindings; needs pybind11 in the python3 on PATH.
+test-python: pymodule
+	python3 tests/test_bindings.py
+
+test_orderbook: tests/src/test_orderbook.cpp match/src/orderbook.cpp $(TEST_HDRS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_orderbook.cpp match/src/orderbook.cpp -o $@
+
+test_account: tests/src/test_account.cpp simulation/src/account.cpp $(TEST_HDRS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_account.cpp simulation/src/account.cpp -o $@
+
+test_scheduler: tests/src/test_scheduler.cpp $(SCHED_SRCS) $(TEST_HDRS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_scheduler.cpp $(SCHED_SRCS) -o $@
+
+test_participant: tests/src/test_participant.cpp $(SCHED_SRCS) $(TEST_HDRS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_participant.cpp $(SCHED_SRCS) -o $@
 
 # ---------------------------------------------------------
 # Test runs (drive online_run against a config)
@@ -143,4 +174,4 @@ hardware-test: $(ONLINE_TARGET)
 	./$(ONLINE_TARGET) $(HARDWARE_CONFIG)
 
 clean:
-	rm -f $(ONLINE_TARGET) $(PY_MODULE)*.so
+	rm -f $(ONLINE_TARGET) $(TEST_TARGETS) $(PY_MODULE)*.so

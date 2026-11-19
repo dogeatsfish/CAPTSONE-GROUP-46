@@ -4,23 +4,36 @@
 # down together on Ctrl-C. Works for every mode -- offline, loopback online,
 # and the real board.
 #
-# The backend runs natively rather than in Docker because Docker Desktop
-# puts containers on their own virtual network (a VM, on Windows/macOS): the
-# backend's UDP traffic to the board never reaches the host's physical NIC or
-# the static ARP entry `setup/net_setup.sh` adds for 192.168.0.1, and the
-# board's replies never reach the container. Native means the host's real
-# network stack.
+# The backend runs natively so it shares the host's real network stack --
+# that is what lets its UDP traffic reach the board through the static ARP
+# entry `setup/net_setup.sh` adds for 192.168.0.1, and lets the board's
+# replies come back.
 #
 # Platform: macOS, Linux, or WSL2 (on WSL2 also set networkingMode=mirrored
 # in .wslconfig, Windows 11 22H2+, so WSL shares the host's NIC instead of
-# NATing through its own adapter). Native Windows: use .\dev.ps1 (Docker,
-# offline/loopback only). For the board, run `setup/net_setup.sh` first.
+# NATing through its own adapter). Native Windows is not supported. For the
+# board, run `setup/net_setup.sh` first.
 #
-# Usage: ./dev.sh   (from sw/, or anywhere -- it cd's to its own directory)
+# Usage: ./dev.sh              (from sw/, or anywhere -- it cd's to its own directory)
+#        ./dev.sh --no-ui     backend only; skips the npm checks and the Vite
+#                             dev server, and holds until Ctrl-C
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+
+START_UI=1
+for arg in "$@"; do
+    case "$arg" in
+        --no-ui|--backend-only) START_UI=0 ;;
+        -h|--help)
+            echo "Usage: ./dev.sh [--no-ui]"
+            echo "  --no-ui   start the backend only and hold until Ctrl-C"
+            exit 0
+            ;;
+        *) echo "Unknown option: $arg (try --help)" >&2; exit 2 ;;
+    esac
+done
 
 API_URL="http://127.0.0.1:8000/"
 UVICORN_PID=""
@@ -43,11 +56,10 @@ case "$(uname -s)" in
     Linux*|Darwin*) : ;;
     *)
         fail "This looks like native Windows ($(uname -s)), not macOS/Linux/WSL2. \
-The engine's Makefile can't build hardware/online support there \
-(engine/Makefile compiles with -DCT_NO_ONLINE_SIM on Windows_NT, no way \
-around it without a POSIX sockets layer) -- run this from WSL2 (with \
-\"mirrored\" networking mode) or a macOS/Linux box instead. For \
-offline/loopback-only work, ./dev.ps1 is fine on native Windows."
+The engine's Makefile only compiles hardware/online support off Windows_NT \
+(engine/Makefile builds the Python module with -DCT_NO_ONLINE_SIM there) -- \
+run this from WSL2 (with \"mirrored\" networking mode) or a macOS/Linux box \
+instead."
         ;;
 esac
 
@@ -57,17 +69,19 @@ command -v python3 >/dev/null 2>&1 \
 command -v g++ >/dev/null 2>&1 \
     || fail "g++ isn't installed or not on PATH (needed to build the engine's Python module)."
 
-command -v npm >/dev/null 2>&1 \
-    || fail "npm isn't installed or not on PATH. Install Node.js: https://nodejs.org/"
+if [ "$START_UI" -eq 1 ]; then
+    command -v npm >/dev/null 2>&1 \
+        || fail "npm isn't installed or not on PATH. Install Node.js: https://nodejs.org/ (or run with --no-ui)"
 
-[ -d "ui/node_modules" ] \
-    || fail "ui/node_modules is missing. Run 'npm install' inside sw/ui/ first."
+    [ -d "ui/node_modules" ] \
+        || fail "ui/node_modules is missing. Run 'npm install' inside sw/ui/ first (or run with --no-ui)."
+fi
 
 # sw/service/.venv, not sw/.venv: engine/Makefile's online tests default to
-# PY ?= ../service/.venv/bin/python (see build-and-test.md), and
-# run-dashboard.md's manual setup uses the same path -- reusing it here means
-# this script, `make test-online`/`socket-test`, and the manual docs all
-# agree on one venv instead of three.
+# PY ?= ../service/.venv/bin/python, and docs/system-testing.md's manual
+# setup uses the same path -- reusing it here means this script, the
+# Makefile's test-book generation, and the docs all agree on one venv
+# instead of three.
 if [ ! -d "service/.venv" ]; then
     echo "==> Creating a venv at sw/service/.venv..."
     python3 -m venv service/.venv || fail "Failed to create the venv."
@@ -117,5 +131,12 @@ fi
 echo "==> Backend is up."
 echo "==> Reminder: setup/net_setup.sh must have already been run for this host session"
 echo "    (static IP + ARP entry for the board) -- see docs/connection-test.md."
-echo "==> Starting the UI dev server (npm run dev). Ctrl-C stops both."
-(cd ui && npm run dev)
+if [ "$START_UI" -eq 1 ]; then
+    echo "==> Starting the UI dev server (npm run dev). Ctrl-C stops both."
+    (cd ui && npm run dev)
+else
+    echo "==> Backend only (--no-ui). API at $API_URL"
+    echo "==> Start the UI yourself with: cd ui && npm run dev"
+    echo "==> Ctrl-C to stop the backend."
+    wait "$UVICORN_PID"
+fi

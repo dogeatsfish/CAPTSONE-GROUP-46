@@ -38,8 +38,8 @@ STRATEGY_COMPILE_TIMEOUT_S = float(os.environ.get("STRATEGY_COMPILE_TIMEOUT_S", 
 STRATEGY_RUN_TIMEOUT_S = float(os.environ.get("STRATEGY_RUN_TIMEOUT_S", "15"))
 
 # --- Persistent run logging (FS-15 -- see db.py for current scope) ---
-# Override via env var so a containerized deployment can point this at a
-# mounted volume outside the code tree (see sw/Dockerfile, docker-compose.yml).
+# Override via env var (CT_DB_PATH) so a deployment can keep the database
+# outside the code tree -- CI points it at a temp dir, for example.
 DB_PATH = Path(os.environ.get("CT_DB_PATH", str(SERVICE_ROOT / "commontrader.db")))
 
 # --- Online (real-time) simulation transport (server-side ONLY) ---

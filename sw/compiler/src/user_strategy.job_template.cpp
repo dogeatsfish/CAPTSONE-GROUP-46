@@ -6,11 +6,13 @@
 // str.replace() matches every occurrence, and an incidental match up here
 // would splice user code into the top of the file instead of the function.
 //
-// The fixed Strategy machinery (constructor, on_fill, get_unrealized_pnl)
-// lives in strategy_base.cpp and is linked in unchanged -- see that file's
-// header comment. This template only needs to provide on_market_update, so
-// unlike an earlier version of this file there is nothing here that could
-// drift from sw/engine/simulation/src/user_strategy.cpp's real boilerplate.
+// The fixed Strategy machinery (constructor, sync_account) lives in
+// sw/engine/simulation/src/trading_context.cpp and is linked in unchanged.
+// This template only needs to provide on_market_update. The body runs inside
+// the simulation through the StrategyParticipant adapter
+// (strategy_participant.h); position_size, avg_entry_price and realized_pnl
+// are refreshed from the player's Account before every call, so a body may
+// read them but assigning to them has no effect.
 // <iostream> is included so a submitted body can std::cout/std::cerr for
 // debugging (very likely for a student to reach for). That output is safe
 // to use now: main_job.cpp writes its JSON result to a file rather than
