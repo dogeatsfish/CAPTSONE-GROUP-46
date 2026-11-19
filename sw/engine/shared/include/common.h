@@ -2,6 +2,13 @@
 #include <cstdint>
 #include <vector>
 
+// Identifies a participant on the Scheduler. Declared here rather than in
+// participant.h because the scheduler keys its queue entries, inboxes and
+// order-ownership map by it, in places where no Participant object is
+// involved -- so the engine can name a participant without depending on the
+// Participant type.
+using ParticipantId = uint32_t;
+
 struct Order {
     uint64_t order_id;
     double price;

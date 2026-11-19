@@ -10,9 +10,16 @@
 #include <vector>
 
 #include "account.h"
+#include "common.h"   // ParticipantId
 #include "latency.h"
 #include "orderbook.h"
-#include "participant.h"
+
+// The engine does not depend on its participants. Slot holds a Participant*
+// and add_participant takes a Participant&, both of which an incomplete type
+// satisfies; no method is ever called on one from this header. scheduler.cpp
+// includes participant.h for the virtual dispatch, which is a translation-unit
+// dependency rather than a coupling between modules.
+class Participant;
 
 // Deterministic discrete-event scheduler: the simulated exchange's clock.
 //

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <vector>
+#include "participant.h"
 #include "scheduler.h"
 
 namespace {

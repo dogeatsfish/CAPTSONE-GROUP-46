@@ -31,6 +31,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "participant.h"
 #include "offline_simulation.h"
 // OnlineSimulation uses POSIX sockets and isn't buildable on native Windows
 // yet (see the Windows branch of the pymodule target in engine/Makefile,

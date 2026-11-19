@@ -7,7 +7,6 @@
 #include "common.h"
 
 class Scheduler;
-using ParticipantId = uint32_t;
 
 // Anything that trades in the simulation: built-in bots and the player's
 // strategy alike. Subclass it, override the callbacks you care about, and act

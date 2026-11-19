@@ -30,6 +30,7 @@
 #include <cstdlib>
 #include <vector>
 
+#include "participant.h"
 #include "scheduler.h"
 
 namespace {

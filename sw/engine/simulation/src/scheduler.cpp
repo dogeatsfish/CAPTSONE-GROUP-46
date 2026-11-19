@@ -1,5 +1,7 @@
 #include "scheduler.h"
 
+#include "participant.h" // complete type: virtual dispatch + add_participant
+
 #include <algorithm>
 #include <utility>
 
