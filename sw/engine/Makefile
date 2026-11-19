@@ -7,6 +7,7 @@
 #   simulation/src/      - OfflineSimulation / OnlineSimulation + trading_context (fixed Strategy machinery)
 #   simulation/templates/- trading_template (editable on_market_update strategy body)
 #   app/online_run.cpp   - online (real-time) CLI entry point
+#   app/link_flash.cpp   - UDP link check: flashes the board's LED
 #   tests/src/           - unit tests (test_*.cpp)
 #   bindings/            - pybind11 wrapper exposing the simulation to Python
 #   ../compiler/         - strategy-compiler entry point (main_job, job template)
@@ -19,6 +20,8 @@
 #   make test       -> build + run the C++ unit tests (tests/src/test_*.cpp)
 #   make test-python-> build the Python module and check it
 #                      (../service/tests/test_bindings.py)
+#   make flash      -> send ITCH packets at the board and watch its LED
+#                      (visual check, not automated -- see the file header)
 #   make rebuild    -> clean, then build from scratch
 #   make clean      -> remove all build artifacts
 
@@ -113,7 +116,7 @@ PY_LINK_LIBS :=
 endif
 endif
 
-.PHONY: all online rebuild run pymodule test test-python clean
+.PHONY: all online rebuild run pymodule test test-python flash clean
 
 all: $(ONLINE_TARGET)
 
@@ -140,6 +143,25 @@ pymodule: $(PY_TARGET)
 $(PY_TARGET): $(PY_SRCS) $(ALL_HDRS)
 	$(CXX) $(CXXFLAGS) $(PY_DEFINES) -shared -fPIC \
 		$(INCLUDES) $(PY_INCLUDES) $(PY_SRCS) $(PY_LINK_LIBS) -o $(PY_TARGET)
+
+# ---------------------------------------------------------
+# Link check (visual -- deliberately not in CI)
+# ---------------------------------------------------------
+# Streams ITCH packets at the board so its receive LED flashes. There is
+# nothing to assert: the board never acknowledges anything, so you confirm it
+# by looking at the board. See app/link_flash.cpp.
+FLASH_TARGET := link_flash
+FLASH_ADDR  ?= 192.168.0.1
+FLASH_RATE  ?= 5      # packets per second
+FLASH_COUNT ?= 0      # 0 = continuous, Ctrl-C to stop
+FLASH_PORT  ?= 50001
+
+flash: $(FLASH_TARGET)
+	./$(FLASH_TARGET) $(FLASH_ADDR) $(FLASH_RATE) $(FLASH_COUNT) $(FLASH_PORT)
+
+$(FLASH_TARGET): app/link_flash.cpp network/src/protocol.cpp $(ALL_HDRS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) app/link_flash.cpp network/src/protocol.cpp \
+		-o $@ -lpthread $(NET_LIBS)
 
 # ---------------------------------------------------------
 # Unit tests
@@ -170,4 +192,4 @@ test_participant: tests/src/test_participant.cpp $(SCHED_SRCS) $(ALL_HDRS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_participant.cpp $(SCHED_SRCS) -o $@
 
 clean:
-	rm -f $(ONLINE_TARGET) $(TEST_TARGETS) $(PY_MODULE)*.so
+	rm -f $(ONLINE_TARGET) $(FLASH_TARGET) $(TEST_TARGETS) $(PY_MODULE)*.so

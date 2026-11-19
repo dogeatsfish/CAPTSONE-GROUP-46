@@ -40,6 +40,7 @@ resolves to on `PATH`.
 | `test` | builds + runs all four C++ unit-test binaries |
 | `test-python` | builds the module, then runs `../service/tests/test_bindings.py` |
 | `run` | builds + runs `online_run` on `FILE` at pacing `SCALE`, broadcasting to `ITCH_ADDR` |
+| `flash` | sends ITCH packets at the board so its LED flashes — a visual link check |
 | `rebuild` | clean, then build from scratch |
 | `clean` | removes all build artifacts |
 

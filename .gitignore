@@ -55,6 +55,7 @@ sw/engine/engine_sim*.so
 # after a local build can't silently reintroduce them.
 sw/engine/simulation_run
 sw/engine/online_run
+sw/engine/link_flash
 sw/engine/test_*
 sw/engine/fpga_test
 sw/engine/tests/src/socket_test

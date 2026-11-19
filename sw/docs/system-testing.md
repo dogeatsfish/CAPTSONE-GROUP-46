@@ -36,7 +36,7 @@ browser-level symptom is almost never a browser-level bug.
 | Engine | `make test` (C++), `make test-python` (`sw/service/tests/`) | [engine-testing.md](engine-testing.md) |
 | Backend | `curl` against `:8000` | below |
 | Frontend | the browser, against a known-good backend | below |
-| Hardware | `make run SCALE=1.0 ITCH_ADDR=192.168.0.1`, `tcpdump` | below + [`connection-test.md`](../../docs/connection-test.md) |
+| Hardware | `make flash` (LED check), then `make run SCALE=1.0 ITCH_ADDR=192.168.0.1` + `tcpdump` | below + [`connection-test.md`](../../docs/connection-test.md) |
 
 ---
 
@@ -45,7 +45,7 @@ browser-level symptom is almost never a browser-level bug.
 ```
 sw/
   engine/       the C++ engine
-    app/        CLI entry points (online_run)
+    app/        CLI entry points (online_run, link_flash)
     match/      the order book
     simulation/ scheduler, participants, accounts, the two simulations
     bindings/   the pybind11 wrapper -> engine_sim*.so
@@ -164,6 +164,32 @@ The one thing worth repeating here, because it causes silent failures:
 > looks like it "works" on loopback — the service talking to itself — and then
 > receives nothing from real hardware. `dev.sh` runs natively for exactly this
 > reason. On WSL2 you also need `networkingMode=mirrored` in `.wslconfig`.
+
+### Is anything reaching the board at all?
+
+The narrowest possible check, before any replay: send packets and watch the
+board's green receive LED.
+
+```bash
+cd sw/engine
+make flash                      # 5 packets/sec at 192.168.0.1, Ctrl-C to stop
+make flash FLASH_RATE=1         # one per second, easy to count against the LED
+make flash FLASH_COUNT=10       # exactly ten, then stop
+```
+
+Each line it prints is one real ITCH Add Order put on the wire. **Verification
+is your eyes** — the board has no ARP, ICMP or TCP, so it never acknowledges
+anything and no tool can confirm delivery for you. That is also why this isn't
+in CI.
+
+| What you see | What it means |
+|---|---|
+| LED flashes in time with the printed lines | frames are reaching the board; anything still broken is inside the FPGA |
+| lines print, LED does nothing | the host isn't transmitting, or that LED is FPGA-driven and the parser is rejecting the frames. Re-check step 1 of [`connection-test.md`](../../docs/connection-test.md): an `inet` address on the board's subnet **and** the static ARP entry |
+| `packet N FAILED to send` | the host couldn't put it on the wire at all — almost always the missing ARP entry or no route |
+
+Sanity-check the tool itself against loopback first if you like:
+`make flash FLASH_ADDR=127.0.0.1 FLASH_COUNT=3`.
 
 ### Engine ↔ board, without the UI
 
