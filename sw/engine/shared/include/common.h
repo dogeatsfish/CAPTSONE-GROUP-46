@@ -23,31 +23,53 @@ struct L1State {
     double best_ask = 0.0;
 };
 
+// One aggregated price level of the book (see OrderBook::get_l2_state).
+struct L2Level {
+    double   price = 0.0;
+    double   size = 0.0;        // total resting size at this price
+    uint32_t order_count = 0;   // number of orders making up that size
+};
+
+// Top-N depth per side, best price first.
+struct L2State {
+    std::vector<L2Level> bids;  // highest price first
+    std::vector<L2Level> asks;  // lowest price first
+};
+
+// Where one resting order stands in line at its price (OrderBook::queue_position).
+// Orders at a price fill strictly first-in-first-out, so shares_ahead is how
+// much must trade (or cancel) at that price before this order is next.
+struct QueuePosition {
+    char     side = 0;
+    double   price = 0.0;
+    double   remaining = 0.0;     // this order's own open size
+    double   shares_ahead = 0.0;  // total size queued in front of it at this price
+    uint32_t orders_ahead = 0;    // number of orders making up that size
+};
+
+// Every resting order, in priority order (OrderBook::snapshot). Enough to
+// rebuild the book exactly with OrderBook::restore -- so a run can be resumed
+// from the snapshot's time instead of replayed from the start.
+struct BookSnapshot {
+    uint64_t timestamp_ns = 0;
+    uint64_t next_event_seq = 0;  // seq the next BookEvent will get: every event
+                                  // with a lower seq is already reflected here
+    std::vector<Order> bids;      // best price first; oldest first within a price
+    std::vector<Order> asks;
+};
+
 struct FillReport {
     double filled_size = 0.0;     // total volume that executed against the book
     double avg_fill_price = 0.0;  // volume-weighted average execution price
 };
 
 
-// ---------------------------------------------------------
-// Order-lifecycle events
-//
-// Every OrderBook call returns the list of things that happened because of it,
-// in order. An order's status is always recoverable from its events:
-//
-//   Accepted ──> PartialFill* ──> Filled        (fully executed)
-//            └─> PartialFill* ──> Cancelled     (pulled with size left)
-//   Rejected                                    (never entered the book)
-//
-// Trade is the public print (one per match, what the tape shows); PartialFill /
-// Filled are the private per-order view of that same match -- one for the
-// taker and one for the resting maker, so a passive order learns it was hit.
-// ---------------------------------------------------------
 enum class BookEventType : uint8_t {
     Accepted,     // order passed validation and entered matching
     Trade,        // one match between a taker and a resting maker
     PartialFill,  // order_id executed `size`, and still has `remaining` open
     Filled,       // order_id executed `size`, and is now complete
+    Reduced,      // order_id gave up `size`, keeps its queue spot, `remaining` still open
     Cancelled,    // order_id left the book with `size` unexecuted
     Rejected      // request refused; the book is unchanged (see `reason`)
 };
@@ -65,7 +87,8 @@ struct BookEvent {
     uint64_t      timestamp_ns = 0;  // sim time of the call that caused it
     BookEventType type = BookEventType::Accepted;
     uint64_t      order_id = 0;      // the order this event is about (Trade: the taker)
-    uint64_t      contra_order_id = 0; // other side of a match (Trade: the maker); else 0
+    uint64_t      contra_order_id = 0; // other side of a match (Trade: the maker);
+                                     // on a replace's Cancelled: the new order id; else 0
     char          side = 0;          // side of order_id; 0 if unknown (rejected cancel)
     char          liquidity = 0;     // fills only: 'T' taker (aggressor), 'M' maker (resting)
     double        price = 0.0;       // execution price for Trade/fills; limit price otherwise
@@ -83,6 +106,7 @@ inline const char* to_string(BookEventType t) {
         case BookEventType::Trade:       return "Trade";
         case BookEventType::PartialFill: return "PartialFill";
         case BookEventType::Filled:      return "Filled";
+        case BookEventType::Reduced:     return "Reduced";
         case BookEventType::Cancelled:   return "Cancelled";
         case BookEventType::Rejected:    return "Rejected";
     }

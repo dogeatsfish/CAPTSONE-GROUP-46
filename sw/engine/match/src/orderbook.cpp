@@ -1,6 +1,7 @@
 #include "orderbook.h"
 #include <algorithm> // Required for std::min
 #include <cmath>     // std::isfinite
+#include <limits>
 
 namespace {
 
@@ -127,6 +128,64 @@ bool cancel_from(uint64_t order_id, Book& book, OrderBook::IdIndex& index, Order
     return true;
 }
 
+// Pointer to a resting order on this side, or nullptr.
+template <class Book>
+Order* find_resting(uint64_t order_id, Book& book, OrderBook::IdIndex& index) {
+    auto idx_it = index.find(order_id);
+    if (idx_it == index.end()) return nullptr;
+    auto level_it = book.find(idx_it->second);
+    if (level_it == book.end()) return nullptr;
+    for (Order& o : level_it->second) {
+        if (o.order_id == order_id) return &o;
+    }
+    return nullptr;
+}
+
+template <class Book>
+void collect_levels(const Book& book, size_t n_levels, std::vector<L2Level>& out) {
+    out.reserve(std::min(n_levels, book.size()));
+    for (auto it = book.begin(); it != book.end() && out.size() < n_levels; ++it) {
+        L2Level level;
+        level.price = it->first;
+        for (const Order& o : it->second) {
+            level.size += o.size;
+            ++level.order_count;
+        }
+        out.push_back(level);
+    }
+}
+
+template <class Book>
+std::optional<QueuePosition> position_in(uint64_t order_id, const Book& book,
+                                         const OrderBook::IdIndex& index) {
+    const auto idx_it = index.find(order_id);
+    if (idx_it == index.end()) return std::nullopt;
+    const auto level_it = book.find(idx_it->second);
+    if (level_it == book.end()) return std::nullopt;
+
+    QueuePosition pos;
+    for (const Order& o : level_it->second) { // front of the queue first
+        if (o.order_id == order_id) {
+            pos.side      = o.side;
+            pos.price     = o.price;
+            pos.remaining = o.size;
+            return pos;
+        }
+        pos.shares_ahead += o.size;
+        ++pos.orders_ahead;
+    }
+    return std::nullopt;
+}
+
+template <class Book>
+void copy_orders(const Book& book, std::vector<Order>& out) {
+    for (const auto& level : book) {          // best price first
+        for (const Order& o : level.second) { // oldest first
+            out.push_back(o);
+        }
+    }
+}
+
 RejectReason validate(const Order& order) {
     if (order.side != 'B' && order.side != 'S') return RejectReason::InvalidSide;
     if (!std::isfinite(order.size) || order.size <= 0.0) return RejectReason::InvalidSize;
@@ -155,26 +214,57 @@ BookEvents OrderBook::process_add(Order& aggressive_order, uint64_t timestamp_ns
         return events;
     }
 
-    BookEvent& accepted = emit(events, next_event_seq, timestamp_ns, BookEventType::Accepted,
-                               aggressive_order.order_id, aggressive_order.side);
-    accepted.price     = aggressive_order.price;
-    accepted.size      = aggressive_order.size;
-    accepted.remaining = aggressive_order.size;
+    add_validated(aggressive_order, timestamp_ns, events);
+    return events;
+}
 
-    if (aggressive_order.side == 'B') {
-        match_impl(aggressive_order, asks, ask_index, trade_log, events, next_event_seq,
-                   true, timestamp_ns);
-        if (aggressive_order.size > 0) {
-            rest_order(aggressive_order, bids, bid_index);
+BookEvents OrderBook::process_market(Order& order, uint64_t timestamp_ns) {
+    BookEvents events;
+
+    // A price that crosses every level: the highest possible for a buy, the
+    // lowest positive one for a sell.
+    order.price = (order.side == 'B') ? std::numeric_limits<double>::max()
+                                      : std::numeric_limits<double>::min();
+    const RejectReason reason = validate(order);
+    if (reason != RejectReason::None) {
+        BookEvent& e = emit(events, next_event_seq, timestamp_ns, BookEventType::Rejected,
+                            order.order_id, order.side);
+        e.size   = order.size;
+        e.reason = reason;
+        return events;
+    }
+
+    add_validated(order, timestamp_ns, events, false);
+    events.front().price = 0.0; // Accepted: a market order has no limit price
+    return events;
+}
+
+void OrderBook::add_validated(Order& order, uint64_t timestamp_ns, BookEvents& events,
+                              bool rest_remainder) {
+    BookEvent& accepted = emit(events, next_event_seq, timestamp_ns, BookEventType::Accepted,
+                               order.order_id, order.side);
+    accepted.price     = order.price;
+    accepted.size      = order.size;
+    accepted.remaining = order.size;
+
+    if (order.side == 'B') {
+        match_impl(order, asks, ask_index, trade_log, events, next_event_seq, true, timestamp_ns);
+        if (order.size > 0 && rest_remainder) {
+            rest_order(order, bids, bid_index);
         }
     } else {
-        match_impl(aggressive_order, bids, bid_index, trade_log, events, next_event_seq,
-                   false, timestamp_ns);
-        if (aggressive_order.size > 0) {
-            rest_order(aggressive_order, asks, ask_index);
+        match_impl(order, bids, bid_index, trade_log, events, next_event_seq, false, timestamp_ns);
+        if (order.size > 0 && rest_remainder) {
+            rest_order(order, asks, ask_index);
         }
     }
-    return events;
+
+    if (order.size > 0 && !rest_remainder) {
+        // Ran out of liquidity: the rest of the order is dropped, not rested.
+        BookEvent& e = emit(events, next_event_seq, timestamp_ns, BookEventType::Cancelled,
+                            order.order_id, order.side);
+        e.size = order.size;
+    }
 }
 
 BookEvents OrderBook::process_cancel(uint64_t order_id, uint64_t timestamp_ns, char side) {
@@ -206,9 +296,117 @@ BookEvents OrderBook::process_cancel(uint64_t order_id, uint64_t timestamp_ns, c
     return events;
 }
 
+BookEvents OrderBook::process_reduce(uint64_t order_id, double qty, uint64_t timestamp_ns,
+                                     char side) {
+    BookEvents events;
+
+    if (!std::isfinite(qty) || qty <= 0.0) {
+        BookEvent& e = emit(events, next_event_seq, timestamp_ns, BookEventType::Rejected,
+                            order_id, side);
+        e.size   = qty;
+        e.reason = RejectReason::InvalidSize;
+        return events;
+    }
+
+    Order* resting = nullptr;
+    if (side != 'S') resting = find_resting(order_id, bids, bid_index);
+    if (resting == nullptr && side != 'B') resting = find_resting(order_id, asks, ask_index);
+
+    if (resting == nullptr) {
+        BookEvent& e = emit(events, next_event_seq, timestamp_ns, BookEventType::Rejected,
+                            order_id, side);
+        e.size   = qty;
+        e.reason = RejectReason::UnknownOrderId;
+        return events;
+    }
+
+    // Nothing would be left: this is a full cancel.
+    if (qty >= resting->size) {
+        return process_cancel(order_id, timestamp_ns, resting->side);
+    }
+
+    // Shrink in place -- the order is not moved, so it keeps its queue position.
+    resting->size -= qty;
+    BookEvent& e = emit(events, next_event_seq, timestamp_ns, BookEventType::Reduced,
+                        order_id, resting->side);
+    e.price     = resting->price;
+    e.size      = qty;
+    e.remaining = resting->size;
+    return events;
+}
+
+BookEvents OrderBook::process_replace(uint64_t old_order_id, Order& new_order,
+                                      uint64_t timestamp_ns) {
+    BookEvents events;
+
+    const Order* old_order = find_resting(old_order_id, bids, bid_index);
+    if (old_order == nullptr) old_order = find_resting(old_order_id, asks, ask_index);
+
+    if (old_order == nullptr) {
+        BookEvent& e = emit(events, next_event_seq, timestamp_ns, BookEventType::Rejected,
+                            old_order_id, 0);
+        e.reason = RejectReason::UnknownOrderId;
+        return events;
+    }
+
+    // A replace cannot change side; validate the new order before touching
+    // the old one so a bad replace leaves the original resting.
+    new_order.side = old_order->side;
+    const RejectReason reason = validate(new_order);
+    if (reason != RejectReason::None) {
+        BookEvent& e = emit(events, next_event_seq, timestamp_ns, BookEventType::Rejected,
+                            new_order.order_id, new_order.side);
+        e.contra_order_id = old_order_id;
+        e.price  = new_order.price;
+        e.size   = new_order.size;
+        e.reason = reason;
+        return events;
+    }
+
+    events = process_cancel(old_order_id, timestamp_ns, new_order.side);
+    events.back().contra_order_id = new_order.order_id; // links old -> new
+
+    // Entered as a brand-new order: back of the queue, free to match.
+    add_validated(new_order, timestamp_ns, events);
+    return events;
+}
+
 L1State OrderBook::get_l1_state() const {
     L1State state;
     if (!bids.empty()) state.best_bid = bids.begin()->first; // highest bid
     if (!asks.empty()) state.best_ask = asks.begin()->first; // lowest ask
     return state;
+}
+
+L2State OrderBook::get_l2_state(size_t n_levels) const {
+    L2State state;
+    collect_levels(bids, n_levels, state.bids);
+    collect_levels(asks, n_levels, state.asks);
+    return state;
+}
+
+std::optional<QueuePosition> OrderBook::queue_position(uint64_t order_id) const {
+    std::optional<QueuePosition> pos = position_in(order_id, bids, bid_index);
+    if (!pos) pos = position_in(order_id, asks, ask_index);
+    return pos;
+}
+
+BookSnapshot OrderBook::snapshot(uint64_t timestamp_ns) const {
+    BookSnapshot snap;
+    snap.timestamp_ns   = timestamp_ns;
+    snap.next_event_seq = next_event_seq;
+    copy_orders(bids, snap.bids);
+    copy_orders(asks, snap.asks);
+    return snap;
+}
+
+void OrderBook::restore(const BookSnapshot& snapshot) {
+    bids.clear();
+    asks.clear();
+    bid_index.clear();
+    ask_index.clear();
+    // Re-resting in snapshot order rebuilds every queue in its original order.
+    for (const Order& o : snapshot.bids) rest_order(o, bids, bid_index);
+    for (const Order& o : snapshot.asks) rest_order(o, asks, ask_index);
+    next_event_seq = snapshot.next_event_seq;
 }
