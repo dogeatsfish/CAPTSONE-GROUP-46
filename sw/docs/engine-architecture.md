@@ -110,46 +110,60 @@ latency impossible to express.
 
 ## Timing: one order, end to end
 
-A bot with `in_ns = 1000`, `out_ns = 1000`, `compute_ns = 500` reacting to a
-trade that happens at **t = 0**:
+Follow a single order from the moment a bot decides to send it. The bot has
+`compute_ns = 500`, `out_ns = 1000`, `in_ns = 1000`.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Q as Priority queue
+    participant Bot as Bot
     participant S as Scheduler
+    participant Q as Priority queue
     participant B as OrderBook
     participant A as Account in Slot
-    participant Bot as Bot
 
-    Note over B: t=0 — a trade occurs
-    B->>S: BookEvents (Trade, fills)
-    S->>A: update immediately (t=0)
-    S->>Q: push DeliverEvent @ t=1000 (now + in_ns)
+    Note over Bot: t=0 — the bot decides to buy
+    Bot->>S: send_limit('B', 10.05, 100)
+    S->>Q: push BookAction @ t=1500<br/>(compute 500 + out_ns 1000)
+    Note over Q: the clock advances - other work may pop first
 
-    Note over Q,Bot: ...scheduler pops other work meanwhile...
+    Q->>B: t=1500 — the order reaches the book
+    B->>S: BookEvents (Accepted, Trade, fills)
+    S->>A: account updated immediately, at t=1500
+    S->>Q: push DeliverEvent @ t=2500<br/>(+ in_ns 1000)
 
-    Q->>Bot: t=1000 — on_trade(event)
-    Bot->>S: send_limit(...)
-    S->>Q: push BookAction @ t=2500<br/>(1000 + compute 500 + out 1000)
-
-    Q->>B: t=2500 — order reaches the book
-    B->>S: BookEvents (Accepted, PartialFill, ...)
-    S->>A: update immediately (t=2500)
-    S->>Q: push DeliverEvent @ t=3500 (+ in_ns)
-    Q->>Bot: t=3500 — on_fill(event)
+    Q->>Bot: t=2500 — on_fill(event)
+    Note over Bot: whatever it sends in response starts again at step 2
 ```
 
-Two things to take from that diagram:
+Three legs, and every one of them is the scheduler putting something on the
+queue for later:
 
-1. **The bot's order lands 2500 ns after the trade it reacted to.** A colocated
-   competitor with 5 µs legs and a retail bot with 25 ms legs run identical
-   code and get completely different fills. That's the whole point of the
-   latency model.
-2. **The account is updated at t = 2500, but `on_fill` arrives at t = 3500.**
-   `account()` is the *exchange's* live view, not a latency-delayed one. A bot
-   reading it between those two moments sees a position its callbacks haven't
-   told it about yet. This is a known simplification.
+| Leg | From → to | Cost |
+|---|---|---|
+| decision → the book sees it | `send_limit` → `BookAction` popped | `compute_ns + out_ns` = 1500 ns |
+| the book → the account | `publish()` | **zero** — immediate |
+| the book → the bot knows | `DeliverEvent` popped | `in_ns` = 1000 ns |
+
+### When the order is a reaction
+
+The common case is a bot sending an order *because* it saw something. That
+just adds one more inbound leg on the front: a trade at `t = 0` reaches the bot
+at `t = 1000` (`in_ns`), it decides there, and the diagram above runs from that
+point — so its order hits the book at `t = 2500`, not `t = 1500`, and it learns
+its own fill at `t = 3500`.
+
+Two things to take from this:
+
+1. **Round trip is `in_ns + compute_ns + out_ns`.** A colocated bot with 5 µs
+   legs and a retail bot with 25 ms legs run identical code and get completely
+   different fills. That is the whole point of the latency model, and it is why
+   `send_limit` returns immediately instead of blocking — "immediately" in the
+   bot's own timeline is still 1500 ns before anyone else can see the order.
+2. **The account is updated at t = 1500, but `on_fill` arrives at t = 2500.**
+   `account()` is the *exchange's* live view, not a latency-delayed one, so a
+   bot reading it between those two moments sees a position its own callbacks
+   have not told it about yet. A known simplification.
 
 ---
 
