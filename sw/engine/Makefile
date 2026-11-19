@@ -40,6 +40,7 @@ INCLUDES := -Ishared/include -Imatch/include -Isimulation/include -Inetwork/incl
 # Windows branch of the pymodule target below.
 OFFLINE_CORE_SRCS := simulation/src/offline_simulation.cpp \
                      simulation/src/scheduler.cpp \
+                     simulation/src/participant.cpp \
                      simulation/src/account.cpp \
                      network/src/protocol.cpp \
                      simulation/src/trading_context.cpp \
@@ -61,7 +62,8 @@ ALL_HDRS := $(wildcard shared/include/*.h match/include/*.h \
 # READS the rule, so a group defined further down expands to nothing and the
 # target silently stops depending on its own sources. (bench_scheduler had
 # exactly that bug -- it relinked only when its own .cpp changed.)
-SCHED_SRCS   := simulation/src/scheduler.cpp simulation/src/account.cpp match/src/orderbook.cpp
+SCHED_SRCS   := simulation/src/scheduler.cpp simulation/src/participant.cpp \
+                simulation/src/account.cpp match/src/orderbook.cpp
 TEST_TARGETS := test_orderbook test_account test_scheduler test_participant
 
 # ---------------------------------------------------------

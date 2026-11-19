@@ -104,6 +104,7 @@ _INCLUDES = [
 _SHARED_SRCS = [
     str(ENGINE_DIR / "simulation" / "src" / "offline_simulation.cpp"),
     str(ENGINE_DIR / "simulation" / "src" / "scheduler.cpp"),
+    str(ENGINE_DIR / "simulation" / "src" / "participant.cpp"),
     str(ENGINE_DIR / "simulation" / "src" / "account.cpp"),
     str(ENGINE_DIR / "network" / "src" / "protocol.cpp"),
     str(ENGINE_DIR / "simulation" / "src" / "trading_context.cpp"),
