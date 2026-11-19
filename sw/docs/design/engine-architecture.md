@@ -26,8 +26,8 @@ nothing happens in parallel.
 ```mermaid
 flowchart TB
     subgraph Participants["Participants (you write these)"]
-        P1["Bot A<br/><i>Participant subclass</i>"]
-        P2["Bot B"]
+        P1["Participant A<br/><i>your subclass</i>"]
+        P2["Participant B"]
         P3["StrategyParticipant<br/><i>wraps the user's Strategy</i>"]
     end
 
@@ -61,7 +61,7 @@ flowchart TB
 | Component | Owns | Key properties |
 |---|---|---|
 | **Scheduler** | the queue, the clock, the book, every Slot, the RNG | `now_ns_` only moves forward; `next_order_id_` starts at `1 << 40` so engine-assigned ids can never collide with a data file's; `book_depth_` (default 5) sets how many L2 levels get broadcast |
-| **Slot** | one participant's registration | `Participant*` (a pointer — the scheduler does **not** copy or own your bot), `LatencyProfile`, `Account`. Looked up by `ParticipantId` (a `uint32_t` alias) |
+| **Slot** | one participant's registration | `Participant*` (a pointer — the scheduler does **not** copy or own your participant), `LatencyProfile`, `Account`. Looked up by `ParticipantId` (a `uint32_t` alias) |
 | **LatencyProfile** | where a participant sits | `per_exchange : id → LatencyLeg{in_ns, out_ns}`, a `fallback` leg, and `compute_ns`. Presets: Retail / Direct / Colo / Microwave |
 | **Account** | the exchange's record of a participant | position, average entry, cash, realized + unrealized PnL, open orders, fill history, reject count. Updated by `on_event()` the instant a fill happens |
 | **OrderBook** | the live book | `std::map<price, deque<Order>>` per side (sorted, so `begin()` is the best price; the deque preserves time priority), plus an `unordered_map<order_id, price>` index per side for O(1) lookup by id |
@@ -110,20 +110,20 @@ latency impossible to express.
 
 ## Timing: one order, end to end
 
-Follow a single order from the moment a bot decides to send it. The bot has
+Follow a single order from the moment a participant decides to send it. It has
 `compute_ns = 500`, `out_ns = 1000`, `in_ns = 1000`.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Bot as Bot
+    participant P as Participant
     participant S as Scheduler
     participant Q as Priority queue
     participant B as OrderBook
     participant A as Account in Slot
 
-    Note over Bot: t=0 — the bot decides to buy
-    Bot->>S: send_limit('B', 10.05, 100)
+    Note over P: t=0 — it decides to buy
+    P->>S: send_limit('B', 10.05, 100)
     S->>Q: push BookAction @ t=1500<br/>(compute 500 + out_ns 1000)
     Note over Q: the clock advances - other work may pop first
 
@@ -132,8 +132,8 @@ sequenceDiagram
     S->>A: account updated immediately, at t=1500
     S->>Q: push DeliverEvent @ t=2500<br/>(+ in_ns 1000)
 
-    Q->>Bot: t=2500 — on_fill(event)
-    Note over Bot: whatever it sends in response starts again at step 2
+    Q->>P: t=2500 — on_fill(event)
+    Note over P: whatever it sends in response starts again at step 2
 ```
 
 Three legs, and every one of them is the scheduler putting something on the
@@ -143,26 +143,27 @@ queue for later:
 |---|---|---|
 | decision → the book sees it | `send_limit` → `BookAction` popped | `compute_ns + out_ns` = 1500 ns |
 | the book → the account | `publish()` | **zero** — immediate |
-| the book → the bot knows | `DeliverEvent` popped | `in_ns` = 1000 ns |
+| the book → it knows | `DeliverEvent` popped | `in_ns` = 1000 ns |
 
 ### When the order is a reaction
 
-The common case is a bot sending an order *because* it saw something. That
-just adds one more inbound leg on the front: a trade at `t = 0` reaches the bot
+The common case is a participant sending an order *because* it saw something.
+That just adds one more inbound leg on the front: a trade at `t = 0` reaches it
 at `t = 1000` (`in_ns`), it decides there, and the diagram above runs from that
 point — so its order hits the book at `t = 2500`, not `t = 1500`, and it learns
 its own fill at `t = 3500`.
 
 Two things to take from this:
 
-1. **Round trip is `in_ns + compute_ns + out_ns`.** A colocated bot with 5 µs
-   legs and a retail bot with 25 ms legs run identical code and get completely
-   different fills. That is the whole point of the latency model, and it is why
+1. **Round trip is `in_ns + compute_ns + out_ns`.** A colocated participant
+   with 5 µs legs and a retail one with 25 ms legs run identical code and get
+   completely different fills. That is the whole point of the latency model, and it is why
    `send_limit` returns immediately instead of blocking — "immediately" in the
-   bot's own timeline is still 1500 ns before anyone else can see the order.
+   participant's own timeline is still 1500 ns before anyone else can see it.
 2. **The account is updated at t = 1500, but `on_fill` arrives at t = 2500.**
    `account()` is the *exchange's* live view, not a latency-delayed one, so a
-   bot reading it between those two moments sees a position its own callbacks
+   participant reading it between those two moments sees a position its own
+   callbacks
    have not told it about yet. A known simplification.
 
 ---
@@ -193,7 +194,8 @@ flowchart LR
 | `Reduced` / `Cancelled` | the order's owner |
 | L2 book snapshot | everyone except the participant whose action caused it |
 
-If the resting side belonged to the recorded market feed rather than a bot,
+If the resting side belonged to the recorded market feed rather than a
+registered participant,
 there is no maker fill to deliver — only the Trade and the taker fill go out.
 
 ---
