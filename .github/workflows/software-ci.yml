@@ -129,11 +129,3 @@ jobs:
 
       - run: npm ci
       - run: npm run build
-
-  docker:
-    name: Docker image builds
-    # Keeps dev.ps1 (Docker-based backend for Windows) from breaking silently.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t commontrader-service sw

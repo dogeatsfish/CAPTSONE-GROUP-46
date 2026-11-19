@@ -4,17 +4,15 @@
 # down together on Ctrl-C. Works for every mode -- offline, loopback online,
 # and the real board.
 #
-# The backend runs natively rather than in Docker because Docker Desktop
-# puts containers on their own virtual network (a VM, on Windows/macOS): the
-# backend's UDP traffic to the board never reaches the host's physical NIC or
-# the static ARP entry `setup/net_setup.sh` adds for 192.168.0.1, and the
-# board's replies never reach the container. Native means the host's real
-# network stack.
+# The backend runs natively so it shares the host's real network stack --
+# that is what lets its UDP traffic reach the board through the static ARP
+# entry `setup/net_setup.sh` adds for 192.168.0.1, and lets the board's
+# replies come back.
 #
 # Platform: macOS, Linux, or WSL2 (on WSL2 also set networkingMode=mirrored
 # in .wslconfig, Windows 11 22H2+, so WSL shares the host's NIC instead of
-# NATing through its own adapter). Native Windows: use .\dev.ps1 (Docker,
-# offline/loopback only). For the board, run `setup/net_setup.sh` first.
+# NATing through its own adapter). Native Windows is not supported. For the
+# board, run `setup/net_setup.sh` first.
 #
 # Usage: ./dev.sh   (from sw/, or anywhere -- it cd's to its own directory)
 set -u
@@ -43,11 +41,10 @@ case "$(uname -s)" in
     Linux*|Darwin*) : ;;
     *)
         fail "This looks like native Windows ($(uname -s)), not macOS/Linux/WSL2. \
-The engine's Makefile can't build hardware/online support there \
-(engine/Makefile compiles with -DCT_NO_ONLINE_SIM on Windows_NT, no way \
-around it without a POSIX sockets layer) -- run this from WSL2 (with \
-\"mirrored\" networking mode) or a macOS/Linux box instead. For \
-offline/loopback-only work, ./dev.ps1 is fine on native Windows."
+The engine's Makefile only compiles hardware/online support off Windows_NT \
+(engine/Makefile builds the Python module with -DCT_NO_ONLINE_SIM there) -- \
+run this from WSL2 (with \"mirrored\" networking mode) or a macOS/Linux box \
+instead."
         ;;
 esac
 

@@ -12,9 +12,8 @@ engine_sim (C++, via pybind11)  ->  FastAPI service (:8000)  ->  React UI (:5173
 Ctrl-C) with a native backend, so it works for offline, loopback, and
 real-hardware runs (see
 [`docs/connection-test.md`](../../docs/connection-test.md#running-the-backend-against-real-hardware)
-for the board). On native Windows, `sw/dev.ps1` does the same via a
-Docker-based backend -- offline/loopback only. Read on if you want to
-understand what the scripts are doing for you.
+for the board). Native Windows isn't supported -- use WSL2. Read on if you
+want to understand what the script is doing for you.
 
 ## Prerequisites
 

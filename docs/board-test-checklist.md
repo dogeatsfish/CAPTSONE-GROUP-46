@@ -88,10 +88,10 @@ cd sw
 ./dev.sh
 ```
 
-Rebuilds `engine_sim` fresh, starts the FastAPI backend natively (not
-Docker — Docker's networking can't reach the board; see
-[`docs/connection-test.md`](connection-test.md#running-the-backend-against-real-hardware)),
-and starts the UI. Then in the browser:
+Rebuilds `engine_sim` fresh, starts the FastAPI backend natively — it has to
+share the host's network stack to reach the board; see
+[`docs/connection-test.md`](connection-test.md#running-the-backend-against-real-hardware)
+— and starts the UI. Then in the browser:
 
 1. **Mode** → `Online`
 2. **Target** → `Real Board`
