@@ -31,6 +31,8 @@ INCLUDES := -Ishared/include -Imatch/include -Isimulation/include -Inetwork/incl
 # don't exist on native Windows/MinGW without a Winsock2 port -- see the
 # Windows branch of the pymodule target below.
 OFFLINE_CORE_SRCS := simulation/src/offline_simulation.cpp \
+                     simulation/src/scheduler.cpp \
+                     simulation/src/account.cpp \
                      network/src/protocol.cpp \
                      simulation/src/trading_context.cpp \
                      simulation/templates/trading_template.cpp \

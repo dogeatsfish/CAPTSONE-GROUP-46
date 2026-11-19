@@ -103,6 +103,8 @@ _INCLUDES = [
 # if that list changes.
 _SHARED_SRCS = [
     str(ENGINE_DIR / "simulation" / "src" / "offline_simulation.cpp"),
+    str(ENGINE_DIR / "simulation" / "src" / "scheduler.cpp"),
+    str(ENGINE_DIR / "simulation" / "src" / "account.cpp"),
     str(ENGINE_DIR / "network" / "src" / "protocol.cpp"),
     str(ENGINE_DIR / "simulation" / "src" / "trading_context.cpp"),
     str(ENGINE_DIR / "match" / "src" / "orderbook.cpp"),

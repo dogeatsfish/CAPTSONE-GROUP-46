@@ -4,15 +4,23 @@
 #include <optional>
 #include <cstdint>
 
+// The player's strategy as written in the Strategy Compiler page: one function
+// body, on_market_update, that looks at the top of book and may return an
+// order. It is plugged into the simulation through StrategyParticipant (see
+// strategy_participant.h).
+//
+// PnL bookkeeping does NOT live here any more -- the participant's Account
+// owns it. position_size / avg_entry_price / realized_pnl below are read-only
+// copies refreshed from the Account before every on_market_update call, kept
+// so existing strategy bodies that read them still compile and behave.
 class Strategy {
 public:
     Strategy();
 
     std::optional<Order> on_market_update(const L1State& current_l1);
-    void on_fill(char side, double price, double size);
-    double get_position() const { return position_size; }
-    double get_realized_pnl() const { return realized_pnl; }
-    double get_unrealized_pnl(double mark_price) const;
+
+    // Refreshes the copies of the account state that strategy bodies read.
+    void sync_account(double position, double entry_price, double realized);
 
 private:
     uint64_t next_strategy_order_id;
