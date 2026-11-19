@@ -10,7 +10,7 @@ REPO_ROOT = SERVICE_ROOT.parent  # sw
 ENGINE_DIR = REPO_ROOT / "engine"
 COMPILER_DIR = (
     REPO_ROOT / "compiler"
-)  # strategy-compiler sources (main_job, strategy_base, template)
+)  # strategy-compiler sources (main_job, job template)
 DATA_DIR = REPO_ROOT / "data_pipeline" / "data"
 DEFAULT_DATA_FILE = DATA_DIR / "synthetic_mbo_stream.bin"
 REPO_TOP = REPO_ROOT.parent  # repo root (sibling of sw/, vivado/, rtl/)

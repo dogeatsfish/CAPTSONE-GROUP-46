@@ -7,8 +7,9 @@
 #                       (clock + event queue), the latency model, Accounts
 #   participants/     - the Participant port and its implementations;
 #                       agents/ is where the built-in bots go
-#   strategy/         - the player's strategy: src/ is fixed machinery,
-#                       templates/ is the editable on_market_update body
+#   strategy/         - the player's strategy, split in two: src/ is the
+#                       fixed half they cannot change, templates/ is the
+#                       editable on_market_update body
 #   runner/           - ways to run a simulation: OfflineSimulation (replay a
 #                       file) and OnlineSimulation (real time over sockets)
 #   network/          - ITCH/OUCH wire protocol + the cross-platform socket layer
@@ -56,7 +57,7 @@ OFFLINE_CORE_SRCS := runner/src/offline_simulation.cpp \
                      participants/src/participant.cpp \
                      simcore/src/account.cpp \
                      network/src/protocol.cpp \
-                     strategy/src/trading_context.cpp \
+                     strategy/src/strategy_fixed.cpp \
                      strategy/templates/trading_template.cpp \
                      exchange/src/orderbook.cpp
 RUNNER_ONLINE_SRCS := runner/src/online_simulation.cpp

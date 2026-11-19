@@ -107,7 +107,7 @@ _SHARED_SRCS = [
     str(ENGINE_DIR / "participants" / "src" / "participant.cpp"),
     str(ENGINE_DIR / "simcore" / "src" / "account.cpp"),
     str(ENGINE_DIR / "network" / "src" / "protocol.cpp"),
-    str(ENGINE_DIR / "strategy" / "src" / "trading_context.cpp"),
+    str(ENGINE_DIR / "strategy" / "src" / "strategy_fixed.cpp"),
     str(ENGINE_DIR / "exchange" / "src" / "orderbook.cpp"),
 ]
 
