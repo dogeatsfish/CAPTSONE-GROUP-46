@@ -45,11 +45,16 @@ browser-level symptom is almost never a browser-level bug.
 ```
 sw/
   engine/       the C++ engine
-    app/        CLI entry points (online_run, link_flash)
-    match/      the order book
-    simulation/ scheduler, participants, accounts, the two simulations
-    bindings/   the pybind11 wrapper -> engine_sim*.so
-    tests/src/  C++ unit tests
+    shared/       types everyone shares (common.h, feed.h, telemetry.h)
+    exchange/     the order book: matching, depth, queue position
+    simcore/      what makes it simulated: scheduler, latency, accounts
+    participants/ the Participant interface; agents/ holds the bots
+    strategy/     the player's strategy (src/ fixed, templates/ editable)
+    runner/       OfflineSimulation and OnlineSimulation
+    network/      ITCH/OUCH wire protocol and the socket layer
+    bindings/     the pybind11 wrapper -> engine_sim*.so
+    tools/        CLI programs: online_run, link_flash, bench_scheduler
+    tests/src/    C++ unit tests
   service/      the FastAPI backend
     src/        app.py, routes, managers
     include/    request/response models, metrics

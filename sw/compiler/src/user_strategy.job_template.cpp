@@ -7,7 +7,7 @@
 // would splice user code into the top of the file instead of the function.
 //
 // The fixed Strategy machinery (constructor, sync_account) lives in
-// sw/engine/simulation/src/trading_context.cpp and is linked in unchanged.
+// sw/engine/strategy/src/trading_context.cpp and is linked in unchanged.
 // This template only needs to provide on_market_update. The body runs inside
 // the simulation through the StrategyParticipant adapter
 // (strategy_participant.h); position_size, avg_entry_price and realized_pnl

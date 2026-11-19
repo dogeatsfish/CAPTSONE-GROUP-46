@@ -30,6 +30,7 @@
 #   make flash      -> send ITCH packets at the board and watch its LED
 #                      (visual check, not automated -- see the file header)
 #   make bench      -> measure the engine's own fan-out cost (wall clock)
+#   make headers    -> check every header compiles on its own
 #   make rebuild    -> clean, then build from scratch
 #   make clean      -> remove all build artifacts
 
@@ -139,7 +140,7 @@ PY_LINK_LIBS :=
 endif
 endif
 
-.PHONY: all online rebuild run pymodule test test-python flash bench clean
+.PHONY: all online rebuild run pymodule test test-python headers flash bench clean
 
 all: $(ONLINE_TARGET)
 
@@ -190,6 +191,21 @@ flash: $(FLASH_TARGET)
 $(FLASH_TARGET): tools/link_flash.cpp network/src/protocol.cpp $(ALL_HDRS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) tools/link_flash.cpp network/src/protocol.cpp \
 		-o $@ -lpthread $(NET_LIBS)
+
+# ---------------------------------------------------------
+# Header hygiene
+# ---------------------------------------------------------
+# Every header must compile on its own. Without this it is easy for a header
+# to quietly rely on a sibling's includes -- which is how protocol.h ended up
+# including offline_simulation.h, dragging the scheduler and the whole
+# participant layer into every file that only wanted to talk ITCH.
+headers:
+	@for h in $(ALL_HDRS); do \
+	    $(CXX) $(CXXFLAGS) $(INCLUDES) -fsyntax-only -x c++ $$h \
+	        -Wno-pragma-once-outside-header -Wno-unused-const-variable \
+	        || exit 1; \
+	done
+	@echo "all $(words $(ALL_HDRS)) headers compile standalone"
 
 # ---------------------------------------------------------
 # Benchmark (wall clock -- deliberately not in CI)

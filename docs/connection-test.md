@@ -23,7 +23,7 @@ understands one thing: raw Ethernet → IPv4/UDP → MoldUDP64 → ITCH market d
   so the packet is never sent. You must add a *static ARP entry* to break this
   deadlock.
 - **The board only speaks UDP.** The software order-entry server must be in UDP
-  mode (the default; see `sw/engine/simulation/include/online_simulation.h`).
+  mode (the default; see `sw/engine/runner/include/online_simulation.h`).
 
 ## Addressing
 

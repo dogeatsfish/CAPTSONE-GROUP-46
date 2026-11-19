@@ -87,7 +87,7 @@ and covered by its unit bench, but **are not reachable from the software feed**.
 
 ## 3. Numeric scaling — **OPEN**
 
-Software uses `double` for price and size (`sw/shared/include/common.h`).
+Software uses `double` for price and size (`sw/engine/shared/include/common.h`).
 Hardware uses `logic [31:0]`, unsigned, for both.
 
 OUCH 5.0 specifies **4 implied decimal places** for its price field, and
@@ -138,7 +138,7 @@ complementary, not redundant.
 
 They are not intended to match and should not be compared directly:
 
-- `sw/match/src/orderbook.cpp` is a **matching engine**. It crosses trades when
+- `sw/engine/exchange/src/orderbook.cpp` is a **matching engine**. It crosses trades when
   prices cross and maintains a trade log.
 - `rtl/order_book/order_book_array.sv` is a **market-data book**. It aggregates
   price levels and never matches anything.
@@ -150,7 +150,7 @@ price and quantity), which both maintain. That is what the replay test compares.
 
 ## 6. The two strategies are different algorithms — informational
 
-- `sw/simulation/src/user_strategy.cpp` — fair-value arbitrage. Crosses the
+- `sw/engine/strategy/templates/trading_template.cpp` — fair-value arbitrage. Crosses the
   spread when `best_ask < fair_value - 0.50` or `best_bid > fair_value + 0.50`.
 - `rtl/alpha_engine/alpha_engine_core.sv` — EMA mean reversion on the mid price,
   with a configurable threshold.

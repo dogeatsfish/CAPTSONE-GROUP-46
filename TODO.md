@@ -17,7 +17,7 @@ duplicating; see below for the summary and what to actually do about it.
 **Read `docs/hw_sw_transport_gaps.md` and `docs/hw_sw_interface.md` in full —
 this section is a pointer, not a substitute.** Written explicitly for
 "software lead." Bottom line: the FPGA and the online simulation
-(`sw/engine/simulation/src/online_simulation.cpp` etc.) have never actually
+(`sw/engine/runner/src/online_simulation.cpp` etc.) have never actually
 been connected, and the two sides were built against assumptions that were
 never reconciled. Of 11 identified transport gaps, most are flagged as
 blockers:

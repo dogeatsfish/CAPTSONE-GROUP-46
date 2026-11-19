@@ -53,5 +53,5 @@ Outside `sw/`, mostly hardware-side:
 | Check the board is receiving | `make -C sw/engine flash` (watch the LED) |
 | Stream at the real board | `make -C sw/engine run SCALE=1.0 ITCH_ADDR=192.168.0.1` |
 | Wire protocols | `sw/engine/network/include/protocol.h` (ITCH in, OUCH out) |
-| Networking config | `OnlineConfig` in `sw/engine/simulation/include/online_config.h` |
+| Networking config | `OnlineConfig` in `sw/engine/runner/include/online_config.h` |
 | API | `http://127.0.0.1:8000` · UI `http://localhost:5173` |

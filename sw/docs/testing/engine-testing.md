@@ -95,7 +95,7 @@ Test binaries are gitignored (`sw/engine/test_*`) and removed by `make clean`.
 
 ## Running the engine by hand
 
-`online_run` (built from `app/online_run.cpp`) replays a market-data book over
+`online_run` (built from `tools/online_run.cpp`) replays a market-data book over
 real ITCH/OUCH sockets. It takes positional arguments only:
 
 ```bash
@@ -103,7 +103,7 @@ real ITCH/OUCH sockets. It takes positional arguments only:
 ```
 
 Anything you leave off keeps its `OnlineConfig` default
-(`simulation/include/online_config.h`). Through the Makefile:
+(`runner/include/online_config.h`). Through the Makefile:
 
 ```bash
 make run                                      # loopback, 1000x speed
@@ -131,7 +131,7 @@ make run SCALE=1.0 ITCH_ADDR=192.168.0.1      # real time, at the board
 `data_pipeline/src/gen_market_ladder.py` and `gen_test_datasets.py` regenerate
 the last three if you need variants. Record format is `struct "<QcQcdd"` —
 timestamp, message type, order id, side, price, size — 34 bytes, asserted at
-compile time in `offline_simulation.h`.
+compile time in `shared/include/feed.h`.
 
 ## Measuring the engine's own speed
 

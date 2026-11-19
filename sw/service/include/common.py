@@ -30,7 +30,7 @@ class Trade(BaseModel):
     price: float
     size: float
     # Real wall-clock decision-to-fill latency in nanoseconds. 0 = not
-    # measured -- see TradeRecord::decision_latency_ns in offline_simulation.h;
+    # measured -- see TradeRecord::decision_latency_ns in telemetry.h;
     # today only online-loopback local-strategy trades populate this.
     decision_latency_ns: int = 0
 
