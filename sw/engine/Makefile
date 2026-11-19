@@ -150,10 +150,15 @@ $(PY_TARGET): $(PY_SRCS) $(ALL_HDRS)
 # Streams ITCH packets at the board so its receive LED flashes. There is
 # nothing to assert: the board never acknowledges anything, so you confirm it
 # by looking at the board. See app/link_flash.cpp.
+# FLASH_RATE is packets per second; FLASH_COUNT 0 means continuous (Ctrl-C).
+# These comments sit above the assignments, not after them: make keeps the
+# whitespace between a value and a trailing '#', so `X ?= 5   # note` sets X to
+# "5   ", which survives shell word-splitting here but breaks the moment the
+# value is quoted or compared.
 FLASH_TARGET := link_flash
 FLASH_ADDR  ?= 192.168.0.1
-FLASH_RATE  ?= 5      # packets per second
-FLASH_COUNT ?= 0      # 0 = continuous, Ctrl-C to stop
+FLASH_RATE  ?= 5
+FLASH_COUNT ?= 0
 FLASH_PORT  ?= 50001
 
 flash: $(FLASH_TARGET)
