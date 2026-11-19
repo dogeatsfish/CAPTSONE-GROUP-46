@@ -8,6 +8,7 @@
 #   simulation/templates/- trading_template (editable on_market_update strategy body)
 #   app/online_run.cpp   - online (real-time) CLI entry point
 #   app/link_flash.cpp   - UDP link check: flashes the board's LED
+#   app/bench_scheduler.cpp - wall-clock fan-out benchmark
 #   tests/src/           - unit tests (test_*.cpp)
 #   bindings/            - pybind11 wrapper exposing the simulation to Python
 #   ../compiler/         - strategy-compiler entry point (main_job, job template)
@@ -22,6 +23,7 @@
 #                      (../service/tests/test_bindings.py)
 #   make flash      -> send ITCH packets at the board and watch its LED
 #                      (visual check, not automated -- see the file header)
+#   make bench      -> measure the engine's own fan-out cost (wall clock)
 #   make rebuild    -> clean, then build from scratch
 #   make clean      -> remove all build artifacts
 
@@ -116,7 +118,7 @@ PY_LINK_LIBS :=
 endif
 endif
 
-.PHONY: all online rebuild run pymodule test test-python flash clean
+.PHONY: all online rebuild run pymodule test test-python flash bench clean
 
 all: $(ONLINE_TARGET)
 
@@ -169,6 +171,20 @@ $(FLASH_TARGET): app/link_flash.cpp network/src/protocol.cpp $(ALL_HDRS)
 		-o $@ -lpthread $(NET_LIBS)
 
 # ---------------------------------------------------------
+# Benchmark (wall clock -- deliberately not in CI)
+# ---------------------------------------------------------
+# Measures how long the engine itself takes to fan a trade out to N
+# participants. Timing on a shared CI runner is noise, so this is run by hand.
+BENCH_TARGET := bench_scheduler
+BENCH_TRIALS ?= 5000
+
+bench: $(BENCH_TARGET)
+	./$(BENCH_TARGET) $(BENCH_TRIALS)
+
+$(BENCH_TARGET): app/bench_scheduler.cpp $(SCHED_SRCS) $(ALL_HDRS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) app/bench_scheduler.cpp $(SCHED_SRCS) -o $@
+
+# ---------------------------------------------------------
 # Unit tests
 # ---------------------------------------------------------
 TEST_TARGETS := test_orderbook test_account test_scheduler test_participant
@@ -197,4 +213,4 @@ test_participant: tests/src/test_participant.cpp $(SCHED_SRCS) $(ALL_HDRS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_participant.cpp $(SCHED_SRCS) -o $@
 
 clean:
-	rm -f $(ONLINE_TARGET) $(FLASH_TARGET) $(TEST_TARGETS) $(PY_MODULE)*.so
+	rm -f $(ONLINE_TARGET) $(FLASH_TARGET) $(BENCH_TARGET) $(TEST_TARGETS) $(PY_MODULE)*.so

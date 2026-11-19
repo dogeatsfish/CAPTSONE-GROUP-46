@@ -263,3 +263,10 @@ These are deliberate, not bugs — but they shape what conclusions a run support
   book from its own fills.
 - **Snapshots hold the book only** — not accounts, not order ownership — so
   `restore()` is a book-level seek, not a full run rewind.
+- **Simulated latency is free; the engine's own overhead is not.** Fanning a
+  trade out costs roughly 1.5 µs fixed plus ~170 ns per participant in real
+  time, so at 64 participants the engine needs ~10 µs to notify everyone
+  regardless of what their `LatencyProfile` claims. Harmless for a simulation,
+  since simulated time is independent of wall-clock time, but it caps a
+  real-time-paced run. `make bench` measures it — see
+  [engine-testing.md](../testing/engine-testing.md#measuring-the-engines-own-speed).

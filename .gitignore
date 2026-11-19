@@ -56,6 +56,7 @@ sw/engine/engine_sim*.so
 sw/engine/simulation_run
 sw/engine/online_run
 sw/engine/link_flash
+sw/engine/bench_scheduler
 sw/engine/test_*
 sw/engine/fpga_test
 sw/engine/tests/src/socket_test

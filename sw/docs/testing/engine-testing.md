@@ -41,6 +41,7 @@ resolves to on `PATH`.
 | `test-python` | builds the module, then runs `../service/tests/test_bindings.py` |
 | `run` | builds + runs `online_run` on `FILE` at pacing `SCALE`, broadcasting to `ITCH_ADDR` |
 | `flash` | sends ITCH packets at the board so its LED flashes — a visual link check |
+| `bench` | measures the engine's own fan-out cost in wall-clock time |
 | `rebuild` | clean, then build from scratch |
 | `clean` | removes all build artifacts |
 
@@ -131,6 +132,51 @@ make run SCALE=1.0 ITCH_ADDR=192.168.0.1      # real time, at the board
 the last three if you need variants. Record format is `struct "<QcQcdd"` —
 timestamp, message type, order id, side, price, size — 34 bytes, asserted at
 compile time in `offline_simulation.h`.
+
+## Measuring the engine's own speed
+
+`make bench` answers a different question from the latency model. `in_ns` and
+`out_ns` are bookkeeping — adding a number to a timestamp costs nothing. What
+would bound a real system is the engine's **wall-clock** overhead: heap
+push/pop, building the L2 snapshot, dispatching callbacks, updating accounts.
+
+```bash
+make bench                      # 1, 2, 4 ... 256 participants
+make bench BENCH_TRIALS=20000   # more samples per point
+```
+
+It times, per trade, from the moment the order hits the book to the moment the
+last participant's callback returns, and reports percentiles rather than a mean
+because the tail is what bites.
+
+Representative output (Apple Silicon, `-O2`, 3000 trades per point):
+
+| participants | steps | p50 | p99 | per recipient |
+|---|---|---|---|---|
+| 1 | 3 | 1.75 µs | 3.5 µs | — |
+| 16 | 33 | 3.3 µs | 4.6 µs | 206 ns |
+| 64 | 129 | 10.2 µs | 11.7 µs | 159 ns |
+| 256 | 513 | 47.5 µs | 54.8 µs | 186 ns |
+
+Two things fall out of that:
+
+- **There is a fixed cost of roughly 1.5 µs per trade** regardless of audience
+  — the match itself, plus one `get_l2_state` and the `shared_ptr` snapshot
+  that every book update shares.
+- **Each additional listener costs about 160–190 ns**, which is one heap push,
+  one pop, a `BookEvent` copy and a virtual call.
+
+So if every participant were on a genuinely sub-microsecond link, **the engine
+would be the bottleneck, not the network**: at 64 participants nobody can hear
+about a trade in under ~10 µs of real time, whatever their `LatencyProfile`
+says. That gap doesn't affect correctness — simulated time is independent of
+wall-clock time, and results stay deterministic — but it caps how fast a live
+or real-time-paced run could go.
+
+`steps` is `2N + 1`: one `BookAction`, then a `Trade` and a book update for
+each participant. If that number ever changes, the routing changed.
+
+Not in CI — wall-clock timing on a shared runner is noise.
 
 ## Checking a change didn't move the numbers
 
