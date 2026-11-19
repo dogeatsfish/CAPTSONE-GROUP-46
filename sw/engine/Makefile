@@ -1,11 +1,17 @@
 # Makefile for the trading engine
 # Modules:
-#   shared/           - common structs (Order, Trade, L1State, FillReport, OnlineConfig)
+#   shared/           - types everyone shares: common.h (Order, events, L2),
+#                       feed.h (MBORecord), telemetry.h (run results)
 #   exchange/         - OrderBook: matching, depth, queue position
-#   network/          - ITCH/OUCH wire protocol (protocol.h/.cpp)
-#   simulation/include/  - simulation headers (offline/online sim, online_config, user_strategy)
-#   simulation/src/      - OfflineSimulation / OnlineSimulation + trading_context (fixed Strategy machinery)
-#   simulation/templates/- trading_template (editable on_market_update strategy body)
+#   simcore/          - what makes it a SIMULATED exchange: the Scheduler
+#                       (clock + event queue), the latency model, Accounts
+#   participants/     - the Participant port and its implementations;
+#                       agents/ is where the built-in bots go
+#   strategy/         - the player's strategy: src/ is fixed machinery,
+#                       templates/ is the editable on_market_update body
+#   runner/           - ways to run a simulation: OfflineSimulation (replay a
+#                       file) and OnlineSimulation (real time over sockets)
+#   network/          - ITCH/OUCH wire protocol + the cross-platform socket layer
 #   tools/online_run.cpp   - online (real-time) CLI entry point
 #   tools/link_flash.cpp   - UDP link check: flashes the board's LED
 #   tools/bench_scheduler.cpp - wall-clock fan-out benchmark
@@ -30,23 +36,29 @@
 CXX      := g++
 CXXFLAGS := -std=c++17 -O2 -Wall -Wextra
 
-# Per-module include directories (headers are referenced by bare name)
-INCLUDES := -Ishared/include -Iexchange/include -Isimulation/include -Inetwork/include
+# Every module that publishes headers. One list, because INCLUDES and ALL_HDRS
+# must never disagree: a module missing from INCLUDES fails loudly ("no such
+# file"), but a module missing from ALL_HDRS fails SILENTLY -- make goes on
+# thinking a binary is current after you edit one of its headers.
+MODULES := shared exchange simcore participants strategy runner network
+
+# Headers are referenced by bare name; these -I flags are what resolves them.
+INCLUDES := $(addprefix -I,$(addsuffix /include,$(MODULES)))
 
 # Core engine sources shared by both the CLI and the Python module.
 # OFFLINE_CORE_SRCS has no socket usage and is portable as-is;
 # RUNNER_ONLINE_SRCS (real-time ITCH/OUCH replay) uses POSIX sockets that
 # don't exist on native Windows/MinGW without a Winsock2 port -- see the
 # Windows branch of the pymodule target below.
-OFFLINE_CORE_SRCS := simulation/src/offline_simulation.cpp \
-                     simulation/src/scheduler.cpp \
-                     simulation/src/participant.cpp \
-                     simulation/src/account.cpp \
+OFFLINE_CORE_SRCS := runner/src/offline_simulation.cpp \
+                     simcore/src/scheduler.cpp \
+                     participants/src/participant.cpp \
+                     simcore/src/account.cpp \
                      network/src/protocol.cpp \
-                     simulation/src/trading_context.cpp \
-                     simulation/templates/trading_template.cpp \
+                     strategy/src/trading_context.cpp \
+                     strategy/templates/trading_template.cpp \
                      exchange/src/orderbook.cpp
-RUNNER_ONLINE_SRCS := simulation/src/online_simulation.cpp
+RUNNER_ONLINE_SRCS := runner/src/online_simulation.cpp
 CORE_SRCS := $(OFFLINE_CORE_SRCS) $(RUNNER_ONLINE_SRCS)
 
 # Every engine header. Each build target lists these as prerequisites because
@@ -54,16 +66,15 @@ CORE_SRCS := $(OFFLINE_CORE_SRCS) $(RUNNER_ONLINE_SRCS)
 # leaves `make` thinking the binary is up to date and you keep running the old
 # one. A wildcard (not a hand-written list) so a new header is covered the day
 # it's added.
-ALL_HDRS := $(wildcard shared/include/*.h exchange/include/*.h \
-                       simulation/include/*.h network/include/*.h)
+ALL_HDRS := $(wildcard $(addsuffix /include/*.h,$(MODULES)))
 
 # Everything a target that drives the scheduler has to link. Defined up here,
 # above every rule that names it: a prerequisite list is expanded when make
 # READS the rule, so a group defined further down expands to nothing and the
 # target silently stops depending on its own sources. (bench_scheduler had
 # exactly that bug -- it relinked only when its own .cpp changed.)
-SCHED_SRCS   := simulation/src/scheduler.cpp simulation/src/participant.cpp \
-                simulation/src/account.cpp exchange/src/orderbook.cpp
+SCHED_SRCS   := simcore/src/scheduler.cpp participants/src/participant.cpp \
+                simcore/src/account.cpp exchange/src/orderbook.cpp
 TEST_TARGETS := test_orderbook test_account test_scheduler test_participant
 
 # ---------------------------------------------------------
@@ -209,8 +220,8 @@ test-python: pymodule
 test_orderbook: tests/src/test_orderbook.cpp exchange/src/orderbook.cpp $(ALL_HDRS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_orderbook.cpp exchange/src/orderbook.cpp -o $@
 
-test_account: tests/src/test_account.cpp simulation/src/account.cpp $(ALL_HDRS)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_account.cpp simulation/src/account.cpp -o $@
+test_account: tests/src/test_account.cpp simcore/src/account.cpp $(ALL_HDRS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_account.cpp simcore/src/account.cpp -o $@
 
 test_scheduler: tests/src/test_scheduler.cpp $(SCHED_SRCS) $(ALL_HDRS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_scheduler.cpp $(SCHED_SRCS) -o $@

@@ -91,23 +91,23 @@ if _marker_count != 1:
 # every other platform we target (Linux container, macOS) does not.
 _EXE_SUFFIX = ".exe" if sys.platform == "win32" else ""
 
+# Mirrors engine/Makefile's MODULES list; keep the two in sync.
 _INCLUDES = [
-    f"-I{ENGINE_DIR / 'shared' / 'include'}",
-    f"-I{ENGINE_DIR / 'exchange' / 'include'}",
-    f"-I{ENGINE_DIR / 'simulation' / 'include'}",
-    f"-I{ENGINE_DIR / 'network' / 'include'}",
+    f"-I{ENGINE_DIR / module / 'include'}"
+    for module in ("shared", "exchange", "simcore", "participants",
+                   "strategy", "runner", "network")
 ]
 # Fixed, non-user-controlled sources compiled straight from the tracked repo
 # tree -- only user_strategy.cpp (written per-job below) is derived from
-# submitted input. Mirrors engine/Makefile's OFFLINE_CORE_SRCS; keep in sync
-# if that list changes.
+# submitted input. Mirrors engine/Makefile's OFFLINE_CORE_SRCS minus the
+# strategy body (we supply our own); keep in sync if that list changes.
 _SHARED_SRCS = [
-    str(ENGINE_DIR / "simulation" / "src" / "offline_simulation.cpp"),
-    str(ENGINE_DIR / "simulation" / "src" / "scheduler.cpp"),
-    str(ENGINE_DIR / "simulation" / "src" / "participant.cpp"),
-    str(ENGINE_DIR / "simulation" / "src" / "account.cpp"),
+    str(ENGINE_DIR / "runner" / "src" / "offline_simulation.cpp"),
+    str(ENGINE_DIR / "simcore" / "src" / "scheduler.cpp"),
+    str(ENGINE_DIR / "participants" / "src" / "participant.cpp"),
+    str(ENGINE_DIR / "simcore" / "src" / "account.cpp"),
     str(ENGINE_DIR / "network" / "src" / "protocol.cpp"),
-    str(ENGINE_DIR / "simulation" / "src" / "trading_context.cpp"),
+    str(ENGINE_DIR / "strategy" / "src" / "trading_context.cpp"),
     str(ENGINE_DIR / "exchange" / "src" / "orderbook.cpp"),
 ]
 
