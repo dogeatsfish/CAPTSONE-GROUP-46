@@ -3,7 +3,7 @@
 End-to-end testing of the whole stack: FPGA, engine, backend service, and
 browser UI. This page is about testing the pieces **together**. For the engine
 on its own see [engine-testing.md](engine-testing.md); for how the engine is
-built internally see [engine-architecture.md](engine-architecture.md).
+built internally see [engine-architecture.md](../design/engine-architecture.md).
 
 ---
 
@@ -36,7 +36,7 @@ browser-level symptom is almost never a browser-level bug.
 | Engine | `make test` (C++), `make test-python` (`sw/service/tests/`) | [engine-testing.md](engine-testing.md) |
 | Backend | `curl` against `:8000` | below |
 | Frontend | the browser, against a known-good backend | below |
-| Hardware | `make flash` (LED check), then `make run SCALE=1.0 ITCH_ADDR=192.168.0.1` + `tcpdump` | below + [`connection-test.md`](../../docs/connection-test.md) |
+| Hardware | `make flash` (LED check), then `make run SCALE=1.0 ITCH_ADDR=192.168.0.1` + `tcpdump` | below + [`connection-test.md`](../../../docs/connection-test.md) |
 
 ---
 
@@ -150,7 +150,7 @@ Everything above still applies; the board replaces the local strategy as the
 source of orders.
 
 **Before anything else**, work through the cold-start sequence in
-[`docs/board-test-checklist.md`](../../docs/board-test-checklist.md): build and
+[`docs/board-test-checklist.md`](../../../docs/board-test-checklist.md): build and
 program the bitstream, run `setup/net_setup.sh`, and confirm the physical link.
 Do not skip the flood-ping step — if the board's activity LED doesn't blink,
 the problem is cabling, PHY or host TX, and no amount of software debugging
@@ -185,7 +185,7 @@ in CI.
 | What you see | What it means |
 |---|---|
 | LED flashes in time with the printed lines | frames are reaching the board; anything still broken is inside the FPGA |
-| lines print, LED does nothing | the host isn't transmitting, or that LED is FPGA-driven and the parser is rejecting the frames. Re-check step 1 of [`connection-test.md`](../../docs/connection-test.md): an `inet` address on the board's subnet **and** the static ARP entry |
+| lines print, LED does nothing | the host isn't transmitting, or that LED is FPGA-driven and the parser is rejecting the frames. Re-check step 1 of [`connection-test.md`](../../../docs/connection-test.md): an `inet` address on the board's subnet **and** the static ARP entry |
 | `packet N FAILED to send` | the host couldn't put it on the wire at all — almost always the missing ARP entry or no route |
 
 Sanity-check the tool itself against loopback first if you like:
@@ -233,7 +233,7 @@ Work inward from the symptom.
 | UI shows "Simulation failed: …" | backend or engine | read the API terminal — the real traceback is there |
 | `Address already in use` on 8000 or 5173 | host | stop the other process, or move the port and update `API_TARGET` in `vite.config.js` |
 | Offline run works, loopback online shows no trades | service config | check `enable_local_strategy` is being set for loopback targets |
-| Hardware run completes with **zero trades** | board or link | board isn't sending OUCH. Go back to `tcpdump` + the activity LED; see [`connection-test.md`](../../docs/connection-test.md) |
+| Hardware run completes with **zero trades** | board or link | board isn't sending OUCH. Go back to `tcpdump` + the activity LED; see [`connection-test.md`](../../../docs/connection-test.md) |
 | `tcpdump` shows nothing from the board, LED blinks | FPGA internals | bitstream loaded? Put an ILA on the RGMII RX or `rx_mac_core`'s outputs; persistent `rx_error` points at the RGMII RX clock-delay issue |
 | `/compile` (Alpha Engine) fails | Vivado | not installed or not on `PATH` — expected outside a Vivado machine |
 

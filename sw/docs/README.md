@@ -4,19 +4,34 @@ Documentation for the software side of CommonTrader: the C++ trading engine,
 the FastAPI service, the React UI, and the data pipeline — everything under
 `sw/`.
 
-## Guides
+Split two ways: **design** explains how things are built and why; **testing**
+tells you what to run and how to read the result.
 
-- **[System testing](system-testing.md)** — testing the whole stack together:
-  FPGA, engine, backend and UI. How to bring the stack up, verify each layer,
-  run against the real board, and narrow a failure to the layer that caused it.
-- **[Engine testing](engine-testing.md)** — building the engine, every Makefile
-  target, what each unit test covers, the replay scenarios, and the offline
-  baseline to check regressions against.
-- **[Engine architecture](engine-architecture.md)** — how the engine works
-  inside: participants, the scheduler's priority queue, the latency model,
-  accounts, and the order book. Diagrams included.
+## Design
+
+How the software works internally. Read these to change the engine, or to
+understand a behaviour you didn't expect.
+
+- **[Engine architecture](design/engine-architecture.md)** — participants, the
+  scheduler's priority queue, the latency model, accounts, and the order book.
+  How one order moves through the system, where events get routed, what makes
+  a run reproducible, and the known simplifications. Diagrams included.
+
+## Testing
+
+What to run, in what order, and how to tell a pass from a failure.
+
+- **[System testing](testing/system-testing.md)** — the whole stack together:
+  FPGA, engine, backend and UI. Bringing the stack up, verifying each layer on
+  its own, running against the real board, and narrowing a failure to the layer
+  that caused it.
+- **[Engine testing](testing/engine-testing.md)** — building the engine, every
+  Makefile target, what each unit test covers, running the engine by hand, and
+  the offline baseline to check regressions against.
 
 ## Related documents
+
+Outside `sw/`, mostly hardware-side:
 
 - [Host ↔ FPGA link setup and connection test](../../docs/connection-test.md) —
   wiring the host to the board, configuring the NIC, verifying the link.

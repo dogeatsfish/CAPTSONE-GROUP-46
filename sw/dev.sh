@@ -78,7 +78,7 @@ if [ "$START_UI" -eq 1 ]; then
 fi
 
 # sw/service/.venv, not sw/.venv: engine/Makefile's online tests default to
-# PY ?= ../service/.venv/bin/python, and docs/system-testing.md's manual
+# PY ?= ../service/.venv/bin/python, and docs/testing/system-testing.md's manual
 # setup uses the same path -- reusing it here means this script, the
 # Makefile's test-book generation, and the docs all agree on one venv
 # instead of three.
