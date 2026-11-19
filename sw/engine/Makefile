@@ -34,8 +34,8 @@ CXXFLAGS := -std=c++17 -O2 -Wall -Wextra
 INCLUDES := -Ishared/include -Imatch/include -Isimulation/include -Inetwork/include
 
 # Core engine sources shared by both the CLI and the Python module.
-# OFFLINE_CORE_SRCS has no socket usage and is portable as-is; ONLINE_SRCS
-# (real-time ITCH/OUCH replay) uses POSIX sockets (sys/socket.h etc.) that
+# OFFLINE_CORE_SRCS has no socket usage and is portable as-is;
+# RUNNER_ONLINE_SRCS (real-time ITCH/OUCH replay) uses POSIX sockets that
 # don't exist on native Windows/MinGW without a Winsock2 port -- see the
 # Windows branch of the pymodule target below.
 OFFLINE_CORE_SRCS := simulation/src/offline_simulation.cpp \
@@ -45,8 +45,8 @@ OFFLINE_CORE_SRCS := simulation/src/offline_simulation.cpp \
                      simulation/src/trading_context.cpp \
                      simulation/templates/trading_template.cpp \
                      match/src/orderbook.cpp
-ONLINE_SRCS := simulation/src/online_simulation.cpp
-CORE_SRCS := $(OFFLINE_CORE_SRCS) $(ONLINE_SRCS)
+RUNNER_ONLINE_SRCS := simulation/src/online_simulation.cpp
+CORE_SRCS := $(OFFLINE_CORE_SRCS) $(RUNNER_ONLINE_SRCS)
 
 # Every engine header. Each build target lists these as prerequisites because
 # the compile lines name only .cpp files -- without them, editing a header
@@ -56,11 +56,19 @@ CORE_SRCS := $(OFFLINE_CORE_SRCS) $(ONLINE_SRCS)
 ALL_HDRS := $(wildcard shared/include/*.h match/include/*.h \
                        simulation/include/*.h network/include/*.h)
 
+# Everything a target that drives the scheduler has to link. Defined up here,
+# above every rule that names it: a prerequisite list is expanded when make
+# READS the rule, so a group defined further down expands to nothing and the
+# target silently stops depending on its own sources. (bench_scheduler had
+# exactly that bug -- it relinked only when its own .cpp changed.)
+SCHED_SRCS   := simulation/src/scheduler.cpp simulation/src/account.cpp match/src/orderbook.cpp
+TEST_TARGETS := test_orderbook test_account test_scheduler test_participant
+
 # ---------------------------------------------------------
 # Online (real-time) CLI binary
 # ---------------------------------------------------------
 ONLINE_TARGET := online_run
-ONLINE_SRCS   := app/online_run.cpp $(CORE_SRCS)
+ONLINE_RUN_SRCS := app/online_run.cpp $(CORE_SRCS)
 
 # Default data file used by `make run` (override with FILE=..., which may be an
 # MBO .bin file).
@@ -134,8 +142,8 @@ rebuild:
 # ---------------------------------------------------------
 online: $(ONLINE_TARGET)
 
-$(ONLINE_TARGET): $(ONLINE_SRCS) $(ALL_HDRS)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(ONLINE_SRCS) -o $(ONLINE_TARGET) -lpthread $(NET_LIBS)
+$(ONLINE_TARGET): $(ONLINE_RUN_SRCS) $(ALL_HDRS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(ONLINE_RUN_SRCS) -o $(ONLINE_TARGET) -lpthread $(NET_LIBS)
 
 run: $(ONLINE_TARGET)
 	./$(ONLINE_TARGET) $(FILE) $(SCALE) $(ITCH_PORT) $(OUCH_PORT) $(ITCH_ADDR)
@@ -187,10 +195,6 @@ $(BENCH_TARGET): app/bench_scheduler.cpp $(SCHED_SRCS) $(ALL_HDRS)
 # ---------------------------------------------------------
 # Unit tests
 # ---------------------------------------------------------
-TEST_TARGETS := test_orderbook test_account test_scheduler test_participant
-# Everything the scheduler-level tests link.
-SCHED_SRCS   := simulation/src/scheduler.cpp simulation/src/account.cpp match/src/orderbook.cpp
-
 test: $(TEST_TARGETS)
 	@for t in $(TEST_TARGETS); do echo "== $$t"; ./$$t || exit 1; done
 
