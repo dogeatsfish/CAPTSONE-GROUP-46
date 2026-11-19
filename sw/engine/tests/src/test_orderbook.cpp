@@ -4,6 +4,7 @@
 // process exits non-zero if any failed.
 
 #include <cstdio>
+#include <limits>
 #include "orderbook.h"
 
 namespace {
@@ -158,6 +159,77 @@ void test_rejects() {
     CHECK(c.size() == 1 && c[0].type == T::Rejected && c[0].reason == RejectReason::InvalidPrice);
     CHECK(book.get_l1_state().best_bid == 0.0 && book.get_l1_state().best_ask == 0.0);
     CHECK(book.trade_log.empty());
+}
+
+// Market orders are validated too, and the Rejected event carries enough to
+// act on: which order, which side, how much, and why.
+void test_market_rejects() {
+    OrderBook book;
+    Order resting = make(1, 'S', 10.0, 50);
+    book.process_add(resting, 1);
+
+    Order bad_side = make(2, 'X', 0.0, 10);
+    Order bad_size = make(3, 'B', 0.0, -5);
+    const BookEvents a = book.process_market(bad_side, 2);
+    const BookEvents b = book.process_market(bad_size, 3);
+
+    CHECK(a.size() == 1 && a[0].type == T::Rejected);
+    CHECK(a[0].reason == RejectReason::InvalidSide);
+    CHECK(b.size() == 1 && b[0].type == T::Rejected);
+    CHECK(b[0].reason == RejectReason::InvalidSize);
+
+    // The payload identifies the order that was refused.
+    CHECK(b[0].order_id == 3 && b[0].side == 'B');
+    CHECK(b[0].size == -5 && b[0].timestamp_ns == 3);
+
+    // Nothing traded and the resting order is untouched.
+    CHECK(book.trade_log.empty());
+    CHECK(book.get_l2_state(1).asks[0].size == 50);
+
+    // A market order's own price is ignored -- process_market overwrites it,
+    // so a price that would be rejected on a limit order is fine here.
+    Order garbage_price = make(4, 'B', -99.0, 10);
+    const BookEvents ok = book.process_market(garbage_price, 4);
+    CHECK(ok.front().type == T::Accepted && ok.front().price == 0.0);
+    CHECK(book.trade_log.size() == 1);
+}
+
+// Non-finite values are refused rather than poisoning the book: a NaN price
+// compares false against everything, so one resting in a std::map would make
+// the ordering incoherent.
+void test_non_finite_rejects() {
+    OrderBook book;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+
+    Order nan_price = make(1, 'B', nan, 10);
+    Order inf_price = make(2, 'B', inf, 10);
+    Order nan_size  = make(3, 'B', 10.0, nan);
+    Order inf_size  = make(4, 'B', 10.0, inf);
+
+    const BookEvents a = book.process_add(nan_price, 1);
+    const BookEvents b = book.process_add(inf_price, 2);
+    const BookEvents c = book.process_add(nan_size, 3);
+    const BookEvents d = book.process_add(inf_size, 4);
+
+    CHECK(a.size() == 1 && a[0].type == T::Rejected && a[0].reason == RejectReason::InvalidPrice);
+    CHECK(b.size() == 1 && b[0].type == T::Rejected && b[0].reason == RejectReason::InvalidPrice);
+    CHECK(c.size() == 1 && c[0].type == T::Rejected && c[0].reason == RejectReason::InvalidSize);
+    CHECK(d.size() == 1 && d[0].type == T::Rejected && d[0].reason == RejectReason::InvalidSize);
+
+    // An infinite price is InvalidPrice, not an accidental "crosses
+    // everything" order: nothing rested and nothing traded.
+    CHECK(book.get_l1_state().best_bid == 0.0 && book.get_l1_state().best_ask == 0.0);
+    CHECK(book.trade_log.empty());
+
+    // Every reject still consumed a sequence number, so the event log stays a
+    // total order with no gaps.
+    CHECK(a[0].seq == 1 && b[0].seq == 2 && c[0].seq == 3 && d[0].seq == 4);
+
+    // A Rejected event never carries RejectReason::None.
+    for (const BookEvents* e : {&a, &b, &c, &d}) {
+        CHECK((*e)[0].reason != RejectReason::None);
+    }
 }
 
 // seq increases by one per event across calls: a total order for the log.
@@ -383,6 +455,8 @@ int main() {
         {"cancel",                   test_cancel},
         {"cancel_wrong_side",        test_cancel_wrong_side},
         {"rejects",                  test_rejects},
+        {"market_rejects",           test_market_rejects},
+        {"non_finite_rejects",       test_non_finite_rejects},
         {"sequence_numbers",         test_sequence_numbers},
         {"l2_depth",                 test_l2_depth},
         {"reduce_keeps_priority",    test_reduce_keeps_priority},
