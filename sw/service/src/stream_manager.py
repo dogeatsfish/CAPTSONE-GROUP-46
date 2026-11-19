@@ -78,8 +78,8 @@ def build_online_config(
     on ONLINE_STREAM_ITCH_ADDRESS for why (UDP sendto to a real device with
     no such host reachable can stall per-packet on ARP resolution).
     target="hardware": the real board, same addressing/pacing as the
-    blocking /simulate/online endpoint and the hw-smoke-test/fpga-test
-    targets.
+    blocking /simulate/online endpoint and `make -C sw/engine run
+    SCALE=1.0 ITCH_ADDR=192.168.0.1`.
 
     time_scale: optional per-request pacing override (SimulationRequest.
     time_scale, set from the UI). None keeps the target's server-side default.

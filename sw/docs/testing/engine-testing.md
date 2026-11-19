@@ -123,7 +123,7 @@ make run SCALE=1.0 ITCH_ADDR=192.168.0.1      # real time, at the board
 | File | What it is |
 |---|---|
 | `synthetic_mbo_stream.bin` | the full ~5.3h stream, ~61k records |
-| `smoke_book.bin` | 10 orders, about a second |
+| `tiny_book.bin` | 10 orders, about a second |
 | `flood_book.bin` | 5000 orders, dense — what CI's loopback run replays |
 | `market_ladder.bin` | a rising bid ladder, 100 orders |
 

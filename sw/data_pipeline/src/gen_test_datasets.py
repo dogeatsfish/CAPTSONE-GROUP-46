@@ -1,12 +1,12 @@
 """Generates the extra MBO books, on top of the base rising bid ladder
 produced by gen_market_ladder.py:
 
-  smoke_book.bin  a short, slow ladder for a quick sanity check (e.g. before
-                  trusting a run against the real board).
+  tiny_book.bin   a short, slow ladder -- 10 orders over about a second,
+                  for a quick look before trusting a longer run.
   flood_book.bin  the same price range/shape as market_ladder.bin, but far
                   denser -- stresses the online engine with a burst of
-                  market-data messages instead of a steady trickle. The CI
-                  workflow's loopback smoke step replays this one.
+                  market-data messages instead of a steady trickle. This is
+                  the book CI's loopback online run replays.
 
 Both keep the 100.00 -> 104.95 price band and pure rising-bid-ladder shape of
 market_ladder.bin, so a book can be swapped for either without changing what
@@ -23,7 +23,7 @@ if __name__ == "__main__":
     base_ns = 1_000_000_000_000_000_000
 
     # Short + slow: 10 orders, 100.00 -> 100.45, 100ms apart (~1s total).
-    smoke_cfg = EventConfig(
+    tiny_cfg = EventConfig(
         start_price=100.00,
         end_price=100.45,
         start_time=base_ns,
@@ -32,8 +32,8 @@ if __name__ == "__main__":
         side="B",
         size=100.0,
     )
-    smoke_path = gen.dict_to_bin(gen.generate_events(smoke_cfg), "smoke_book.bin")
-    print(f"smoke_book.bin -> {smoke_path} (10 orders)")
+    tiny_path = gen.dict_to_bin(gen.generate_events(tiny_cfg), "tiny_book.bin")
+    print(f"tiny_book.bin -> {tiny_path} (10 orders)")
 
     # Flood: same 100.00 -> 104.95 band and 5s window as market_ladder.bin,
     # but 1ms apart instead of 50ms -> 50x the message rate.

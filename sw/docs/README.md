@@ -27,7 +27,7 @@ What to run, in what order, and how to tell a pass from a failure.
   that caused it.
 - **[Engine testing](testing/engine-testing.md)** — building the engine, every
   Makefile target, what each unit test covers, running the engine by hand, and
-  the offline baseline to check regressions against.
+  the offline baseline to diff a change against.
 
 ## Related documents
 
