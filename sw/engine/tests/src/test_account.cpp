@@ -115,9 +115,50 @@ void test_open_orders() {
 
     a.on_event(ev(T::Rejected, 9, 'B', 0, 0, 0), NO_FEES);
     CHECK(a.rejects() == 1);
+}
 
-    a.note_order_sent(); a.note_order_sent(); a.note_cancel_sent();
-    CHECK(a.orders_sent() == 2 && a.cancels_sent() == 1);
+// The three counters: orders_sent, cancels_sent and rejects. They count
+// different things and must not bleed into each other. Who calls
+// note_order_sent / note_cancel_sent, and for which action, is the
+// scheduler's job -- test_participant.cpp's sent_counters covers that.
+void test_counters() {
+    using T = BookEventType;
+    Account a;
+
+    // A fresh account has counted nothing.
+    CHECK(a.orders_sent() == 0 && a.cancels_sent() == 0 && a.rejects() == 0);
+
+    // Each note_* bumps exactly its own counter, once per call.
+    a.note_order_sent();
+    CHECK(a.orders_sent() == 1 && a.cancels_sent() == 0 && a.rejects() == 0);
+    a.note_cancel_sent();
+    CHECK(a.orders_sent() == 1 && a.cancels_sent() == 1 && a.rejects() == 0);
+
+    // They keep accumulating rather than saturating or resetting.
+    for (int i = 0; i < 10; ++i) { a.note_order_sent(); a.note_cancel_sent(); }
+    CHECK(a.orders_sent() == 11 && a.cancels_sent() == 11);
+
+    // Events never touch the sent counters -- those count what the
+    // participant asked for, not what came back.
+    a.on_event(ev(T::Accepted, 1, 'B', 10.0, 100, 100), NO_FEES);
+    a.on_event(ev(T::PartialFill, 1, 'B', 10.0, 40, 60, 'T'), NO_FEES);
+    a.on_event(ev(T::Filled, 1, 'B', 10.0, 60, 0, 'T'), NO_FEES);
+    a.on_event(ev(T::Cancelled, 1, 'B', 10.0, 0, 0), NO_FEES);
+    a.on_event(ev(T::Reduced, 1, 'B', 10.0, 10, 50), NO_FEES);
+    a.on_event(ev(T::Trade, 1, 'B', 10.0, 100, 0), NO_FEES);
+    CHECK(a.orders_sent() == 11 && a.cancels_sent() == 11);
+    CHECK(a.position() == 100); // the fills did land
+
+    // Only Rejected moves rejects(), and it does not touch the others.
+    CHECK(a.rejects() == 0);
+    a.on_event(ev(T::Rejected, 2, 'B', 0, 0, 0), NO_FEES);
+    a.on_event(ev(T::Rejected, 3, 'S', 0, 0, 0), NO_FEES);
+    CHECK(a.rejects() == 2);
+    CHECK(a.orders_sent() == 11 && a.cancels_sent() == 11);
+
+    // Counters are per-account, not shared state.
+    Account b;
+    CHECK(b.orders_sent() == 0 && b.cancels_sent() == 0 && b.rejects() == 0);
 }
 } // namespace
 
@@ -129,6 +170,7 @@ int main() {
         {"round_trip_short", test_round_trip_short},
         {"fees", test_fees},
         {"open_orders", test_open_orders},
+        {"counters", test_counters},
     };
     for (const auto& t : tests) {
         const int before = failures;

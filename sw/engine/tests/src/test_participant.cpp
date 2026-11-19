@@ -226,6 +226,61 @@ void test_order_management() {
     CHECK(s.book().get_l1_state().best_bid == 0.0);
 }
 
+// Which action bumps which counter. Scheduler::submit decides this, and the
+// mapping is not obvious: a replace counts as an order sent (it creates one)
+// and NOT as a cancel, while a reduce counts as a cancel even though the order
+// survives. Wake counts as neither.
+void test_sent_counters() {
+    Scheduler s;
+    Recorder alice, bob;
+    s.add_participant(ALICE, alice);
+    s.add_participant(BOB, bob);
+
+    CHECK(alice.acct().orders_sent() == 0 && alice.acct().cancels_sent() == 0);
+
+    // --- the three that count as orders sent ---
+    const uint64_t lim = alice.do_limit('B', 10.0, 100);
+    run_all(s);
+    CHECK(alice.acct().orders_sent() == 1 && alice.acct().cancels_sent() == 0);
+
+    alice.do_market('B', 1); // nothing resting to hit; still an order sent
+    run_all(s);
+    CHECK(alice.acct().orders_sent() == 2 && alice.acct().cancels_sent() == 0);
+
+    const uint64_t rep = alice.do_replace(lim, 9.5, 40);
+    run_all(s);
+    CHECK(alice.acct().orders_sent() == 3); // a replace is a new order...
+    CHECK(alice.acct().cancels_sent() == 0); // ...and not a cancel
+
+    // --- the two that count as cancels sent ---
+    alice.do_reduce(rep, 10); // the order survives, but it counts as a cancel
+    run_all(s);
+    CHECK(alice.acct().orders_sent() == 3 && alice.acct().cancels_sent() == 1);
+
+    alice.do_cancel(rep);
+    run_all(s);
+    CHECK(alice.acct().orders_sent() == 3 && alice.acct().cancels_sent() == 2);
+
+    // --- Wake counts as neither ---
+    s.schedule(s.now(), ALICE, Action::wake());
+    run_all(s);
+    CHECK(alice.acct().orders_sent() == 3 && alice.acct().cancels_sent() == 2);
+
+    // --- counted when sent, not when the book accepts it ---
+    // Cancelling an id that does not exist is rejected by the book, but the
+    // participant still asked for it, so the counter moves and rejects() also
+    // records the refusal.
+    alice.do_cancel(999999);
+    run_all(s);
+    CHECK(alice.acct().cancels_sent() == 3 && alice.acct().rejects() == 1);
+
+    // --- per participant, not global ---
+    CHECK(bob.acct().orders_sent() == 0 && bob.acct().cancels_sent() == 0);
+    bob.do_limit('S', 20.0, 5);
+    run_all(s);
+    CHECK(bob.acct().orders_sent() == 1 && alice.acct().orders_sent() == 3);
+}
+
 // Fees: the taker pays, the maker is paid.
 void test_fees_applied() {
     Scheduler s;
@@ -292,6 +347,7 @@ int main() {
         {"latency_presets", test_latency_presets},
         {"market_order", test_market_order},
         {"order_management", test_order_management},
+        {"sent_counters", test_sent_counters},
         {"fees_applied", test_fees_applied},
         {"timer", test_timer},
         {"queue_position_query", test_queue_position_query},
