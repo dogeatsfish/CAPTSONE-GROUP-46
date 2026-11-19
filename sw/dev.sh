@@ -14,11 +14,26 @@
 # NATing through its own adapter). Native Windows is not supported. For the
 # board, run `setup/net_setup.sh` first.
 #
-# Usage: ./dev.sh   (from sw/, or anywhere -- it cd's to its own directory)
+# Usage: ./dev.sh              (from sw/, or anywhere -- it cd's to its own directory)
+#        ./dev.sh --no-ui     backend only; skips the npm checks and the Vite
+#                             dev server, and holds until Ctrl-C
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+
+START_UI=1
+for arg in "$@"; do
+    case "$arg" in
+        --no-ui|--backend-only) START_UI=0 ;;
+        -h|--help)
+            echo "Usage: ./dev.sh [--no-ui]"
+            echo "  --no-ui   start the backend only and hold until Ctrl-C"
+            exit 0
+            ;;
+        *) echo "Unknown option: $arg (try --help)" >&2; exit 2 ;;
+    esac
+done
 
 API_URL="http://127.0.0.1:8000/"
 UVICORN_PID=""
@@ -54,11 +69,13 @@ command -v python3 >/dev/null 2>&1 \
 command -v g++ >/dev/null 2>&1 \
     || fail "g++ isn't installed or not on PATH (needed to build the engine's Python module)."
 
-command -v npm >/dev/null 2>&1 \
-    || fail "npm isn't installed or not on PATH. Install Node.js: https://nodejs.org/"
+if [ "$START_UI" -eq 1 ]; then
+    command -v npm >/dev/null 2>&1 \
+        || fail "npm isn't installed or not on PATH. Install Node.js: https://nodejs.org/ (or run with --no-ui)"
 
-[ -d "ui/node_modules" ] \
-    || fail "ui/node_modules is missing. Run 'npm install' inside sw/ui/ first."
+    [ -d "ui/node_modules" ] \
+        || fail "ui/node_modules is missing. Run 'npm install' inside sw/ui/ first (or run with --no-ui)."
+fi
 
 # sw/service/.venv, not sw/.venv: engine/Makefile's online tests default to
 # PY ?= ../service/.venv/bin/python (see build-and-test.md), and
@@ -114,5 +131,12 @@ fi
 echo "==> Backend is up."
 echo "==> Reminder: setup/net_setup.sh must have already been run for this host session"
 echo "    (static IP + ARP entry for the board) -- see docs/connection-test.md."
-echo "==> Starting the UI dev server (npm run dev). Ctrl-C stops both."
-(cd ui && npm run dev)
+if [ "$START_UI" -eq 1 ]; then
+    echo "==> Starting the UI dev server (npm run dev). Ctrl-C stops both."
+    (cd ui && npm run dev)
+else
+    echo "==> Backend only (--no-ui). API at $API_URL"
+    echo "==> Start the UI yourself with: cd ui && npm run dev"
+    echo "==> Ctrl-C to stop the backend."
+    wait "$UVICORN_PID"
+fi
