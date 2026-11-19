@@ -1,14 +1,14 @@
 # Makefile for the trading engine
 # Modules:
 #   shared/           - common structs (Order, Trade, L1State, FillReport, OnlineConfig)
-#   match/            - OrderBook matching engine
+#   exchange/         - OrderBook: matching, depth, queue position
 #   network/          - ITCH/OUCH wire protocol (protocol.h/.cpp)
 #   simulation/include/  - simulation headers (offline/online sim, online_config, user_strategy)
 #   simulation/src/      - OfflineSimulation / OnlineSimulation + trading_context (fixed Strategy machinery)
 #   simulation/templates/- trading_template (editable on_market_update strategy body)
-#   app/online_run.cpp   - online (real-time) CLI entry point
-#   app/link_flash.cpp   - UDP link check: flashes the board's LED
-#   app/bench_scheduler.cpp - wall-clock fan-out benchmark
+#   tools/online_run.cpp   - online (real-time) CLI entry point
+#   tools/link_flash.cpp   - UDP link check: flashes the board's LED
+#   tools/bench_scheduler.cpp - wall-clock fan-out benchmark
 #   tests/src/           - unit tests (test_*.cpp)
 #   bindings/            - pybind11 wrapper exposing the simulation to Python
 #   ../compiler/         - strategy-compiler entry point (main_job, job template)
@@ -31,7 +31,7 @@ CXX      := g++
 CXXFLAGS := -std=c++17 -O2 -Wall -Wextra
 
 # Per-module include directories (headers are referenced by bare name)
-INCLUDES := -Ishared/include -Imatch/include -Isimulation/include -Inetwork/include
+INCLUDES := -Ishared/include -Iexchange/include -Isimulation/include -Inetwork/include
 
 # Core engine sources shared by both the CLI and the Python module.
 # OFFLINE_CORE_SRCS has no socket usage and is portable as-is;
@@ -45,7 +45,7 @@ OFFLINE_CORE_SRCS := simulation/src/offline_simulation.cpp \
                      network/src/protocol.cpp \
                      simulation/src/trading_context.cpp \
                      simulation/templates/trading_template.cpp \
-                     match/src/orderbook.cpp
+                     exchange/src/orderbook.cpp
 RUNNER_ONLINE_SRCS := simulation/src/online_simulation.cpp
 CORE_SRCS := $(OFFLINE_CORE_SRCS) $(RUNNER_ONLINE_SRCS)
 
@@ -54,7 +54,7 @@ CORE_SRCS := $(OFFLINE_CORE_SRCS) $(RUNNER_ONLINE_SRCS)
 # leaves `make` thinking the binary is up to date and you keep running the old
 # one. A wildcard (not a hand-written list) so a new header is covered the day
 # it's added.
-ALL_HDRS := $(wildcard shared/include/*.h match/include/*.h \
+ALL_HDRS := $(wildcard shared/include/*.h exchange/include/*.h \
                        simulation/include/*.h network/include/*.h)
 
 # Everything a target that drives the scheduler has to link. Defined up here,
@@ -63,14 +63,14 @@ ALL_HDRS := $(wildcard shared/include/*.h match/include/*.h \
 # target silently stops depending on its own sources. (bench_scheduler had
 # exactly that bug -- it relinked only when its own .cpp changed.)
 SCHED_SRCS   := simulation/src/scheduler.cpp simulation/src/participant.cpp \
-                simulation/src/account.cpp match/src/orderbook.cpp
+                simulation/src/account.cpp exchange/src/orderbook.cpp
 TEST_TARGETS := test_orderbook test_account test_scheduler test_participant
 
 # ---------------------------------------------------------
 # Online (real-time) CLI binary
 # ---------------------------------------------------------
 ONLINE_TARGET := online_run
-ONLINE_RUN_SRCS := app/online_run.cpp $(CORE_SRCS)
+ONLINE_RUN_SRCS := tools/online_run.cpp $(CORE_SRCS)
 
 # Default data file used by `make run` (override with FILE=..., which may be an
 # MBO .bin file).
@@ -161,7 +161,7 @@ $(PY_TARGET): $(PY_SRCS) $(ALL_HDRS)
 # ---------------------------------------------------------
 # Streams ITCH packets at the board so its receive LED flashes. There is
 # nothing to assert: the board never acknowledges anything, so you confirm it
-# by looking at the board. See app/link_flash.cpp.
+# by looking at the board. See tools/link_flash.cpp.
 # FLASH_RATE is packets per second; FLASH_COUNT 0 means continuous (Ctrl-C).
 # These comments sit above the assignments, not after them: make keeps the
 # whitespace between a value and a trailing '#', so `X ?= 5   # note` sets X to
@@ -176,8 +176,8 @@ FLASH_PORT  ?= 50001
 flash: $(FLASH_TARGET)
 	./$(FLASH_TARGET) $(FLASH_ADDR) $(FLASH_RATE) $(FLASH_COUNT) $(FLASH_PORT)
 
-$(FLASH_TARGET): app/link_flash.cpp network/src/protocol.cpp $(ALL_HDRS)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) app/link_flash.cpp network/src/protocol.cpp \
+$(FLASH_TARGET): tools/link_flash.cpp network/src/protocol.cpp $(ALL_HDRS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) tools/link_flash.cpp network/src/protocol.cpp \
 		-o $@ -lpthread $(NET_LIBS)
 
 # ---------------------------------------------------------
@@ -191,8 +191,8 @@ BENCH_TRIALS ?= 5000
 bench: $(BENCH_TARGET)
 	./$(BENCH_TARGET) $(BENCH_TRIALS)
 
-$(BENCH_TARGET): app/bench_scheduler.cpp $(SCHED_SRCS) $(ALL_HDRS)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) app/bench_scheduler.cpp $(SCHED_SRCS) -o $@
+$(BENCH_TARGET): tools/bench_scheduler.cpp $(SCHED_SRCS) $(ALL_HDRS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) tools/bench_scheduler.cpp $(SCHED_SRCS) -o $@
 
 # ---------------------------------------------------------
 # Unit tests
@@ -206,8 +206,8 @@ test: $(TEST_TARGETS)
 test-python: pymodule
 	python3 ../service/tests/test_bindings.py
 
-test_orderbook: tests/src/test_orderbook.cpp match/src/orderbook.cpp $(ALL_HDRS)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_orderbook.cpp match/src/orderbook.cpp -o $@
+test_orderbook: tests/src/test_orderbook.cpp exchange/src/orderbook.cpp $(ALL_HDRS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_orderbook.cpp exchange/src/orderbook.cpp -o $@
 
 test_account: tests/src/test_account.cpp simulation/src/account.cpp $(ALL_HDRS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) tests/src/test_account.cpp simulation/src/account.cpp -o $@

@@ -93,7 +93,7 @@ _EXE_SUFFIX = ".exe" if sys.platform == "win32" else ""
 
 _INCLUDES = [
     f"-I{ENGINE_DIR / 'shared' / 'include'}",
-    f"-I{ENGINE_DIR / 'match' / 'include'}",
+    f"-I{ENGINE_DIR / 'exchange' / 'include'}",
     f"-I{ENGINE_DIR / 'simulation' / 'include'}",
     f"-I{ENGINE_DIR / 'network' / 'include'}",
 ]
@@ -108,7 +108,7 @@ _SHARED_SRCS = [
     str(ENGINE_DIR / "simulation" / "src" / "account.cpp"),
     str(ENGINE_DIR / "network" / "src" / "protocol.cpp"),
     str(ENGINE_DIR / "simulation" / "src" / "trading_context.cpp"),
-    str(ENGINE_DIR / "match" / "src" / "orderbook.cpp"),
+    str(ENGINE_DIR / "exchange" / "src" / "orderbook.cpp"),
 ]
 
 
