@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "common.h"             // Order
-#include "offline_simulation.h" // MBORecord
+#include "feed.h"               // MBORecord
 
 namespace protocol {
 

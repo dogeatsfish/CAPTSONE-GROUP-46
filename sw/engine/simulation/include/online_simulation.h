@@ -8,9 +8,10 @@
 #include <thread>
 #include <vector>
 
+#include "feed.h"
 #include "orderbook.h"
 #include "user_strategy.h"
-#include "offline_simulation.h" 
+#include "telemetry.h"
 #include "protocol.h"
 #include "socket_compat.h" // net:: cross-platform UDP wrappers
 #include "online_config.h" // OnlineConfig

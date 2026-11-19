@@ -1,6 +1,6 @@
 #pragma once
 
-#include "orderbook.h"
+#include "common.h" // Order, L1State
 #include <optional>
 #include <cstdint>
 

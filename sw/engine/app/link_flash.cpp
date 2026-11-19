@@ -32,7 +32,7 @@
 #include <thread>
 #include <vector>
 
-#include "offline_simulation.h" // MBORecord
+#include "feed.h"          // MBORecord
 #include "online_config.h"      // OnlineConfig, for the shared defaults
 #include "protocol.h"
 #include "socket_compat.h"

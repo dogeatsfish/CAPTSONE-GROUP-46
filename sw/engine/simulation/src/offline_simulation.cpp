@@ -1,3 +1,4 @@
+#include "feed.h"
 #include "offline_simulation.h"
 #include <iostream>
 #include <cstdio>
