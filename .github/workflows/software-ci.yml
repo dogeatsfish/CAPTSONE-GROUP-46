@@ -1,6 +1,6 @@
 name: Software CI
 
-# Builds and smoke-tests the software side (sw/): the C++ engine, the FastAPI
+# Builds and tests the software side (sw/): the C++ engine, the FastAPI
 # service, and the React UI. The RTL has its own manual-only workflow (ci.yml).
 on:
   pull_request:
@@ -61,7 +61,7 @@ jobs:
           assert len(r.pnl_curve) > 0, 'offline sim produced no PnL samples'
           "
 
-      - name: Online simulation smoke test (loopback, unpaced)
+      - name: Online CLI end-to-end run (loopback, unpaced)
         run: |
           ./online_run ../data_pipeline/data/flood_book.bin 0 50001 50001 127.0.0.1 | tee online.log
           grep -q "Simulation finished successfully" online.log

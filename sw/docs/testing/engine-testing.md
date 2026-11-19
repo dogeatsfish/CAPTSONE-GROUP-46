@@ -124,7 +124,7 @@ make run SCALE=1.0 ITCH_ADDR=192.168.0.1      # real time, at the board
 |---|---|
 | `synthetic_mbo_stream.bin` | the full ~5.3h stream, ~61k records |
 | `smoke_book.bin` | 10 orders, about a second |
-| `flood_book.bin` | 5000 orders, dense — used by the CI smoke step |
+| `flood_book.bin` | 5000 orders, dense — what CI's loopback run replays |
 | `market_ladder.bin` | a rising bid ladder, 100 orders |
 
 `data_pipeline/src/gen_market_ladder.py` and `gen_test_datasets.py` regenerate
@@ -134,8 +134,9 @@ compile time in `offline_simulation.h`.
 
 ## Checking a change didn't move the numbers
 
-The offline simulation is deterministic, so the quickest regression check is to
-compare its output before and after:
+The offline simulation is deterministic, so the quickest way to confirm a change
+didn't alter behaviour is to compare its output before and after. This is a
+manual diff, not an automated test:
 
 ```bash
 make pymodule
@@ -165,7 +166,9 @@ the numbers here in the same commit.
 3. `make pymodule` — build the extension
 4. `make test-python` — the binding tests
 5. an offline simulation through Python, asserting the PnL curve isn't empty
-6. a loopback `online_run` smoke test, grepping for `Simulation finished successfully`
+6. a loopback `online_run` end-to-end run, grepping for `Simulation finished successfully`
+   — the only check that exercises the real socket path (ITCH framing, UDP
+   send, the OUCH listener thread); everything above it runs in-process
 
 Warnings don't fail the build. To make them fail locally:
 
