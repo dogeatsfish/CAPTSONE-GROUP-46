@@ -4,8 +4,9 @@ Documentation for the software side of CommonTrader: the C++ trading engine,
 the FastAPI service, the React UI, and the data pipeline — everything under
 `sw/`.
 
-Split two ways: **design** explains how things are built and why; **testing**
-tells you what to run and how to read the result.
+Split three ways: **design** explains how things are built and why; **idea**
+collects proposals for work that is not built or not yet agreed; **testing** tells
+you what to run and how to read the result.
 
 ## Design
 
@@ -16,6 +17,22 @@ understand a behaviour you didn't expect.
   scheduler's priority queue, the latency model, accounts, and the order book.
   How one order moves through the system, where events get routed, what makes
   a run reproducible, and the known simplifications. Diagrams included.
+
+## Idea
+
+Proposals and explorations, for work that has not been built and in some cases has
+not been agreed. Read these before starting the ticket they describe; they are
+meant to be argued with.
+
+- **[Calibration from L1](idea/calibration.md)** — ticket #23. What the TAQ sample
+  in the repo can honestly support and what has to come from published stylised
+  facts, the shapes `calibration.json` could take so an assumption can later be
+  promoted to a measurement without breaking its consumers, and how the numbers
+  would reach the C++ side.
+- **[Calibration from a month of Massive data](idea/calibration_11242026.md)** —
+  update to the above. One stock of mid liquidity, quotes and trades kept out of git,
+  how bots scale the base config without drifting the market, and modelling one market
+  now with venue profiles at #21.
 
 ## Testing
 
