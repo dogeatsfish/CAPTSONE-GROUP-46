@@ -5,12 +5,6 @@
 #include <chrono>
 #include <thread>
 #include <optional>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/socket.h>
-#include <sys/select.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 
 namespace {
 constexpr uint64_t SAMPLE_INTERVAL_NS = 1'000'000'000ULL;
@@ -19,22 +13,22 @@ constexpr size_t   READ_CHUNK = 8192;
 
 
 OnlineSimulation::OnlineSimulation(const OnlineConfig& config)
-    : cfg(config) {}
+    : cfg_(config) {}
 
 OnlineSimulation::OnlineSimulation(const std::string& file_path)
-    : cfg(OnlineConfig{}) { cfg.file_path = file_path; }
+    : cfg_(OnlineConfig{}) { cfg_.file_path = file_path; }
 
 OnlineSimulation::~OnlineSimulation() {
-    running = false;
-    if (ouch_thread.joinable()) {
-        ouch_thread.join();
+    running_ = false;
+    if (ouch_thread_.joinable()) {
+        ouch_thread_.join();
     }
     close_sockets();
 }
 
 bool OnlineSimulation::open_itch_socket() {
-    itch_fd = ::socket(AF_INET, SOCK_DGRAM, 0);
-    if (itch_fd < 0) {
+    itch_fd_ = net::open_udp();
+    if (itch_fd_ == net::INVALID_SOCK) {
         std::cerr << "WARN: ITCH UDP socket() failed; market data will not be broadcast.\n";
         return false;
     }
@@ -42,60 +36,45 @@ bool OnlineSimulation::open_itch_socket() {
 }
 
 bool OnlineSimulation::open_ouch_listener() {
-    const bool is_udp   = (cfg.ouch_transport == OuchTransport::UDP);
-    const char* proto   = is_udp ? "UDP" : "TCP";
-    const int  sock_type = is_udp ? SOCK_DGRAM : SOCK_STREAM;
-
-    ouch_listen_fd = ::socket(AF_INET, sock_type, 0);
-    if (ouch_listen_fd < 0) {
-        std::cerr << "WARN: OUCH " << proto
-                  << " socket() failed; order entry disabled.\n";
+    ouch_listen_fd_ = net::open_udp();
+    if (ouch_listen_fd_ == net::INVALID_SOCK) {
+        std::cerr << "WARN: OUCH UDP socket() failed; order entry disabled.\n";
         return false;
     }
 
-    int yes = 1;
-    ::setsockopt(ouch_listen_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    net::set_reuse_addr(ouch_listen_fd_);
 
-    sockaddr_in addr{};
-    addr.sin_family      = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port        = htons(cfg.ouch_port);
-
-    if (::bind(ouch_listen_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-        std::cerr << "WARN: OUCH bind() to port " << cfg.ouch_port
+    if (!net::bind_any(ouch_listen_fd_, cfg_.ouch_port)) {
+        std::cerr << "WARN: OUCH bind() to port " << cfg_.ouch_port
                   << " failed; order entry disabled.\n";
-        ::close(ouch_listen_fd);
-        ouch_listen_fd = -1;
-        return false;
-    }
-    if (!is_udp && ::listen(ouch_listen_fd, 1) < 0) {
-        std::cerr << "WARN: OUCH listen() failed; order entry disabled.\n";
-        ::close(ouch_listen_fd);
-        ouch_listen_fd = -1;
+        net::close_socket(ouch_listen_fd_);
+        ouch_listen_fd_ = net::INVALID_SOCK;
         return false;
     }
     return true;
 }
 
 void OnlineSimulation::close_sockets() {
-    if (itch_fd >= 0)        { ::close(itch_fd);        itch_fd = -1; }
-    if (ouch_listen_fd >= 0) { ::close(ouch_listen_fd); ouch_listen_fd = -1; }
+    if (itch_fd_ != net::INVALID_SOCK) {
+        net::close_socket(itch_fd_);
+        itch_fd_ = net::INVALID_SOCK;
+    }
+    if (ouch_listen_fd_ != net::INVALID_SOCK) {
+        net::close_socket(ouch_listen_fd_);
+        ouch_listen_fd_ = net::INVALID_SOCK;
+    }
 }
 
 // ---------------------------------------------------------
 // Market-data (ITCH) side
 // ---------------------------------------------------------
 void OnlineSimulation::broadcast_itch(const std::vector<uint8_t>& itch_msg) {
-    if (itch_fd < 0 || itch_msg.empty()) return;
+    if (itch_fd_ == net::INVALID_SOCK || itch_msg.empty()) return;
     const std::vector<uint8_t> packet =
-        protocol::to_moldudp64({itch_msg}, itch_seq_num, cfg.session);
-    itch_seq_num += 1;
-    sockaddr_in dest{};
-    dest.sin_family = AF_INET;
-    dest.sin_port   = htons(cfg.itch_port);
-    ::inet_pton(AF_INET, cfg.itch_address.c_str(), &dest.sin_addr);
-    ::sendto(itch_fd, packet.data(), packet.size(), 0,
-             reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
+        protocol::to_moldudp64({itch_msg}, itch_seq_num_, cfg_.session);
+    itch_seq_num_ += 1;
+    const sockaddr_in dest = net::make_addr(cfg_.itch_address.c_str(), cfg_.itch_port);
+    net::send_to(itch_fd_, packet.data(), packet.size(), dest);
 }
 
 void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_sample_ns) {
@@ -104,31 +83,37 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
     std::optional<TradeRecord> new_trade; 
     L1State l1; 
     {
-        std::lock_guard<std::mutex> lock(book_mutex);
+        std::lock_guard<std::mutex> lock(book_mutex_);
         if (rec.message_type == protocol::ITCH_ADD) {
             Order mkt_order{rec.order_id, rec.price, rec.size, rec.side, false};
-            matching_engine.process_add(mkt_order, ts);
+            matching_engine_.process_add(mkt_order, ts);
             note_market_quote(rec.side, rec.price);
         } else if (rec.message_type == protocol::ITCH_CANCEL) {
-            matching_engine.process_cancel(rec.order_id, rec.side);
+            // ITCH Order Cancel takes rec.size shares off the order (all of it
+            // when rec.size covers what is left) -- same rule the FPGA applies
+            // to the 'X' message this record is broadcast as.
+            matching_engine_.process_reduce(rec.order_id, rec.size, ts, rec.side);
         }
 
-        l1 = matching_engine.get_l1_state();
+        l1 = matching_engine_.get_l1_state();
 
-        if (cfg.enable_local_strategy) {
+        if (cfg_.enable_local_strategy) {
             const auto decision_start = std::chrono::steady_clock::now();
-            std::optional<Order> user_order = strategy.on_market_update(l1);
+            strategy_.sync_account(account_.position(), account_.avg_entry_price(),
+                                  account_.realized_pnl());
+            std::optional<Order> user_order = strategy_.on_market_update(l1);
             if (user_order.has_value()) {
                 Order& uo = user_order.value();
-                FillReport fill = matching_engine.process_add(uo, ts);
-                finalize_auto_fill(uo, fill); // no-op unless cfg.auto_fill
+                FillReport fill = fill_report(matching_engine_.process_add(uo, ts));
+                finalize_auto_fill(uo, fill, ts); // no-op unless cfg_.auto_fill
                 if (fill.filled_size > 0.0) {
                     const uint64_t decision_latency_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                         std::chrono::steady_clock::now() - decision_start).count();
-                    strategy.on_fill(uo.side, fill.avg_fill_price, fill.filled_size);
+                    account_.apply_fill(ts, uo.order_id, uo.side, 'T', fill.avg_fill_price,
+                                       fill.filled_size, FeeSchedule{});
                     const TradeRecord tr{
                         ts, uo.side, fill.avg_fill_price, fill.filled_size, decision_latency_ns};
-                    active_result->trades.push_back(tr);
+                    active_result_->trades.push_back(tr);
                     new_trade = tr;
                 }
             }
@@ -139,11 +124,11 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
             const double mark = market_mid();
             const PnLSnapshot snap{
                 ts,
-                strategy.get_realized_pnl(),
-                strategy.get_unrealized_pnl(mark),
-                strategy.get_position(),
-                active_result->trades.size()};
-            active_result->pnl_curve.push_back(snap);
+                account_.realized_pnl(),
+                account_.unrealized_pnl(mark),
+                account_.position(),
+                active_result_->trades.size()};
+            active_result_->pnl_curve.push_back(snap);
             sampled = snap;
             next_sample_ns = ts + SAMPLE_INTERVAL_NS;
         }
@@ -151,8 +136,8 @@ void OnlineSimulation::apply_market_event(const MBORecord& rec, uint64_t& next_s
 
     // 5. Stream the sample (and any new fill) to live-telemetry consumers,
     // outside the lock.
-    if (sampled && on_sample_cb) {
-        on_sample_cb(*sampled, l1);
+    if (sampled && on_sample_cb_) {
+        on_sample_cb_(*sampled, l1);
     }
     if (new_trade && trade_observer_) {
         trade_observer_(*new_trade);
@@ -188,9 +173,9 @@ double OnlineSimulation::market_mid() const {
     return 0.0;
 }
 
-void OnlineSimulation::finalize_auto_fill(Order& order, FillReport& fill) {
+void OnlineSimulation::finalize_auto_fill(Order& order, FillReport& fill, uint64_t ts) {
     // Off by default, and nothing to do if the order already filled fully.
-    if (!cfg.auto_fill || order.size <= 0.0) {
+    if (!cfg_.auto_fill || order.size <= 0.0) {
         return;
     }
 
@@ -200,7 +185,7 @@ void OnlineSimulation::finalize_auto_fill(Order& order, FillReport& fill) {
     // price. The result is a guaranteed complete fill regardless of how much
     // real liquidity the book held.
     const double remaining = order.size;
-    matching_engine.process_cancel(order.order_id);
+    matching_engine_.process_cancel(order.order_id, ts);
 
     const double prior_notional = fill.avg_fill_price * fill.filled_size;
     fill.filled_size += remaining;
@@ -211,10 +196,10 @@ void OnlineSimulation::finalize_auto_fill(Order& order, FillReport& fill) {
 }
 
 // ---------------------------------------------------------
-// Order-entry (OUCH) side  — runs on ouch_thread
+// Order-entry (OUCH) side  — runs on ouch_thread_
 // ---------------------------------------------------------
 FillReport OnlineSimulation::apply_ouch_order(const protocol::OuchMessage& msg) {
-    const uint64_t ts = last_market_ts_ns.load(std::memory_order_relaxed);
+    const uint64_t ts = last_market_ts_ns_.load(std::memory_order_relaxed);
 
     // Snapshot produced only if this order fills (if(sampled) below). Captured
     // under the lock but the telemetry callback is invoked afterwards, without
@@ -226,26 +211,25 @@ FillReport OnlineSimulation::apply_ouch_order(const protocol::OuchMessage& msg) 
     FillReport fill{};
 
     {
-        std::lock_guard<std::mutex> lock(book_mutex);
+        std::lock_guard<std::mutex> lock(book_mutex_);
 
         if (msg.msg_type == protocol::OUCH_CANCEL) {
             // msg.side is always 0 here -- the OUCH Cancel wire format carries no
-            // side (see protocol::from_ouch) -- so this must use the side-agnostic
-            // overload, not guess. Passing msg.side straight through used to
-            // silently no-op every bid-side cancel (process_cancel(id, side)'s
-            // side != 'B' branch always looked in the ask index).
-            matching_engine.process_cancel(msg.order_id);
+            // side (see protocol::from_ouch) -- so this leaves process_cancel's
+            // side at its default and lets it search both sides of the book.
+            matching_engine_.process_cancel(msg.order_id, ts);
             return FillReport{};
         }
 
         // OUCH_ENTER: convert to an aggressive order and match it.
         Order order = protocol::ouch_to_order(msg);
-        fill = matching_engine.process_add(order, ts);
-        finalize_auto_fill(order, fill); // no-op unless cfg.auto_fill
+        fill = fill_report(matching_engine_.process_add(order, ts));
+        finalize_auto_fill(order, fill, ts); // no-op unless cfg_.auto_fill
         if (fill.filled_size > 0.0) {
-            strategy.on_fill(order.side, fill.avg_fill_price, fill.filled_size);
+            account_.apply_fill(ts, order.order_id, order.side, 'T', fill.avg_fill_price,
+                               fill.filled_size, FeeSchedule{});
             const TradeRecord tr{ts, order.side, fill.avg_fill_price, fill.filled_size};
-            active_result->trades.push_back(tr);
+            active_result_->trades.push_back(tr);
             new_trade = tr;
 
             // A fill is exactly the kind of event the once-per-second
@@ -255,21 +239,21 @@ FillReport OnlineSimulation::apply_ouch_order(const protocol::OuchMessage& msg) 
             // stream only reflects a board fill whenever the next scheduled
             // sample happens to land, which can make a genuinely active
             // board look frozen in the UI.
-            l1 = matching_engine.get_l1_state();
+            l1 = matching_engine_.get_l1_state();
             const double mark = market_mid();
             const PnLSnapshot snap{
                 ts,
-                strategy.get_realized_pnl(),
-                strategy.get_unrealized_pnl(mark),
-                strategy.get_position(),
-                active_result->trades.size()};
-            active_result->pnl_curve.push_back(snap);
+                account_.realized_pnl(),
+                account_.unrealized_pnl(mark),
+                account_.position(),
+                active_result_->trades.size()};
+            active_result_->pnl_curve.push_back(snap);
             sampled = snap;
         }
-    } // book_mutex released here
+    } // book_mutex_ released here
 
-    if (sampled && on_sample_cb) {
-        on_sample_cb(*sampled, l1);
+    if (sampled && on_sample_cb_) {
+        on_sample_cb_(*sampled, l1);
     }
     if (new_trade && trade_observer_) {
         trade_observer_(*new_trade);
@@ -278,126 +262,20 @@ FillReport OnlineSimulation::apply_ouch_order(const protocol::OuchMessage& msg) 
     return fill;
 }
 
-bool OnlineSimulation::send_all(int fd, const uint8_t* data, size_t len) {
-    size_t sent = 0;
-    while (sent < len) {
-        const ssize_t n = ::send(fd, data + sent, len - sent, 0);
-        if (n <= 0) return false;
-        sent += static_cast<size_t>(n);
-    }
-    return true;
-}
-
-void OnlineSimulation::handle_ouch_client(int client_fd) {
-    uint8_t buf[protocol::OUCH_MAX_LEN];
-
-    while (running.load(std::memory_order_relaxed)) {
-        // Wait (with timeout) until the client has sent at least one byte so we
-        // stay responsive to shutdown between messages.
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(client_fd, &rfds);
-        timeval tv{0, 200'000}; // 200 ms
-
-        const int ready = ::select(client_fd + 1, &rfds, nullptr, nullptr, &tv);
-        if (ready < 0) break;         // socket error
-        if (ready == 0) continue;     // timeout: re-check running flag
-
-        // Read the 1-byte message type to learn the frame length.
-        ssize_t got = ::recv(client_fd, buf, 1, 0);
-        if (got <= 0) break;          // client disconnected
-
-        const size_t frame_len = protocol::ouch_frame_len(buf[0]);
-        if (frame_len == 0 || frame_len > sizeof(buf)) {
-            // Unknown message type: we can't know the frame boundary, so drop
-            // the connection rather than desync the stream.
-            break;
-        }
-
-        // Read the remainder of the frame (recv may return partial data).
-        size_t have = 1;
-        bool   ok   = true;
-        while (have < frame_len) {
-            got = ::recv(client_fd, buf + have, frame_len - have, 0);
-            if (got <= 0) { ok = false; break; }
-            have += static_cast<size_t>(got);
-        }
-        if (!ok) break;
-
-        protocol::OuchMessage msg;
-        if (!protocol::from_ouch(buf, frame_len, msg)) {
-            continue;
-        }
-
-        if (ouch_observer_) ouch_observer_(msg, buf, frame_len);
-
-        const FillReport fill = apply_ouch_order(msg);
-
-        // Reply to the client for ENTER orders: an execution report if any
-        // volume filled, otherwise an accept (the remainder rests in the book).
-        if (msg.msg_type == protocol::OUCH_ENTER) {
-            std::vector<uint8_t> resp;
-            if (fill.filled_size > 0.0) {
-                resp = protocol::to_ouch_response(
-                    protocol::OUCH_EXECUTED, msg.order_id,
-                    fill.filled_size, fill.avg_fill_price);
-            } else {
-                resp = protocol::to_ouch_response(
-                    protocol::OUCH_ACCEPTED, msg.order_id, msg.size, msg.price);
-            }
-            if (!send_all(client_fd, resp.data(), resp.size())) break;
-        }
-    }
-
-    ::close(client_fd);
-}
-
-void OnlineSimulation::ouch_server_loop() {
-    if (cfg.ouch_transport == OuchTransport::UDP) {
-        ouch_udp_loop();
-    } else {
-        ouch_tcp_loop();
-    }
-}
-
-void OnlineSimulation::ouch_tcp_loop() {
-    while (running.load(std::memory_order_relaxed)) {
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(ouch_listen_fd, &rfds);
-        timeval tv{0, 200'000}; // 200 ms accept poll
-
-        const int ready = ::select(ouch_listen_fd + 1, &rfds, nullptr, nullptr, &tv);
-        if (ready < 0) break;
-        if (ready == 0) continue; // no pending connection: re-check running
-
-        const int client_fd = ::accept(ouch_listen_fd, nullptr, nullptr);
-        if (client_fd < 0) continue;
-
-        handle_ouch_client(client_fd);
-    }
-}
-
 void OnlineSimulation::ouch_udp_loop() {
     // One OUCH frame per datagram. The buffer is oversized so trailing bytes the
     // FPGA appends after the OUCH message (e.g. the 2-byte latency telemetry from
     // outbound_tx_generator.sv) are received and simply ignored.
     uint8_t buf[256];
 
-    while (running.load(std::memory_order_relaxed)) {
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(ouch_listen_fd, &rfds);
-        timeval tv{0, 200'000}; // 200 ms poll so we stay responsive to shutdown
-
-        const int ready = ::select(ouch_listen_fd + 1, &rfds, nullptr, nullptr, &tv);
+    while (running_.load(std::memory_order_relaxed)) {
+        // 200 ms poll so we stay responsive to shutdown.
+        const int ready = net::wait_readable(ouch_listen_fd_, 200);
         if (ready < 0) break;
-        if (ready == 0) continue; // timeout: re-check running flag
+        if (ready == 0) continue; // timeout: re-check running_ flag
 
         sockaddr_in src{};
-        socklen_t   src_len = sizeof(src);
-        const ssize_t n = ::recvfrom(ouch_listen_fd, buf, sizeof(buf), 0,
-                                     reinterpret_cast<sockaddr*>(&src), &src_len);
+        const long n = net::recv_from(ouch_listen_fd_, buf, sizeof(buf), src);
         if (n <= 0) continue;
 
         // The first byte is the OUCH message type, which fixes the frame length.
@@ -428,8 +306,7 @@ void OnlineSimulation::ouch_udp_loop() {
                 resp = protocol::to_ouch_response(
                     protocol::OUCH_ACCEPTED, msg.order_id, msg.size, msg.price);
             }
-            ::sendto(ouch_listen_fd, resp.data(), resp.size(), 0,
-                     reinterpret_cast<sockaddr*>(&src), src_len);
+            net::send_to(ouch_listen_fd_, resp.data(), resp.size(), src);
         }
     }
 }
@@ -441,11 +318,11 @@ SimulationResult OnlineSimulation::run(SampleCallback on_sample) {
     SimulationResult result;
 
     // Install the live-telemetry hook for the duration of this run.
-    on_sample_cb = std::move(on_sample);
+    on_sample_cb_ = std::move(on_sample);
 
-    FILE* fp = std::fopen(cfg.file_path.c_str(), "rb");
+    FILE* fp = std::fopen(cfg_.file_path.c_str(), "rb");
     if (fp == nullptr) {
-        std::cerr << "CRITICAL: Failed to open MBO binary stream at " << cfg.file_path << std::endl;
+        std::cerr << "CRITICAL: Failed to open MBO binary stream at " << cfg_.file_path << std::endl;
         return result;
     }
 
@@ -458,14 +335,14 @@ SimulationResult OnlineSimulation::run(SampleCallback on_sample) {
     result.trades.reserve(est_records / 4 + 1);
     result.pnl_curve.reserve(est_records / 1024 + 16);
 
-    active_result = &result;
-    running       = true;
+    active_result_ = &result;
+    running_       = true;
 
     // Bring up sockets. Failures degrade gracefully: the replay still runs and
     // feeds the book, just without broadcast / order entry.
     open_itch_socket();
     if (open_ouch_listener()) {
-        ouch_thread = std::thread(&OnlineSimulation::ouch_server_loop, this);
+        ouch_thread_ = std::thread(&OnlineSimulation::ouch_udp_loop, this);
     }
 
     const auto start_sim_time = std::chrono::high_resolution_clock::now();
@@ -476,19 +353,19 @@ SimulationResult OnlineSimulation::run(SampleCallback on_sample) {
     bool     have_prev      = false;
 
     size_t n;
-    while (running.load(std::memory_order_relaxed) &&
+    while (running_.load(std::memory_order_relaxed) &&
            (n = std::fread(buffer.data(), sizeof(MBORecord), READ_CHUNK, fp)) > 0) {
         for (size_t i = 0; i < n; ++i) {
             // External stop request (e.g. stop() from a SIGINT handler) --
             // unwind now instead of finishing the file.
-            if (!running.load(std::memory_order_relaxed)) break;
+            if (!running_.load(std::memory_order_relaxed)) break;
 
             const MBORecord& rec = buffer[i];
 
             // --- Real-time pacing: wait (future - present) before this line ---
-            if (have_prev && rec.timestamp_ns > prev_ts && cfg.time_scale > 0.0) {
+            if (have_prev && rec.timestamp_ns > prev_ts && cfg_.time_scale > 0.0) {
                 uint64_t gap_ns = rec.timestamp_ns - prev_ts;
-                double   scaled = static_cast<double>(gap_ns) * cfg.time_scale;
+                double   scaled = static_cast<double>(gap_ns) * cfg_.time_scale;
                 uint64_t sleep_ns = static_cast<uint64_t>(scaled);
                 if (sleep_ns > 0) {
                     std::this_thread::sleep_for(std::chrono::nanoseconds(sleep_ns));
@@ -496,10 +373,10 @@ SimulationResult OnlineSimulation::run(SampleCallback on_sample) {
             }
             prev_ts   = rec.timestamp_ns;
             have_prev = true;
-            last_market_ts_ns.store(rec.timestamp_ns, std::memory_order_relaxed);
+            last_market_ts_ns_.store(rec.timestamp_ns, std::memory_order_relaxed);
 
             // --- Broadcast the ITCH packet, then apply to the book ---
-            broadcast_itch(protocol::to_itch(rec, cfg.stock_locate));
+            broadcast_itch(protocol::to_itch(rec, cfg_.stock_locate));
             apply_market_event(rec, next_sample_ns);
         }
     }
@@ -508,9 +385,9 @@ SimulationResult OnlineSimulation::run(SampleCallback on_sample) {
 
     // Market data is exhausted (or an external stop() request broke the loop
     // above): stop the OUCH server and wait for it to drain.
-    running = false;
-    if (ouch_thread.joinable()) {
-        ouch_thread.join();
+    running_ = false;
+    if (ouch_thread_.joinable()) {
+        ouch_thread_.join();
     }
     close_sockets();
 
@@ -519,7 +396,7 @@ SimulationResult OnlineSimulation::run(SampleCallback on_sample) {
         std::chrono::duration_cast<std::chrono::microseconds>(end_sim_time - start_sim_time).count();
     result.total_trades = result.trades.size();
 
-    active_result = nullptr;
-    on_sample_cb = nullptr; // drop the hook once the run is complete
+    active_result_ = nullptr;
+    on_sample_cb_ = nullptr; // drop the hook once the run is complete
     return result;
 }

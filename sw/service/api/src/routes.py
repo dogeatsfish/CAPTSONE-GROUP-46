@@ -142,7 +142,7 @@ def run_online_simulation(req: SimulationRequest):
 
     Uses the same request/response contract as /simulate. The engine replays
     the MBO stream as an ITCH market-data broadcast while serving OUCH order
-    entry; those UDP/TCP sockets are handled entirely inside the engine using
+    entry; those UDP sockets are handled entirely inside the engine using
     server-side configuration, so clients simply trigger the run and receive
     the resulting trade / PnL telemetry.
     """
@@ -155,7 +155,6 @@ def run_online_simulation(req: SimulationRequest):
     cfg.itch_address = ONLINE_ITCH_ADDRESS
     cfg.itch_port = ONLINE_ITCH_PORT
     cfg.ouch_port = ONLINE_OUCH_PORT
-    cfg.ouch_transport = engine_sim.OuchTransport.UDP  # matches the FPGA
     cfg.time_scale = ONLINE_DEFAULT_TIME_SCALE
     cfg.auto_fill = bool(ONLINE_AUTO_FILL)  # on for all online runs
     cfg.file_path = str(data_file)  # MBO stream to replay now travels in the config

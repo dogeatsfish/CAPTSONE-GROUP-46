@@ -1,50 +1,41 @@
 # Software Documentation
 
-Documentation for the software side of the project (the trading engine,
-data pipeline, and host-side tooling under `sw/`).
-
-## Contents
-
-- _(add software design notes, protocol references, and build/run guides here)_
-
-## Development environment (Dev Container)
-
-A ready-to-use Linux C++ toolchain is provided as a VS Code Dev Container so the
-POSIX-only engine (`<sys/socket.h>`, etc.) compiles and debugs natively on
-Windows/macOS via Docker. It lives at [`sw/.devcontainer/`](../.devcontainer)
-and **must stay there** — VS Code only auto-detects `.devcontainer/` at the root
-of the folder you open, and this one is configured to open the whole `sw/`
-workspace. To use it: open the `sw/` folder in VS Code and choose
-**"Reopen in Container"**.
-
-- `Dockerfile` — Ubuntu 24.04 base with pinned GCC 13, CMake, Ninja, GDB,
-  Valgrind, and Python/pybind11.
-- `devcontainer.json` — extensions, IntelliSense/CMake paths, and the
-  `SYS_PTRACE` capability needed for GDB/Valgrind.
+Documentation for the software side of CommonTrader: the C++ trading engine,
+the FastAPI service, the React UI, and the data pipeline — everything under
+`sw/`.
 
 ## Guides
 
-- [Building and running the engine](build-and-test.md) — every Makefile target,
-  overridable variables, how to run each test, and the macOS vs Linux
-  difference for the Python module.
-- [Running the simulation dashboard](run-dashboard.md) — build `engine_sim`,
-  start the FastAPI service, launch the React UI, and use the dashboard.
-- [Engine tests](testing.md) — what each test covers (`stress_orderbook`,
-  `socket_test` (which drives the `socket-test`/`test-online`/`flood-test`
-  scenarios), `gen_market_ladder.py`) and its specific cases.
+- **[System testing](system-testing.md)** — testing the whole stack together:
+  FPGA, engine, backend and UI. How to bring the stack up, verify each layer,
+  run against the real board, and narrow a failure to the layer that caused it.
+- **[Engine testing](engine-testing.md)** — building the engine, every Makefile
+  target, what each unit test covers, the replay scenarios, and the offline
+  baseline to check regressions against.
+- **[Engine architecture](engine-architecture.md)** — how the engine works
+  inside: participants, the scheduler's priority queue, the latency model,
+  accounts, and the order book. Diagrams included.
 
 ## Related documents
 
 - [Host ↔ FPGA link setup and connection test](../../docs/connection-test.md) —
-  how to wire the host to the board, configure the NIC, and verify the link.
-  Uses the helper scripts in [`setup/`](../../setup).
+  wiring the host to the board, configuring the NIC, verifying the link.
+- [Testing the board from scratch](../../docs/board-test-checklist.md) — the
+  cold-start sequence, bitstream through to live trades.
+- [HW ↔ SW interface](../../docs/hw_sw_interface.md) and
+  [transport gaps](../../docs/hw_sw_transport_gaps.md) — the wire contract
+  between the engine and the RTL.
+- [Known limitations](../../docs/known_limitations.md).
 
 ## Quick reference
 
-- **Build the engine:** `make -C sw/engine` (native CLI + `online_run`)
-- **Run the real-time engine:** `make -C sw/engine run-online`
-- **Wire protocols:** see `sw/engine/simulation/include/protocol.h` (ITCH in,
-  OUCH out; byte layouts mirror the FPGA RTL).
-- **Online networking config:** `OnlineSimulation::Config` in
-  `sw/engine/simulation/include/online_simulation.h` (ports, addresses, and the
-  UDP/TCP OUCH transport toggle).
+| | |
+|---|---|
+| Run the whole stack | `cd sw && ./dev.sh` (add `--no-ui` for backend only) |
+| Build the engine CLI | `make -C sw/engine` |
+| Build the Python module | `make -C sw/engine pymodule` |
+| Run the tests | `make -C sw/engine test` and `make -C sw/engine test-python` |
+| Stream at the real board | `make -C sw/engine hardware-test` |
+| Wire protocols | `sw/engine/network/include/protocol.h` (ITCH in, OUCH out) |
+| Networking config | `OnlineConfig` in `sw/engine/simulation/include/online_config.h` |
+| API | `http://127.0.0.1:8000` · UI `http://localhost:5173` |

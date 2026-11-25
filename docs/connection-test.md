@@ -140,23 +140,23 @@ while the activity LED blinks under load, the issue is inside the FPGA:
 
 ## Running the backend against real hardware
 
-**Don't use Docker for the backend when testing against the real board.**
-`sw/Dockerfile`'s container compiles `OnlineSimulation` in fine (real Linux,
-real POSIX sockets), but Docker Desktop runs it inside its own virtual
-network -- the container never reaches the host's physical NIC or the static
-ARP entry `net_setup` just added, and the board's replies never reach the
-container either. It looks like it "works" for loopback online-mode testing
-(the container talking to itself) and then silently gets no traffic against
-real hardware.
+Use `sw/dev.sh`. It runs the FastAPI service natively, so the service shares
+the host's real network stack -- that is what lets its UDP traffic reach the
+board through the static ARP entry `net_setup` just added, and lets the
+board's replies come back.
 
-Use `sw/dev-hardware.sh` instead -- it runs the FastAPI service natively so
-it shares the host's real network stack. It needs macOS, Linux, or WSL2
-(with `networkingMode=mirrored` in `.wslconfig`, so WSL shares the host's NIC
-instead of NATing through its own virtual adapter); native Windows can't do
-hardware-target testing at all, container or not, since
-`engine/Makefile` only compiles online support when the build isn't running
-on `Windows_NT`. Run `setup/net_setup.sh` first either way -- `dev-hardware.sh`
-doesn't do that step for you.
+**The backend must not run inside a container or a NAT'd VM.** Either one
+puts the service on its own virtual network, where it never reaches the
+host's physical NIC and the board's replies never reach it. That setup looks
+like it "works" for loopback online-mode testing -- the service talking to
+itself -- and then silently receives nothing from real hardware.
+
+`dev.sh` needs macOS, Linux, or WSL2 (with `networkingMode=mirrored` in
+`.wslconfig`, so WSL shares the host's NIC instead of NATing through its own
+virtual adapter). Native Windows can't do hardware-target testing at all,
+since `engine/Makefile` only compiles online support when the build isn't
+running on `Windows_NT`. Run `setup/net_setup.sh` first either way --
+`dev.sh` doesn't do that step for you.
 
 ## Important caveats
 

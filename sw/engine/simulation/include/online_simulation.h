@@ -12,7 +12,9 @@
 #include "user_strategy.h"
 #include "offline_simulation.h" 
 #include "protocol.h"
-#include "online_config.h" // OnlineConfig / OuchTransport
+#include "socket_compat.h" // net:: cross-platform UDP wrappers
+#include "online_config.h" // OnlineConfig
+#include "account.h"
 
 class OnlineSimulation {
 public:
@@ -33,32 +35,35 @@ public:
     void set_ouch_observer(OuchObserver cb) { ouch_observer_ = std::move(cb); }
     void set_trade_observer(TradeObserver cb) { trade_observer_ = std::move(cb); }
     
-    void stop() { running = false; }
+    void stop() { running_ = false; }
 
 private:
-    OnlineConfig cfg; 
-    OrderBook   matching_engine;
-    Strategy    strategy;
+    OnlineConfig cfg_; 
+    OrderBook   matching_engine_;
+    Strategy    strategy_;
+    Account     account_;   // position + PnL of the strategy / board orders
 
     // Guards
-    std::mutex        book_mutex;
-    SimulationResult* active_result = nullptr; 
+    std::mutex        book_mutex_;
+    SimulationResult* active_result_ = nullptr; 
 
-    // Networking state.
-    int itch_fd        = -1; // UDP send socket (ITCH market data)
-    int ouch_listen_fd = -1; // TCP listen socket (OUCH order entry)
+    // Networking state. net_session_ must be declared before the sockets so
+    // Winsock is up before they open and torn down only after they close.
+    net::Session  net_session_;
+    net::socket_t itch_fd_        = net::INVALID_SOCK; // UDP send socket (ITCH market data)
+    net::socket_t ouch_listen_fd_ = net::INVALID_SOCK; // UDP receive socket (OUCH order entry)
 
-    std::atomic<bool>     running{false};
-    std::thread           ouch_thread;
-    SampleCallback        on_sample_cb; 
+    std::atomic<bool>     running_{false};
+    std::thread           ouch_thread_;
+    SampleCallback        on_sample_cb_; 
     OuchObserver          ouch_observer_; 
     TradeObserver         trade_observer_;
-    std::atomic<uint64_t> last_market_ts_ns{0};
+    std::atomic<uint64_t> last_market_ts_ns_{0};
 
     double market_bid_ = 0.0;
     double market_ask_ = 0.0;
 
-    uint64_t itch_seq_num = 1;
+    uint64_t itch_seq_num_ = 1;
 
     // --- Setup / teardown ---
     bool open_itch_socket();
@@ -68,14 +73,9 @@ private:
     // --- Market-data side ---
     void broadcast_itch(const std::vector<uint8_t>& packet);
     void apply_market_event(const MBORecord& rec, uint64_t& next_sample_ns);
-    void finalize_auto_fill(Order& order, FillReport& fill);
+    void finalize_auto_fill(Order& order, FillReport& fill, uint64_t ts);
     void note_market_quote(char side, double price);
     double market_mid() const;
-    void ouch_server_loop();      // dispatches to the TCP or UDP loop
-    void ouch_tcp_loop();         // accept() + per-connection stream reader
     void ouch_udp_loop();         // recvfrom() datagram reader
-    void handle_ouch_client(int client_fd);
     FillReport apply_ouch_order(const protocol::OuchMessage& msg);
-
-    static bool send_all(int fd, const uint8_t* data, size_t len);
 };

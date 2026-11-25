@@ -8,7 +8,7 @@ GET-only):
     GET  /simulate/online/stream/{id}       -> attach an SSE stream to it
 
 Two independent planes are involved:
-  * South-bound (engine <-> exchange/FPGA): ITCH/UDP + OUCH/TCP, handled inside
+  * South-bound (engine <-> exchange/FPGA): ITCH/UDP + OUCH/UDP, handled inside
     the C++ engine and never exposed here.
   * North-bound (server -> browser): the SSE stream produced here, carrying a
     copy of each per-second PnL sample (plus the current top-of-book, L1:

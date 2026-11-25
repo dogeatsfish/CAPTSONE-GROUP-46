@@ -103,8 +103,17 @@ L1, now pinned by a regression test).
 
 ## Software engine (`sw/engine/`)
 
-- [x] ~~Port `online_simulation.cpp`/`.h` to Winsock2 for native Windows
-      builds~~ — **decided against.** `sw/Dockerfile` fully covers this: the
+- [ ] **Re-check `CT_NO_ONLINE_SIM` on Windows.** `network/include/socket_compat.h`
+      now wraps the Winsock/POSIX differences and the Makefile already links
+      `-lws2_32` for the Windows CLI build, so `OnlineSimulation` may well
+      compile natively there -- but the `pymodule` Windows branch still
+      excludes it and nobody has tested the claim. Flipping it is a one-line
+      change; it needs someone on a Windows box to confirm. Historical note
+      on the original decision follows, which no longer holds now that Docker
+      is gone:
+
+  - [x] ~~Port `online_simulation.cpp`/`.h` to Winsock2 for native Windows
+      builds~~ — **was decided against.** `sw/Dockerfile` fully covers this: the
       container compiles `online_simulation.cpp` in with no
       `CT_NO_ONLINE_SIM` restriction at all (real Linux, real POSIX
       sockets), so anyone needing `OnlineSimulation` on a Windows/macOS host
@@ -117,7 +126,7 @@ L1, now pinned by a regression test).
       "hardware"` against the real board -- Docker Desktop's networking is
       an isolated VM, so a Dockerized backend never reaches the host's
       physical NIC/static-ARP setup, and the board's replies never reach the
-      container. `sw/dev-hardware.sh` works around it by running the service
+      container. `sw/dev.sh` works around it by running the service
       natively on macOS/Linux/WSL2 instead, but that still leaves native
       Windows with zero hardware-target path (`CT_NO_ONLINE_SIM` at compile
       time, container or not). Worth revisiting if native-Windows
@@ -126,10 +135,9 @@ L1, now pinned by a regression test).
       PR #15 (merged), which removed it along with 3 other stray compiled
       test binaries (`socket_test`, `stress_orderbook`, `test_online`) that
       shouldn't have been tracked either. Also added a VS Code Dev Container
-      (`sw/.devcontainer/`) for engine development — a real Ubuntu 24.04
-      environment with gcc-13/gdb/valgrind, complementary to `sw/Dockerfile`
-      (that one runs the *service*; this one is for editing/building/
-      debugging the C++ engine natively inside VS Code).
+      (`sw/.devcontainer/`) for engine development. That container was
+      removed on 2026-11-19 along with the rest of the Docker setup — the
+      engine builds natively on macOS and Linux, and WSL2 covers Windows.
 - [ ] `sw/data_pipeline/src/cmd_L1_to_L3.py` needs a symbol column added if
       the team decides that way on the "Symbol identity" item above — see
       the HW<->SW integration section. Directly affects whether FS-15's DB
@@ -155,33 +163,23 @@ L1, now pinned by a regression test).
       (not meaningful for the current OOC-only flow, which only synthesizes
       the sandbox module in isolation).
 
-## Containerization (`sw/Dockerfile`, `sw/docker-compose.yml`)
+## Containerization — removed
 
-- [x] **Build-tested for real** (after installing Docker Desktop):
-      `docker compose up --build` builds cleanly, the container starts, and
-      `/`, `/datasets`, and `/simulate` all respond correctly. Ran a real
-      simulation through it (4655 trades) and confirmed it matches the
-      native-Windows run exactly. Confirmed `engine_sim` builds *with full
-      OnlineSimulation support* inside the container (real Linux, real
-      POSIX sockets — no `CT_NO_ONLINE_SIM` needed), and confirmed FS-15 DB
-      logging persists correctly to the mounted volume via `CT_DB_PATH`.
-- [x] Fixed a real bug this surfaced: the Makefile's non-Windows
-      `pymodule` branch used `-undefined dynamic_lookup` unconditionally,
-      which is a macOS/ld64-only linker flag — GNU ld on Linux would have
-      rejected it, breaking the exact same way the Windows build originally
-      did. Now split on `uname -s` (Darwin gets the flag, Linux gets none).
-- [ ] Only covers `sw/engine` + `sw/service` (not `rtl/`/`vivado/` — see the
-      scope note at the top of `sw/Dockerfile`). `/compile` will not work
-      inside the container since Vivado isn't installed there; run the
-      service natively for that endpoint.
-- [ ] Only build-tested on this one Windows/Docker Desktop machine — worth
-      someone confirming `docker compose up --build` on macOS/Linux too,
-      though there's no reason to expect it'd differ (it's the same Linux
-      image either way).
-- [x] `sw/service/api/requirements.txt` is new — no Python dependency
-      manifest (`requirements.txt`/`pyproject.toml`) existed anywhere in the
-      repo before this. Now exact-pinned (full transitive closure via
-      `pip freeze` against the real built image) and rebuild-verified.
+- [x] **Removed 2026-11-19.** `sw/Dockerfile`, `sw/docker-compose.yml`,
+      `sw/.dockerignore` and `sw/dev.ps1` are gone. The image only ever
+      served one purpose -- giving a Windows host a way to run the backend
+      without a local `g++` -- and it could never reach the board anyway
+      (Docker Desktop's networking is an isolated VM). The backend now runs
+      natively everywhere via `sw/dev.sh` on macOS, Linux or WSL2.
+      `sw/.devcontainer/` went with it: the engine builds natively on macOS
+      and Linux, and WSL2 covers Windows, so a second Dockerfile nobody ran
+      was pure upkeep.
+- [ ] Windows hosts now need either WSL2 (recommended -- `dev.sh` works
+      there, including against the board with `networkingMode=mirrored`) or
+      MSYS2/MinGW for a native `g++` + `make`. `make pymodule` already has a
+      Windows branch and builds an offline-only module there; see the
+      open item under "Software engine" about whether `CT_NO_ONLINE_SIM` is
+      still needed now that `socket_compat.h` exists.
 
 ## Database logging (FS-15, `sw/service/api/src/db.py`)
 
@@ -268,6 +266,6 @@ L1, now pinned by a regression test).
       its own, since the pipeline only actually uses `CSVL1Reader` in
       practice, but now entangled with the symbol-identity decision above
       if the pipeline gets real rework.
-- [x] Docker install instructions — added to the root `README.md`
-      ("Don't have Docker yet?"): Docker Desktop for Windows/macOS, Docker
-      Engine for Linux, plus the `docker info` sanity check.
+- [x] ~~Docker install instructions in the root `README.md`~~ — removed
+      along with the Docker setup itself (see "Containerization" above);
+      the README now documents the native backend only.
