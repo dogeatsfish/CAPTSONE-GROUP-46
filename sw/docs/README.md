@@ -24,6 +24,11 @@ Proposals and explorations, for work that has not been built and in some cases h
 not been agreed. Read these before starting the ticket they describe; they are
 meant to be argued with.
 
+- **[App design](idea/app_design.md)** — the whole app at a high level, with UI notes:
+  Tutorial (a story that explains markets, from a first trade to the chip), Games (trading
+  by hand, the daily challenge, a live market against the FPGA house bot) and League (write
+  a strategy in C or Verilog, test it in software, run it on the FPGA). How the one board is
+  shared, the site map, key screens, accounts and sandboxing, and the build phases.
 - **[Calibration from L1](idea/calibration.md)** — ticket #23. What the TAQ sample
   in the repo can honestly support and what has to come from published stylised
   facts, the shapes `calibration.json` could take so an assumption can later be
@@ -33,6 +38,11 @@ meant to be argued with.
   update to the above. One stock of mid liquidity, quotes and trades kept out of git,
   how bots scale the base config without drifting the market, and modelling one market
   now with venue profiles at #21.
+- **[Game progression](idea/game_progression.md)** — hand-played trading games
+  (auctions, making a market, card markets, quant-interview betting games) solo against
+  bots or in multiplayer rooms, and the board challenge: one strategy on the FPGA against
+  four scenarios at once, scored on profit and on-chip latency. Rooms and the board share
+  one external-participant runtime.
 
 ## Testing
 
