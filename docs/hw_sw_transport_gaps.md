@@ -14,7 +14,7 @@ section at all** — and that gap is the root cause of everything below.
 
 | Side | Files | Branch |
 |---|---|---|
-| Software | `sw/engine/simulation/src/online_simulation.cpp`, `simulation/src/protocol.cpp`, `simulation/include/protocol.h`, `simulation/include/online_simulation.h`, `simulation/src/main_online.cpp` | **`origin/minh`** (also on `origin/main`) |
+| Software | `sw/engine/runner/src/online_simulation.cpp`, `runner/include/online_simulation.h`, `network/src/protocol.cpp`, `network/include/protocol.h`, `tools/online_run.cpp` | **`origin/minh`** (also on `origin/main`) |
 | Hardware TX | `rtl/tx_gen/outbound_tx_generator.sv`, `rtl/ip/tx_mac/tx_mac_core.sv`, `rtl/top/commontrader_top.sv` | `victor/HW_integration` |
 | Hardware RX | `rtl/rx_mac/rx_mac_core.sv`, `rtl/parser/cut_through_parser.sv` | `victor/HW_integration` |
 | Reference encoder | `sim/csv_to_itch.py` | `victor/HW_integration` |

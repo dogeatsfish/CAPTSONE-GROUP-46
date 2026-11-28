@@ -1,0 +1,82 @@
+"""Shared API schemas used across requests and responses."""
+
+from typing import List, Optional, TypeVar
+
+from pydantic import BaseModel
+
+T = TypeVar("T")
+
+
+def apply_limit(items: List[T], limit: Optional[int]) -> List[T]:
+    """Cap a list to its first `limit` items, or return it unchanged if
+    `limit` is None. Shared by every endpoint that trims trades/pnl_curve
+    for the response while persisting the untrimmed data to the DB.
+
+    Note for pnl_curve callers: a stoppage/halt in the underlying MBO stream
+    now backfills a real (held-PnL) sample at every second boundary of the
+    gap (see OfflineSimulation::run), instead of contributing zero samples
+    the way it used to. A caller that sets pnl_limit on a run with an early
+    stoppage will have more of that budget spent on the gap, so the
+    truncated response can end mid-stoppage rather than reaching later,
+    possibly more interesting, data. No shipped UI path sets pnl_limit today
+    (always None/unlimited), but this is worth knowing before that changes.
+    """
+    return items[:limit] if limit is not None else items
+
+
+class Trade(BaseModel):
+    timestamp_ns: int
+    side: str
+    price: float
+    size: float
+    # Real wall-clock decision-to-fill latency in nanoseconds. 0 = not
+    # measured -- see TradeRecord::decision_latency_ns in telemetry.h;
+    # today only online-loopback local-strategy trades populate this.
+    decision_latency_ns: int = 0
+
+
+class PnLPoint(BaseModel):
+    timestamp_ns: int
+    realized_pnl: float
+    unrealized_pnl: float
+    position_size: float
+
+
+class SummaryMetrics(BaseModel):
+    """Derived performance stats computed from a run's PnL curve.
+
+    final_realized_pnl is the run's realized PnL alone (closed trades only,
+    excludes any open position's mark-to-market) -- what the UI's "Current
+    PnL" card shows, since a card labeled "PnL" reading as unrealized MTM
+    was misleading (looks the same as realized until you actually close
+    something, and swings with the market mark in the meantime). final_pnl
+    remains the combined realized+unrealized total for anything that wants
+    it.
+
+    final_pnl / max_drawdown / volatility are in the same $ units as the
+    engine's realized/unrealized PnL. sharpe_ratio is annualized assuming a
+    252-day, 23,400-second-per-day trading year (the NYSE session length
+    used elsewhere in the project) since the engine samples the PnL curve
+    once per simulated second. compute_time_us is passed through from the
+    engine's own wall-clock measurement of the run. trades_per_second is
+    total_trades divided by compute_time_us (converted to seconds) -- engine
+    throughput, not a market-timing or latency figure.
+
+    avg_decision_latency_ns is the mean of each trade's own real wall-clock
+    decision-to-fill latency (Trade.decision_latency_ns), i.e. the actual
+    "how fast did this software execute a trade" figure -- distinct from
+    trades_per_second above, which measures batch replay throughput, not
+    per-trade decision speed. 0.0 means no trade in this run had a nonzero
+    decision_latency_ns (offline runs and hardware-target runs don't
+    instrument this yet -- see the field's docstring).
+    """
+
+    final_pnl: float
+    final_realized_pnl: float
+    max_drawdown: float
+    max_drawdown_pct: float
+    volatility: float
+    sharpe_ratio: float
+    compute_time_us: int
+    trades_per_second: float
+    avg_decision_latency_ns: float = 0.0

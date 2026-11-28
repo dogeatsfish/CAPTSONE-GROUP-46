@@ -23,7 +23,7 @@ understands one thing: raw Ethernet → IPv4/UDP → MoldUDP64 → ITCH market d
   so the packet is never sent. You must add a *static ARP entry* to break this
   deadlock.
 - **The board only speaks UDP.** The software order-entry server must be in UDP
-  mode (the default; see `sw/engine/simulation/include/online_simulation.h`).
+  mode (the default; see `sw/engine/runner/include/online_simulation.h`).
 
 ## Addressing
 
@@ -125,7 +125,7 @@ Terminal B — stream market data (from `sw/engine`):
 ```bash
 make run-online                                   # paced, real time
 # or blast continuously for a strong, steady signal:
-while true; do ./online_run ../data_pipeline/data/synthetic_mbo_stream.bin 0; done
+while true; do ./build/online_run ../data_pipeline/data/synthetic_mbo_stream.bin 0; done
 ```
 
 If OUCH frames appear in Terminal A, the full chain works. If nothing returns

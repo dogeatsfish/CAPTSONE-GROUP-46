@@ -1,6 +1,6 @@
 name: Software CI
 
-# Builds and smoke-tests the software side (sw/): the C++ engine, the FastAPI
+# Builds and tests the software side (sw/): the C++ engine, the FastAPI
 # service, and the React UI. The RTL has its own manual-only workflow (ci.yml).
 on:
   pull_request:
@@ -53,6 +53,8 @@ jobs:
         run: make test-python
 
       - name: Offline simulation via Python
+        env:
+          PYTHONPATH: build   # engine_sim*.so lives in sw/engine/build
         run: |
           python3 -c "
           import engine_sim
@@ -61,9 +63,9 @@ jobs:
           assert len(r.pnl_curve) > 0, 'offline sim produced no PnL samples'
           "
 
-      - name: Online simulation smoke test (loopback, unpaced)
+      - name: Online CLI end-to-end run (loopback, unpaced)
         run: |
-          ./online_run ../data_pipeline/data/flood_book.bin 0 50001 50001 127.0.0.1 | tee online.log
+          ./build/online_run ../data_pipeline/data/flood_book.bin 0 50001 50001 127.0.0.1 | tee online.log
           grep -q "Simulation finished successfully" online.log
 
   api:
@@ -76,16 +78,16 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: sw/service/api/requirements.txt
+          cache-dependency-path: sw/service/requirements.txt
 
       - name: Install dependencies
-        run: python3 -m pip install pybind11 -r sw/service/api/requirements.txt
+        run: python3 -m pip install pybind11 -r sw/service/requirements.txt
 
       - name: Build engine module
         run: make -C sw/engine pymodule
 
       - name: Start the service
-        working-directory: sw/service/api/src
+        working-directory: sw/service/src
         env:
           CT_DB_PATH: ${{ runner.temp }}/ci.db
         run: |

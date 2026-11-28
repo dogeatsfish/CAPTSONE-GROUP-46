@@ -18,7 +18,7 @@ const STATUS_LABEL = {
 const MAX_LOG_LINES = 500;
 
 // Pre-filled with the same spread-reversion body shipped in
-// sw/engine/simulation/src/user_strategy.cpp today, so the box demonstrates
+// sw/engine/strategy/templates/trading_template.cpp today, so the box demonstrates
 // working logic instead of starting empty. Just the function body -- the
 // surrounding class (state fields, on_fill, constructor) is fixed; editing
 // those is a future stretch goal, not this first pass.

@@ -8,7 +8,7 @@ links to the doc that actually explains it — this page is just the sequence.
 Ethernet (direct to the host, or a switch) and JTAG, and — for step 4
 onward — a macOS/Linux/WSL2 machine (native Windows can't build
 online/hardware support; see
-[`sw/docs/engine-testing.md`](../sw/docs/engine-testing.md)).
+[`sw/docs/testing/engine-testing.md`](../sw/docs/testing/engine-testing.md)).
 
 ## 1. Build and program the bitstream
 
@@ -65,11 +65,11 @@ real market data — everything before this only proved the wire works.
 
 ```bash
 cd sw/engine
-make hw-smoke-test
+make run SCALE=1.0 ITCH_ADDR=192.168.0.1
 ```
 
 Streams a short order book at the board over UDP and expects OUCH responses
-back (`tests/config/hardware_smoke.ini`). Alternatively, the manual two-terminal
+back. Alternatively, the manual two-terminal
 version (`tcpdump` + `make run-online`) is in
 [`docs/connection-test.md`](connection-test.md#4-end-to-end-test-with-market-data)
 step 4 if you want to watch the raw frames yourself.
@@ -105,6 +105,6 @@ Ctrl-C in the terminal stops both the backend and the UI together.
 |---|---|
 | Board never leaves reset / looks dead | [`docs/board_bringup_issues.md`](board_bringup_issues.md) |
 | Link LED on, activity LED never blinks | [`docs/connection-test.md`](connection-test.md) § 3 — likely host-side (no `inet` line, wrong interface) |
-| Activity LED blinks, `make hardware-test`/`tcpdump` sees nothing back | [`docs/board_bringup_issues.md`](board_bringup_issues.md) + [`docs/hw_sw_transport_gaps.md`](hw_sw_transport_gaps.md) — FPGA-side (RTL/bitstream) |
-| UI's "Real Board" run completes but shows zero trades | The board isn't sending OUCH orders — a hardware-target run deliberately runs no local strategy, so every trade must come from the board. See [`sw/docs/system-testing.md`](../sw/docs/system-testing.md#3-narrowing-a-failure) |
+| Activity LED blinks, the replay/`tcpdump` sees nothing back | [`docs/board_bringup_issues.md`](board_bringup_issues.md) + [`docs/hw_sw_transport_gaps.md`](hw_sw_transport_gaps.md) — FPGA-side (RTL/bitstream) |
+| UI's "Real Board" run completes but shows zero trades | The board isn't sending OUCH orders — a hardware-target run deliberately runs no local strategy, so every trade must come from the board. See [`sw/docs/testing/system-testing.md`](../sw/docs/testing/system-testing.md#3-narrowing-a-failure) |
 | `dev.sh` refuses to run | You're on native Windows — use WSL2 (mirrored networking mode) or a macOS/Linux box instead |
